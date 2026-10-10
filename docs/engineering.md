@@ -12,14 +12,15 @@ remain outside this iteration.
 The next chat UI revision is approved and in implementation by Opus 5.5, with
 Codex responsible for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
-Session actions and settings belong in the session list. Input needs user images
-and adaptive height; replies need block Markdown and attachment views. Real
+Session actions and settings belong in the session list. Input uses an adaptive
+one-to-six-line composer, removable image thumbnails and Photos, camera and
+user-initiated paste. Replies use native block Markdown and attachment views. Real
 model/tool phases must remain visible both in the chat and through the system
 task surface while another app is foreground. The review proposes native SwiftUI
-components over the existing AgentKit events; attachment persistence and its
-migration must be specified before changing the history format. Images remain
-outside portable synchronization. Current UI assessment artifacts are local;
-the earlier teardown fix did not include a UI rewrite or attachment migration.
+components over the existing AgentKit events. Attachment metadata extends the
+current history with optional fields while retaining its current version;
+image bytes remain outside portable synchronization. The earlier teardown fix
+did not include this UI rewrite.
 
 This revision must preserve every existing conversation/message ID, message
 content, draft, selection and attribution. Back up the installed history before
@@ -37,6 +38,32 @@ unreleased iteration. Preserve the currently installed records through one
 upgrade; do not build or maintain a general legacy-version compatibility layer
 or expand the old-format test matrix. Existing portable merging remains a
 current-data integrity requirement.
+
+Normalize user images to a maximum 2048-pixel edge, apply orientation and remove
+source EXIF/GPS before storage. A message may contain up to six images. Draft and
+message references keep local files alive; accepted jobs freeze those references
+alongside their model configuration. At request assembly, include at most four
+prior user images and explain omitted or unavailable images in model context.
+Text-only models require an explicit choice before dropping current input
+images. Portable attachment metadata displays an unavailable placeholder on
+devices without the bytes and participates in conflict identity without
+changing identities for existing attachment-free messages.
+
+Render headings, lists, quotes, fenced code and tables using native views.
+Incomplete fences remain readable during streaming; code can be copied and
+wide tables scroll horizontally. Links use an explicit URL-scheme policy.
+Markdown remote images load only after a user tap, over credential-free HTTPS;
+local image previews use the protected attachment files. Follow streaming output
+only while the reader remains at the bottom, with an explicit return-to-bottom
+control otherwise. Consecutive tool steps fold together without changing event
+order or call/result pairing.
+
+One reducer derives connecting, model response, phone action, retry, user-input,
+cleanup and terminal status from actual events. The chat strip and system task
+subtitle share it. Progress counts completed responses and phone actions rather
+than a request budget. Queue rank is the position among waiting turns. Starting
+a rejected system task must keep a recoverable unsent draft without overwriting
+new edits; completed or interrupted phone work is never replayed automatically.
 
 Android UI references add explicit queued and waiting-for-user states, compact
 tool rows with step outcomes, and an outside-chat current-app/action indicator.
