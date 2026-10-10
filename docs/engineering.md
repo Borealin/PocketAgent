@@ -650,6 +650,13 @@ The run_script descriptor
 tells the model to print real intermediate output from long scripts (for
 example after each finished chunk), never heartbeats or fake progress.
 
+A hosted CI cancellation test failed its two-second bound while measuring from
+before detached-task launch and the pre-cancellation wait. That interval could
+not isolate cancellation latency. The regression now uses a monotonic clock
+starting immediately before `cancel()`, keeps the same two-second bound and
+requires the exact CancellationError. No production search change or scheduler
+root cause is inferred from that failure.
+
 ## Primary references
 
 - [PalmClaw Android UI](https://github.com/ModalityDance/PalmClaw)

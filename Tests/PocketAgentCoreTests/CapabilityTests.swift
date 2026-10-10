@@ -509,12 +509,15 @@ struct SearchCancellationTests {
     @Test func cancellingTheTaskStopsARunawayRegex() async throws {
         let box = try pathological()
         let files = try WorkspaceFiles(root: box.root)
-        let started = Date()
         let task = Task.detached { try files.search("(a+)+$", regex: true, budget: 60) }
         try await Task.sleep(for: .milliseconds(100))
+        // Measure only cancel-to-completion on a monotonic clock, so a late
+        // wake from the sleep above does not count against the search.
+        let clock = ContinuousClock()
+        let cancelled = clock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
-        #expect(Date().timeIntervalSince(started) < 2)
+        #expect(clock.now - cancelled < .seconds(2))
     }
 
     @Test func searchBudgetStopsWithoutCancellation() async throws {
