@@ -9,7 +9,8 @@ private Borealin/PocketAgent. Existing installed conversations and local API
 settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
 remain outside this iteration.
 
-The requested next chat UI revision is pending implementation. Its header has
+The next chat UI revision is approved and in implementation by Opus 5.5, with
+Codex responsible for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
 Session actions and settings belong in the session list. Input needs user images
 and adaptive height; replies need block Markdown and attachment views. Real
@@ -18,7 +19,18 @@ task surface while another app is foreground. The review proposes native SwiftUI
 components over the existing AgentKit events; attachment persistence and its
 migration must be specified before changing the history format. Images remain
 outside portable synchronization. Current UI assessment artifacts are local;
-no UI rewrite or attachment migration is included in the teardown fix.
+the earlier teardown fix did not include a UI rewrite or attachment migration.
+
+This revision must preserve every existing conversation/message ID, message
+content, draft, selection and attribution. Back up the installed history before
+upgrade, install using the same local bundle/signing identity, and compare the
+original records after migration and device checks. User photos use protected
+local binary files and explicit metadata in the existing atomic history; image
+capability is checked against the accepted turn's frozen configuration. Failed
+import/send retains the user's draft. Image-only sends and image steering use
+AgentKit's existing image fields. Portable sync carries no image bytes or local
+paths; attachment-unavailable placeholders and retention of unchanged local
+attachments are part of compatibility validation.
 
 Android UI references add explicit queued and waiting-for-user states, compact
 tool rows with step outcomes, and an outside-chat current-app/action indicator.
