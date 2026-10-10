@@ -229,13 +229,13 @@ final class ChatController: ObservableObject {
             promptID: job.prompt.id, priorMessages: job.prior,
             onEvent: { [weak self, weak job] event in
                 guard let self, let job else { return }; handle(event, job: job)
-            }, onFinished: { [weak self, weak job] successful in
+            }, onFinished: { [weak self, weak job] successful, cleanupWarning in
                 guard let self, let job else { return }
                 phoneSessionID = nil
                 finish(job, state: successful ? .completed : (job.cancelled ? .interrupted : .failed),
-                    detail: successful ? "" :
-                        (job.cancelled ? "已取消。" : "本轮未完成，请重试。"))
-                // The old BG task completes after this callback returns.
+                    detail: ([successful ? "" : (job.cancelled ? "已取消。" : "本轮未完成，请重试。"),
+                              cleanupWarning].filter { !$0.isEmpty }).joined(separator: " "))
+                // The previous runner and BG task have completed before draining.
                 Task { @MainActor [weak self] in self?.drainPhone() }
             })
     }
@@ -266,7 +266,9 @@ final class ChatController: ObservableObject {
                     toolName: invocation.call.name, isError: result.isError, modelText: result.modelContent),
                     to: job.sessionID, before: job.pendingSteering)
             }
-        case .runFinished: job.terminal = true; job.ready = false
+        case .runFinished:
+            job.terminal = true; job.ready = false
+            edit(job.sessionID) { $0.detail = "正在返回 App 并结束自动化。" }; persist()
         case .failed: edit(job.sessionID) { $0.detail = "模型请求失败，正在结束本轮。" }
         default: break
         }

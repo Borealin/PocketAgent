@@ -8,16 +8,11 @@ extension Model {
     func executePhoneAgent(config: RunConfiguration, goal: String,
                            task: BGContinuedProcessingTask, conversationID: UUID, promptID: UUID,
                            priorMessages: [AgentTranscriptMessage],
-                           onEvent: (@MainActor (AgentEvent) -> Void)?, onFinished: (@MainActor (Bool) -> Void)?) {
+                           onEvent: (@MainActor (AgentEvent) -> Void)?, onFinished: (@MainActor (Bool, String) -> Void)?) {
         task.progress.totalUnitCount = 72
         task.expirationHandler = { [weak self] in Task { @MainActor in self?.cancel() } }
         job = Task {
             var successful = false
-            defer {
-                connection = nil; activeAgentRuntime = nil; busy = false; job = nil
-                onFinished?(successful)
-                task.setTaskCompleted(success: successful)
-            }
             do {
                 if pendingAgentCancellation { throw CancellationError() }
                 let phone = PhoneAgent(model: self, task: task, config: config)
@@ -54,9 +49,8 @@ extension Model {
                     若歧义会改变重要操作则向用户澄清。找不到指定内容时报告实际页面和限制。
                     完成或遇到阻碍后用文字总结真实结果。不可静默购买、支付、删除用户资料或向他人发送消息。
                     """, priorMessages: priorMessages))
-                try await withTaskCancellationHandler {
+                await withTaskCancellationHandler {
                     for await event in events {
-                        try Task.checkCancellation()
                         onEvent?(event)
                         switch event {
                         // Default diagnostics omit arguments, results and message text.
@@ -65,7 +59,7 @@ extension Model {
                         case .toolFinished(let invocation, let result):
                             log("tool_finished", ["name": invocation.call.name, "callID": result.callID,
                                 "isError": result.isError])
-                        case .failed(let reason): throw failure(reason)
+                        case .failed: break // Wait for terminal events and tool teardown.
                         case .runFinished(let summary):
                             successful = summary.state == .completed
                             log("agent_terminal", ["state": summary.state.rawValue])
@@ -74,11 +68,23 @@ extension Model {
                     }
                 } onCancel: { Task { await runtime.cancel() } }
                 guard successful else { throw failure("手机助手未完成本轮") }
-                task.progress.completedUnitCount = task.progress.totalUnitCount
                 log("phone_agent_completed", ["requests": phone.requests, "toolCalls": phone.calls])
             } catch {
+                successful = false
                 log(Task.isCancelled ? "interrupted" : "failed", Model.errorFields(error))
             }
+            task.expirationHandler = nil
+            task.updateTitle("手机助手", subtitle: "正在结束本轮")
+            // Cancellation must not cancel the HTTP activation or native stop.
+            let cleanupWarning = await Task { @MainActor in
+                await self.finishPhoneAutomation()
+            }.value
+            if successful { task.progress.completedUnitCount = task.progress.totalUnitCount }
+            task.updateTitle("手机助手", subtitle: successful ? "已完成" :
+                (pendingAgentCancellation ? "已取消" : "未完成"))
+            task.setTaskCompleted(success: successful)
+            activeAgentRuntime = nil; busy = false; job = nil
+            onFinished?(successful, cleanupWarning)
         }
     }
 }

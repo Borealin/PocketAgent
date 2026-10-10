@@ -80,9 +80,19 @@ private final class LocalNetworkPermission {
 final class DeviceConnection {
     var adapter: OpaquePointer?
     var handshake: OpaquePointer?
+    private var server: OpaquePointer?
+    private var process: OpaquePointer?
+    private var runnerPID: UInt64?
+    var ownsRunner: Bool { runnerPID != nil }
     deinit {
+        closeDVT()
         if let handshake { rsd_handshake_free(handshake) }
         if let adapter { adapter_free(adapter) }
+    }
+    private func closeDVT() {
+        if let process { process_control_free(process) }
+        if let server { remote_server_free(server) }
+        process = nil; server = nil
     }
     func connect() throws {
         var pairing: OpaquePointer?
@@ -125,14 +135,12 @@ final class DeviceConnection {
         try check(cryptexd_install_ddi(adapter, handshake, assets, nil))
     }
     func launchRunner() throws -> UInt64 {
-        var server: OpaquePointer?
+        guard !ownsRunner else { throw failure("This turn already owns a runner") }
+        closeDVT()
         try check(remote_server_connect_rsd(adapter, handshake, &server))
         guard let server else { throw failure("Missing DVT server") }
-        defer { remote_server_free(server) }
-        var process: OpaquePointer?
         try check(process_control_new(server, &process))
         guard let process else { throw failure("Missing process control") }
-        defer { process_control_free(process) }
         let runnerID = DeviceSettings.runnerBundleID
         let environment = ["USE_PORT=8100", "USE_IP=127.0.0.1", "WDA_PRODUCT_BUNDLE_IDENTIFIER=\(runnerID)"]
         let allocated = environment.map { strdup($0)! }
@@ -144,7 +152,52 @@ final class DeviceConnection {
                 try check(process_control_launch_test_runner(process, id, $0.baseAddress, UInt($0.count), &pid))
             }
         }
+        guard pid > 0, pid <= UInt64(UInt32.max) else { throw failure("Runner launch returned an invalid PID") }
+        runnerPID = pid
         return pid
+    }
+    func stopRunner() throws {
+        guard let runnerPID else { return }
+        // Instruments may close the launch channel while XCTest is running.
+        // Reopen it over the existing phone tunnel before stopping the owned PID.
+        closeDVT()
+        try check(remote_server_connect_rsd(adapter, handshake, &server))
+        guard let server else { throw failure("Missing DVT server") }
+        var info: OpaquePointer?
+        try check(device_info_new(server, &info))
+        guard let initialInfo = info else { throw failure("Missing device info") }
+        var running = true
+        do {
+            defer { device_info_free(initialInfo); info = nil }
+            try check(device_info_is_running_pid(initialInfo, UInt32(runnerPID), &running))
+            if running {
+                var name: UnsafeMutablePointer<CChar>?
+                try check(device_info_execname_for_pid(initialInfo, UInt32(runnerPID), &name))
+                guard let name else { throw failure("Missing runner executable") }
+                defer { idevice_string_free(name) }
+                guard URL(fileURLWithPath: String(cString: name)).lastPathComponent == "WebDriverAgentRunner-Runner" else {
+                    throw failure("Owned PID no longer belongs to the automation runner")
+                }
+            }
+        }
+        if !running { self.runnerPID = nil; return }
+        try check(process_control_new(server, &process))
+        guard let process else { throw failure("Missing process control") }
+        try check(process_control_kill_app(process, runnerPID))
+        process_control_free(process)
+        self.process = nil
+        // The patched signal API waits for acknowledgement. Also verify process
+        // disappearance before releasing the queue or starting another runner.
+        try check(device_info_new(server, &info))
+        guard let info else { throw failure("Missing device info") }
+        defer { device_info_free(info) }
+        for _ in 0..<30 {
+            running = true
+            try check(device_info_is_running_pid(info, UInt32(runnerPID), &running))
+            if !running { self.runnerPID = nil; return }
+            Thread.sleep(forTimeInterval: 0.1) // Runs on the dedicated FFI thread.
+        }
+        throw failure("Runner shutdown was not confirmed")
     }
 }
 
@@ -158,6 +211,7 @@ final class Model: ObservableObject {
     var runID = ""
     var logURL: URL?
     var connection: DeviceConnection?
+    var wdaSessionBase: String?
     init() {
         DeviceSettings.migrateLegacyPairing()
         // Native file logging only when the user opted in (read at launch).
@@ -197,52 +251,101 @@ final class Model: ObservableObject {
             try? handle.synchronize()
         }
     }
-    func cancel() { pendingAgentCancellation = true; job?.cancel() }
+    func cancel() {
+        pendingAgentCancellation = true
+        if let runtime = activeAgentRuntime {
+            // Drain AgentKit's terminal events before releasing phone resources.
+            // Cancelling the consumer task would stop waiting for an in-flight tool.
+            Task { await runtime.cancel() }
+        } else { job?.cancel() }
+    }
     func prepareWDA() async throws -> String {
-                log("network_authorization_requested")
-                guard await LocalNetworkPermission().request() else {
-                    throw failure("Allow Local Network access for PocketAgent in Settings")
-                }
-                log("network_authorized")
-                let device = DeviceConnection()
-                try await ffi { try device.connect() }
-                connection = device
-                log("rp_tunnel_connected")
-                if !(try await ffi { device.hasDDI() }) {
-                    log("ddi_download")
-                    let directory = documents.appendingPathComponent("DDI", isDirectory: true)
-                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
-                        let destination = directory.appendingPathComponent(name)
-                        if !FileManager.default.fileExists(atPath: destination.path) {
-                            let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
-                            let (temporary, response) = try await URLSession.shared.download(from: url)
-                            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
-                            try FileManager.default.moveItem(at: temporary, to: destination)
-                        }
+        let device: DeviceConnection
+        if let existing = connection {
+            // A failed HTTP/session setup may already own a running process.
+            // Resume setup without replacing the object that owns its PID.
+            device = existing
+        } else {
+            log("network_authorization_requested")
+            guard await LocalNetworkPermission().request() else {
+                throw failure("Allow Local Network access for PocketAgent in Settings")
+            }
+            try Task.checkCancellation()
+            log("network_authorized")
+            device = DeviceConnection()
+            try await ffi { try device.connect() }
+            connection = device
+            log("rp_tunnel_connected")
+        }
+        if !device.ownsRunner {
+            wdaSessionBase = nil
+            if !(try await ffi { device.hasDDI() }) {
+                log("ddi_download")
+                let directory = documents.appendingPathComponent("DDI", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
+                    let destination = directory.appendingPathComponent(name)
+                    if !FileManager.default.fileExists(atPath: destination.path) {
+                        let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
+                        let (temporary, response) = try await URLSession.shared.download(from: url)
+                        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
+                        try FileManager.default.moveItem(at: temporary, to: destination)
                     }
-                    try await ffi { try device.mountDDI(directory) }
                 }
-                log("ddi_ready")
-                let pid = try await ffi { try device.launchRunner() }
-                log("runner_launched", ["pid": pid])
-                var ready = false
-                for _ in 0..<45 {
-                    try Task.checkCancellation()
-                    if (try? await request("GET", "/status")) != nil { ready = true; break }
-                    try await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-                guard ready else { throw failure("WDA HTTP did not become ready") }
-                log("wda_ready", ["endpoint": "127.0.0.1:8100"])
-                let capabilities: [String: Any] = ["shouldWaitForQuiescence": false,
-                    "waitForIdleTimeout": 0, "forceAppLaunch": false]
-                let result = try await request("POST", "/session", ["capabilities": ["alwaysMatch": capabilities]])
-                let session = (result["sessionId"] as? String) ?? ((result["value"] as? [String: Any])?["sessionId"] as? String)
-                guard let session else { throw failure("Missing WDA session ID") }
-                _ = try await request("POST", "/session/\(session)/appium/settings",
-                    ["settings": ["waitForIdleTimeout": 0, "animationCoolOffTimeout": 0]])
-                return "/session/\(session)"
-
+                try await ffi { try device.mountDDI(directory) }
+            }
+            log("ddi_ready")
+            try Task.checkCancellation()
+            let pid = try await ffi { try device.launchRunner() }
+            log("runner_launched", ["pid": pid])
+        }
+        if wdaSessionBase == nil {
+            var ready = false
+            for _ in 0..<45 {
+                try Task.checkCancellation()
+                if (try? await request("GET", "/status")) != nil { ready = true; break }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            guard ready else { throw failure("WDA HTTP did not become ready") }
+            log("wda_ready", ["endpoint": "127.0.0.1:8100"])
+            let capabilities: [String: Any] = ["shouldWaitForQuiescence": false,
+                "waitForIdleTimeout": 0, "forceAppLaunch": false]
+            let result = try await request("POST", "/session", ["capabilities": ["alwaysMatch": capabilities]])
+            let session = (result["sessionId"] as? String) ?? ((result["value"] as? [String: Any])?["sessionId"] as? String)
+            guard let session else { throw failure("Missing WDA session ID") }
+            wdaSessionBase = "/session/\(session)"
+        }
+        let base = wdaSessionBase!
+        _ = try await request("POST", "\(base)/appium/settings",
+            ["settings": ["waitForIdleTimeout": 0, "animationCoolOffTimeout": 0]])
+        return base
+    }
+    /// Called in an uncancelled task after the agent has stopped using tools.
+    /// Keep the serial queue occupied until activation and runner teardown finish.
+    func finishPhoneAutomation() async -> String {
+        defer { wdaSessionBase = nil; connection = nil }
+        guard let device = connection, device.ownsRunner else { return "" }
+        var warnings: [String] = []
+        if let base = wdaSessionBase {
+            do {
+                _ = try await request("POST", "\(base)/wda/apps/activate",
+                    ["bundleId": DeviceSettings.assistantBundleID])
+                log("assistant_returned")
+            } catch {
+                log("assistant_return_failed", Model.errorFields(error))
+                warnings.append("未能自动返回 App，请手动切回。")
+            }
+        }
+        // DELETE /session only removes the HTTP session; XCTest remains alive.
+        // Stop only the PID returned by this turn's own runner launch.
+        do {
+            try await ffi { try device.stopRunner() }
+            log("runner_stopped")
+        } catch {
+            log("runner_stop_failed", Model.errorFields(error))
+            warnings.append("自动化进程未能停止，请检查 VPN 连接。")
+        }
+        return warnings.joined(separator: " ")
     }
     func request(_ method: String, _ path: String, _ body: [String: Any]? = nil) async throws -> [String: Any] {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:8100\(path)")!)

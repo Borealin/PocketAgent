@@ -56,6 +56,15 @@ Run configuration is captured before enqueue; changing a session selection does
 not alter work already accepted. Existing transcript event order and tool result
 IDs are preserved. Restart interrupts active work, never replays it.
 
+Every turn that starts automation owns its runner PID. Retain the tunnel and
+reopen the Instruments control channel for teardown because the launch channel
+can close while XCTest continues. Once AgentKit has finished using tools, return to the
+assistant through WDA, stop that owned process, then complete the background task
+and release the serial queue. Ordinary chat starts no runner. Cancellation drains
+the runtime's terminal events instead of abandoning an in-flight tool. Cleanup
+runs without inherited cancellation; failures appear in the conversation status
+without changing an already completed action into a replay.
+
 Legacy endpoint/model and Keychain settings migrate once; production defaults
 contain no private gateway or company identity. Local build overrides preserve
 the installed test app identity without committing them. Device pairing import
@@ -71,6 +80,25 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+Completed phone turns released only their tunnel connection. The WDA process
+remained alive, and no activation request returned the assistant to the foreground.
+Retaining the owned PID allows explicit runner shutdown after returning to the
+app. The retained launch channel failed to stop the runner on the device; teardown
+reopens that channel, checks the PID still belongs to the companion, and verifies
+process disappearance. Native shutdown sends an acknowledged SIGKILL request
+before releasing its service channel; fire-and-forget kill requests can be lost
+on channel teardown. Failed HTTP/session setup resumes using the existing
+owned connection so a retry cannot lose its first runner. Deleting only a WDA HTTP
+session would leave XCTest alive.
+Success, failure and cancellation use the same ordered finalization, and the next
+queued turn cannot start before it finishes. The BackgroundTasks completion title
+also changes from processing to the terminal result; iOS owns dismissal of its
+system Live Activity.
+Shutdown failures remain visible and are not retried automatically. A subsequent
+runner launch uses KillExisting for its configured companion. The regression
+check verifies both foreground return and process disappearance, rather than
+treating a successful signal call or a closed HTTP session as shutdown proof.
 
 The first CI privacy check matched the absolute checkout's `work` directory and
 rejected every file on GitHub runners. Directory exclusions now inspect only

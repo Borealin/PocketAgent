@@ -9,7 +9,7 @@ extension Model {
     func beginAgent(goal: String, config: RunConfiguration, conversationID: UUID, promptID: UUID,
                     priorMessages: [AgentTranscriptMessage],
                     onEvent: (@MainActor (AgentEvent) -> Void)?,
-                    onFinished: (@MainActor (Bool) -> Void)?) {
+                    onFinished: (@MainActor (Bool, String) -> Void)?) {
         guard !busy else { return }
         do {
             guard !goal.isEmpty else { throw failure("消息不能为空。") }
@@ -32,7 +32,7 @@ extension Model {
             log("agent_submitted", ["format": config.format.rawValue, "imageInput": config.supportsImages,
                 "os": ProcessInfo.processInfo.operatingSystemVersionString])
             try BGTaskScheduler.shared.submit(request)
-        } catch { busy = false; log("failed", Model.errorFields(error)); onFinished?(false) }
+        } catch { busy = false; log("failed", Model.errorFields(error)); onFinished?(false, "") }
     }
 
     /// Error identity without message text, which may echo personal content.
