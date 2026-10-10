@@ -32,6 +32,12 @@ AgentKit's existing image fields. Portable sync carries no image bytes or local
 paths; attachment-unavailable placeholders and retention of unchanged local
 attachments are part of compatibility validation.
 
+The user explicitly removed multi-version history compatibility from this
+unreleased iteration. Preserve the currently installed records through one
+upgrade; do not build or maintain a general legacy-version compatibility layer
+or expand the old-format test matrix. Existing portable merging remains a
+current-data integrity requirement.
+
 Android UI references add explicit queued and waiting-for-user states, compact
 tool rows with step outcomes, and an outside-chat current-app/action indicator.
 Keep Stop separate from the composer so running turns can still accept steering.
