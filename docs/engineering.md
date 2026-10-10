@@ -9,8 +9,8 @@ private Borealin/PocketAgent. Existing installed conversations and local API
 settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
 remain outside this iteration.
 
-The next chat UI revision is approved and in implementation by Opus 5.5, with
-Codex responsible for independent review and iPhone 12 mini validation. Its header has
+The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
+for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
 Session actions and settings belong in the session list. Input uses an adaptive
 one-to-six-line composer, removable image thumbnails and Photos, camera and
@@ -146,6 +146,28 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+Image import initially combined Foundation's atomic and without-overwriting
+write options, which traps instead of returning a catchable write error.
+Use a fresh UUID path, reject an existing file and perform a protected atomic
+write. Reserve image capacity before asynchronous Photos/paste reads; sending
+waits for that session's selected images. Commit checks the six-image limit
+again, and cancelled or orphaned imports release their reservations and files.
+
+A rejected system task previously cleared the composer even though no model
+run had started. Keep the original raw draft and a transient edit revision.
+Restore it only before runStarted and only if the composer remains unedited.
+Preserving new text while merging old images would attach an unintended picture
+to the user's next message, so restoration is all-or-nothing. Failed prompts
+remain in history; neither restoration nor cancellation replays actions.
+
+Pending steering places the live assistant before a later user row, so observing
+only the final row misses streaming changes. Track rendered text/reasoning and
+tool growth across the transcript while retaining the reader's scroll position.
+Remote Markdown images use a streaming byte limit instead of checking size only
+after buffering the entire response. A session delegate validates redirects
+before following and validates the final image response, because the local
+network ATS allowance does not enforce HTTPS for every redirect.
 
 Completed phone turns released only their tunnel connection. The WDA process
 remained alive, and no activation request returned the assistant to the foreground.

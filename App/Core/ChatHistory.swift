@@ -34,11 +34,17 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
     var attributions: [String: String] = [:]
     /// Set when this conversation is a conflict copy split from another.
     var conflictOf: UUID?
+    /// Message ID → user images sent with it. Metadata only; bytes live in
+    /// local protected files named by attachment ID (see `AttachmentFiles`).
+    var attachments: [String: [ChatAttachment]] = [:]
+    /// Images picked for the unsent draft; local only, never synchronized.
+    var draftAttachments: [ChatAttachment] = []
 
     init(selection: ModelSelection? = nil) { self.selection = selection }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, messages, draft, state, detail, updatedAt, selection, metadataUpdatedAt, attributions, conflictOf
+        case attachments, draftAttachments
     }
     // v1/v2 rows lack the newer fields; real IDs and messages are mandatory.
     init(from decoder: any Decoder) throws {
@@ -54,6 +60,26 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
         metadataUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .metadataUpdatedAt) ?? Date(timeIntervalSince1970: 0)
         attributions = try c.decodeIfPresent([String: String].self, forKey: .attributions) ?? [:]
         conflictOf = try c.decodeIfPresent(UUID.self, forKey: .conflictOf)
+        attachments = try c.decodeIfPresent([String: [ChatAttachment]].self, forKey: .attachments) ?? [:]
+        draftAttachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .draftAttachments) ?? []
+    }
+
+    func attachments(of message: AgentTranscriptMessage) -> [ChatAttachment] {
+        attachments[message.id.uuidString] ?? []
+    }
+
+    /// Every attachment file this conversation still needs on this device.
+    var referencedAttachmentIDs: Set<UUID> {
+        Set(attachments.values.joined().map(\.id) + draftAttachments.map(\.id))
+    }
+
+    /// History never stores image bytes delivered through run events: user
+    /// photos are file-backed under `attachments`, and live phone screenshots
+    /// belong only to the request that carried them.
+    static func forHistory(_ message: AgentTranscriptMessage) -> AgentTranscriptMessage {
+        var message = message
+        message.images = []
+        return message
     }
 }
 

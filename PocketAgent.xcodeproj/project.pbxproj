@@ -10,30 +10,42 @@
 		026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 49BF9B5D946340940F5C4C82 /* RustLicenses */; };
 		095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */; };
 		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
+		166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */; };
+		19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A45359ABA3EE41F69474549 /* ChatComposer.swift */; };
 		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
 		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
+		3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19938EABD2390F0D02B28600 /* ChatPolicies.swift */; };
 		4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */; };
+		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
 		6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */; };
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
 		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
 		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
 		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
+		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
 		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
+		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
 		A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D61AC91A09838169F172CE15 /* BackgroundTasks.framework */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
+		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
+		F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */; };
 		FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F24A784103BF8F2532963F /* ChatHistory.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0A45359ABA3EE41F69474549 /* ChatComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComposer.swift; sourceTree = "<group>"; };
+		130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImageLoader.swift; sourceTree = "<group>"; };
+		19938EABD2390F0D02B28600 /* ChatPolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPolicies.swift; sourceTree = "<group>"; };
 		1F266439E5ACA1E35405D10A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		1F9EC154A7B819D774BFB985 /* ProviderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderViews.swift; sourceTree = "<group>"; };
 		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
+		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
 		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
 		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
 		4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AgentKit-LICENSE.txt"; sourceTree = "<group>"; };
@@ -43,9 +55,13 @@
 		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		73652AF715C4968790030FB2 /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
+		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
+		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
+		BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
 		C08CD702C33D2019607205D8 /* DeviceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSettings.swift; sourceTree = "<group>"; };
 		CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		CC78893A183661157A2CB031 /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -79,9 +95,14 @@
 		8095CDEFD963DB49E62171F1 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				8D84987315C6121941984C15 /* Attachments.swift */,
 				59F24A784103BF8F2532963F /* ChatHistory.swift */,
+				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
+				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
+				CC78893A183661157A2CB031 /* Markdown.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
+				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -108,7 +129,10 @@
 			isa = PBXGroup;
 			children = (
 				5243D878A3E7F546CA6EF591 /* AgentRunner.swift */,
+				0A45359ABA3EE41F69474549 /* ChatComposer.swift */,
+				8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */,
 				F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */,
+				BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */,
 				1F266439E5ACA1E35405D10A /* CloudSync.swift */,
 				7B1523AE79BCB523972CA3A5 /* Controller.swift */,
 				C08CD702C33D2019607205D8 /* DeviceSettings.swift */,
@@ -209,16 +233,24 @@
 			buildActionMask = 2147483647;
 			files = (
 				839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */,
+				8886708D7E4580012E54CC6A /* Attachments.swift in Sources */,
+				19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */,
 				FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */,
+				3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */,
+				F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */,
 				6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */,
+				166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */,
 				72018019477198B62A047CE7 /* CloudSync.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
+				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
+				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
+				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -119,7 +119,7 @@ struct ProviderEditorView: View {
                     Toggle(isOn: $model.supportsImages) {
                         VStack(alignment: .leading) {
                             Text(model.id)
-                            Text(model.supportsImages ? "发送截图和界面结构" : "仅发送界面结构文本").font(.caption).foregroundStyle(.secondary)
+                            Text(model.supportsImages ? "接收照片、截图和界面结构" : "仅接收文字和界面结构").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }.onDelete { draft.models.remove(atOffsets: $0) }

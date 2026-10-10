@@ -30,7 +30,7 @@ struct SettingsView: View {
                     Text(sync.status).font(.caption).accessibilityIdentifier("syncStatus")
                     if sync.folderName != nil { Button("停止同步", role: .destructive) { sync.disconnect() } }
                 } header: { Text("iCloud Drive 同步") } footer: {
-                    Text("只同步会话文字、工具调用结果和服务商的非机密配置。API Key、配对文件、草稿、运行状态、日志、截图和附件不会同步；同步来的会话不会自动执行。")
+                    Text("只同步会话文字、工具调用结果、服务商的非机密配置和图片的存在信息。API Key、配对文件、草稿、运行状态、日志、截图和图片内容不会同步，其他设备上的图片显示为不可用；同步来的会话不会自动执行。")
                 }
                 Section {
                     LabeledContent("配对文件", value: device.hasPairing ? "已导入" : "未导入")

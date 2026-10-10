@@ -2,9 +2,9 @@ import AgentKit
 import Foundation
 
 // Portable data shared through a user-chosen folder. Only conversation text,
-// tool call/result pairs and nonsecret provider configuration are represented;
-// keys, pairing data, drafts, run state, selected session, logs, images and
-// attachments have no field here.
+// tool call/result pairs, nonsecret provider configuration and attachment
+// presence metadata are represented; keys, pairing data, drafts, run state,
+// selected session, logs, image bytes and local file paths have no field here.
 
 nonisolated struct PortableToolCall: Hashable, Codable, Sendable {
     var id: String
@@ -23,13 +23,51 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
     var modelText: String?
     var createdAtMs: Int64
     var attribution: String?
+    /// Metadata of user images sent with this message. Bytes stay on the
+    /// sending device; other devices show them as unavailable.
+    var attachments: [ChatAttachment]
 
-    init(_ message: AgentTranscriptMessage, attribution: String?) {
+    init(_ message: AgentTranscriptMessage, attribution: String?, attachments: [ChatAttachment] = []) {
         id = message.id; role = message.role; text = message.text
         toolCalls = message.toolCalls.map { PortableToolCall(id: $0.id, name: $0.name, arguments: $0.arguments) }
         toolCallID = message.toolCallID; toolName = message.toolName; isError = message.isError
         modelText = message.modelText; createdAtMs = PortableTime.ms(message.createdAt)
         self.attribution = attribution
+        self.attachments = attachments
+    }
+
+    // Omits `attachments` when empty so attachment-free messages keep their
+    // canonical bytes and therefore their derived conflict-copy IDs.
+    private enum CodingKeys: String, CodingKey {
+        case id, role, text, toolCalls, toolCallID, toolName, isError, modelText, createdAtMs, attribution, attachments
+    }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        role = try c.decode(AgentTranscriptRole.self, forKey: .role)
+        text = try c.decode(String.self, forKey: .text)
+        toolCalls = try c.decode([PortableToolCall].self, forKey: .toolCalls)
+        toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
+        toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+        isError = try c.decode(Bool.self, forKey: .isError)
+        modelText = try c.decodeIfPresent(String.self, forKey: .modelText)
+        createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
+        attribution = try c.decodeIfPresent(String.self, forKey: .attribution)
+        attachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
+    }
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(role, forKey: .role)
+        try c.encode(text, forKey: .text)
+        try c.encode(toolCalls, forKey: .toolCalls)
+        try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
+        try c.encodeIfPresent(toolName, forKey: .toolName)
+        try c.encode(isError, forKey: .isError)
+        try c.encodeIfPresent(modelText, forKey: .modelText)
+        try c.encode(createdAtMs, forKey: .createdAtMs)
+        try c.encodeIfPresent(attribution, forKey: .attribution)
+        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
     }
 
     var transcript: AgentTranscriptMessage {
@@ -56,7 +94,9 @@ nonisolated struct PortableSession: Hashable, Codable, Sendable, Identifiable {
         guard !session.messages.isEmpty else { return nil }
         id = session.id; title = session.title; selection = session.selection
         metadataUpdatedMs = PortableTime.ms(session.metadataUpdatedAt)
-        messages = session.messages.map { PortableMessage($0, attribution: session.attributions[$0.id.uuidString]) }
+        messages = session.messages.map {
+            PortableMessage($0, attribution: session.attributions[$0.id.uuidString], attachments: session.attachments(of: $0))
+        }
         conflictOf = session.conflictOf
     }
     init(id: UUID, title: String, selection: ModelSelection?, metadataUpdatedMs: Int64, messages: [PortableMessage],
@@ -172,6 +212,11 @@ nonisolated enum PortableCodec {
         }
         for session in snapshot.sessions where Set(session.messages.map(\.id)).count != session.messages.count {
             throw SyncError.invalidContent("会话内重复消息 ID")
+        }
+        for message in snapshot.sessions.flatMap(\.messages) where !message.attachments.isEmpty {
+            guard message.role == .user, message.attachments.count <= ChatAttachment.maxPerMessage,
+                  message.attachments.allSatisfy({ ["image/jpeg", "image/png"].contains($0.mimeType) && $0.byteCount >= 0 })
+            else { throw SyncError.invalidContent("附件元数据无效") }
         }
         for provider in snapshot.providers {
             do { _ = try provider.record.validated() }
@@ -459,11 +504,14 @@ nonisolated enum SyncApplication {
     }
 
     /// Keeps local message values (with images and provider state) whose
-    /// portable projection is unchanged; drafts and run state stay local.
+    /// portable projection is unchanged; drafts, draft images and run state stay
+    /// local. Attachment metadata follows the adopted messages: unchanged
+    /// messages keep their local files, remote ones show as unavailable.
     private static func adopt(_ incoming: PortableSession, into session: ChatSession, now: Date) -> ChatSession {
         var session = session
         let local = Dictionary(session.messages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let attributions = session.attributions
+        let attachments = session.attachments
         session.id = incoming.id
         session.title = incoming.title
         session.selection = incoming.selection
@@ -471,11 +519,15 @@ nonisolated enum SyncApplication {
         session.conflictOf = incoming.conflictOf
         session.messages = incoming.messages.map { message in
             if let existing = local[message.id],
-               PortableMessage(existing, attribution: attributions[message.id.uuidString]) == message { return existing }
+               PortableMessage(existing, attribution: attributions[message.id.uuidString],
+                               attachments: attachments[message.id.uuidString] ?? []) == message { return existing }
             return message.transcript
         }
         session.attributions = Dictionary(uniqueKeysWithValues: incoming.messages.compactMap { m in
             m.attribution.map { (m.id.uuidString, $0) }
+        })
+        session.attachments = Dictionary(uniqueKeysWithValues: incoming.messages.compactMap { m in
+            m.attachments.isEmpty ? nil : (m.id.uuidString, m.attachments)
         })
         session.updatedAt = now
         return session

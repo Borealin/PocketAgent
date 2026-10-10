@@ -5,11 +5,21 @@ import UIKit
 
 @MainActor
 extension Model {
-    func executePhoneAgent(config: RunConfiguration, goal: String,
+    func executePhoneAgent(config: RunConfiguration, goal: String, images: [AgentImageAttachment],
                            task: BGContinuedProcessingTask, conversationID: UUID, promptID: UUID,
                            priorMessages: [AgentTranscriptMessage],
-                           onEvent: (@MainActor (AgentEvent) -> Void)?, onFinished: (@MainActor (Bool, String) -> Void)?) {
-        task.progress.totalUnitCount = 72
+                           onEvent: (@MainActor (AgentEvent, ExecutionStatus) -> Void)?,
+                           onFinished: (@MainActor (Bool, String, ExecutionStatus) -> Void)?) {
+        // The single semantic status: the chat strip and the system task
+        // surface both show this value.
+        var status = ExecutionStatus(modelLabel: config.label)
+        func publish() {
+            let units = status.progressUnits
+            task.progress.totalUnitCount = units.total
+            task.progress.completedUnitCount = units.completed
+            if task.subtitle != status.subtitle { task.updateTitle("手机助手", subtitle: status.subtitle) }
+        }
+        publish()
         task.expirationHandler = { [weak self] in Task { @MainActor in self?.cancel() } }
         job = Task {
             var successful = false
@@ -32,7 +42,7 @@ extension Model {
                 }
                 defer { watchdog.cancel() }
                 let events = await runtime.start(AgentRunRequest(conversationID: conversationID, promptID: promptID,
-                    prompt: goal, permissionMode: .fullAccess, systemPrompt: """
+                    prompt: goal, promptImages: images, permissionMode: .fullAccess, systemPrompt: """
                     你是运行在用户这台 iPhone 上的手机助手，使用用户的语言回答。
                     本轮已经注册真实的手机工具：读屏、打开 App、点击、长按、滑动、输入、键盘操作、返回主屏幕、等待。
                     历史回复中“没有工具/不能操作手机”描述的是旧版本，以本轮工具为准。
@@ -51,7 +61,9 @@ extension Model {
                     """, priorMessages: priorMessages))
                 await withTaskCancellationHandler {
                     for await event in events {
-                        onEvent?(event)
+                        status.apply(event)
+                        publish()
+                        onEvent?(event, status)
                         switch event {
                         // Default diagnostics omit arguments, results and message text.
                         case .toolStarted(let invocation):
@@ -74,17 +86,17 @@ extension Model {
                 log(Task.isCancelled ? "interrupted" : "failed", Model.errorFields(error))
             }
             task.expirationHandler = nil
-            task.updateTitle("手机助手", subtitle: "正在结束本轮")
+            if !status.phase.isTerminal { status.phase = .finishing }
+            publish()
             // Cancellation must not cancel the HTTP activation or native stop.
             let cleanupWarning = await Task { @MainActor in
                 await self.finishPhoneAutomation()
             }.value
-            if successful { task.progress.completedUnitCount = task.progress.totalUnitCount }
-            task.updateTitle("手机助手", subtitle: successful ? "已完成" :
-                (pendingAgentCancellation ? "已取消" : "未完成"))
+            status.finish(successful: successful, cancelled: pendingAgentCancellation)
+            publish()
             task.setTaskCompleted(success: successful)
             activeAgentRuntime = nil; busy = false; job = nil
-            onFinished?(successful, cleanupWarning)
+            onFinished?(successful, cleanupWarning, status)
         }
     }
 }
@@ -171,8 +183,6 @@ private final class PhoneAgent {
         }
         model.log("phone_model_request", ["request": requests, "snapshotID": snapshotID,
             "tools": request.tools.map(\.name)])
-        task.progress.completedUnitCount = Int64(requests)
-        task.updateTitle("手机助手", subtitle: "\(config.modelID) · 第 \(requests) 轮")
         return enriched
     }
     func checkDeadline() throws {

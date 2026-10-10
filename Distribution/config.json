@@ -1,8 +1,8 @@
 {
   "name": "PocketAgent",
   "repository": "Borealin/PocketAgent",
-  "version": "0.2.1",
-  "buildVersion": "2",
+  "version": "0.3.0",
+  "buildVersion": "3",
   "minimumOSVersion": "26.0",
   "bundleIdentifier": "io.github.borealin.PocketAgent",
   "runnerBundleIdentifier": "io.github.borealin.PocketAgent.WDA.xctrunner"
