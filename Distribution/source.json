@@ -13,9 +13,9 @@
           "version": "0.2.0",
           "buildVersion": "1",
           "minOSVersion": "26.0",
-          "size": 4624372,
-          "sha256": "132136c1636f6edbc56b50b72ae7e04ae42c65afbdead8ef6381643bfeb92ed8",
-          "date": "2026-10-10T03:28:38Z",
+          "size": 4673795,
+          "sha256": "99dccf4391f66754872f829ceeb4da14a2f9b819dfb6b26fdfe122b604d1fb69",
+          "date": "2026-10-10T03:47:17Z",
           "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.2.0/PocketAgent-0.2.0.ipa"
         }
       ],
@@ -40,9 +40,9 @@
           "version": "0.2.0",
           "buildVersion": "1",
           "minOSVersion": "26.0",
-          "size": 615097,
-          "sha256": "d5116a178a0533a94fb3ce0cfa8733d50862d4e7b4f958c6d5fbe30d472aba57",
-          "date": "2026-10-10T03:28:38Z",
+          "size": 614561,
+          "sha256": "aecef3a6921571457d74cd168f55b72b7afef1fc09baa3378f2f9848e588eda4",
+          "date": "2026-10-10T03:47:17Z",
           "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.2.0/PocketAgent-WDA-0.2.0.ipa"
         }
       ],
