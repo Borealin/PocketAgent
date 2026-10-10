@@ -164,6 +164,16 @@ passes; model inference continues to use the configured API service.
 Phone control stays central; projects, rules, files, HTTP and scripts feed it.
 Swift and the pinned AgentKit remain the only agent loop.
 
+The user requested an installable release before the remaining physical unplug
+check. v0.3.0 (build 3) publishes generic, ad-hoc-signed app and WDA IPAs,
+the corresponding source and the Classic source feed in the private repository.
+Download with GitHub authentication and re-sign both IPAs for installation.
+The release uses the configured distribution bundle IDs; the bench installation uses
+a separate local test identity. Keep that test app installed to retain its local
+data, and select the same iCloud Drive folder in the release to import portable
+conversations. Credentials, pairing and runner configuration must be set on
+each installation. Publication does not close the pending unplugged device gate.
+
 Source lessons from the Opus/Fable review (static reading, not executed):
 
 | Reference and inspected revision | Mechanism to borrow | Boundary |
