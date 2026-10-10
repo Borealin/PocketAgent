@@ -159,8 +159,8 @@ completed its three phone requests with exit 0 and zero remaining guest
 processes. Its full turn continued with streamed model output while Settings
 was foreground, returned to PocketAgent and stopped its owned runner. Desktop
 runner and port forwarding were stopped before its phone requests. Physical
-USB-disconnected validation, benchmark cleanup and final-head CI are still
-pending; model inference continues to use the configured API service.
+USB-disconnected validation and benchmark cleanup are still pending; source CI
+passes; model inference continues to use the configured API service.
 Phone control stays central; projects, rules, files, HTTP and scripts feed it.
 Swift and the pinned AgentKit remain the only agent loop.
 
@@ -615,13 +615,16 @@ actions): Root never pressed Stop, guest processes were 0 and no phone action
 was replayed. dasd logged "Task has not reported progress within expected
 cadence, marking stalled (time without update ≈31.7 s)" — the last completed
 unit change was at run_script start — then Activity Progress Policy suspended
-the task and the expiration handler fired. This is inference, not proof that
-earlier updates were published: the local dasd record read 0/0. The evidence
-is consistent with a cadence stall rather than object identity — the gap
-matches the last unit change at run_script start and the app's event-to-unit
-mapping, where completed units only advanced on finished messages/steps and a
-subtitle change is not a progress report — pending confirmation from the
-`task_progress` / `background_task_expired` metadata and a device test. Now real work
+the task and the expiration handler fired. The log confirms system progress-policy expiration. It does not isolate
+early progress publication from gaps in real-work reporting: the daemon record
+read 0/0 and the old app had no local publication metadata. Its gap matches
+the old event mapping, which advanced only on finished messages/steps and
+ignored script output. The combined fix initializes one stable Progress before
+the launch callback returns and reports actual intermediate work. On-device
+retest completed the same combined script and a background streamed response
+without stalling; the captured Progress identity stayed stable. A separate
+90-second silent interval also completed normally. These observations verify
+the repaired flow, not a fixed system cadence or one isolated cause. Now real work
 inside a step advances a `workObserved` counter that feeds only
 `progressUnits` (visible step counts unchanged): streamed model/reasoning
 chunks (at most one unit per 5 s), script runtime ready, process started,
@@ -638,10 +641,12 @@ cannot cancel the next one — then marks the status expired, logs
 cancels. An expiry before the turn body starts leaves a pending cancellation,
 so the body stops before any work and fails with the expiry cause. An expiration (system, or dismissal from the system task
 UI) ends an unsuccessful turn as failed with a send-a-new-message cause;
-a turn whose agent already completed successfully keeps its completed outcome. Remaining limit: iOS can expire a task with no observable progress, including
+a turn whose agent already completed successfully keeps its completed outcome.
+Remaining limit: iOS can expire a task with no observable progress, including
 a silent script or a provider that streams nothing. The earlier stall occurred
 at about 32 seconds without an update, but the later silent interval of
-90 seconds completed without expiration; no fixed threshold is claimed. The run_script descriptor
+90 seconds completed without expiration; no fixed threshold is claimed.
+The run_script descriptor
 tells the model to print real intermediate output from long scripts (for
 example after each finished chunk), never heartbeats or fake progress.
 
