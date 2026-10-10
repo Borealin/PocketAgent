@@ -7,6 +7,13 @@ provider you configure.
 
 ## Installation
 
+> [!IMPORTANT]
+> The v0.3.0 Automation companion has a confirmed AltStore re-signing issue:
+> its embedded XCTest bundle causes "Could not find matching provisioning
+> profile." A packaging fix and actual sideload re-sign/install verification
+> are pending. Public downloads and feed checks do not establish successful
+> installation through AltStore or SideStore.
+
 [![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 

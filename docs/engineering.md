@@ -502,6 +502,24 @@ paths. Packaging removes the debug bundles, strips debug records while retaining
 runtime symbols, maps compiler source paths and signs the prepared copy. IPA
 inspection rejects remaining local paths and development identities.
 
+The v0.3.0 companion fails AltStore re-signing with AltSign.Error 4. Confirmed
+cause: its `PlugIns/WebDriverAgentRunner.xctest` is absent from AltSign's
+`.appex`-only extension discovery, so AltStore fetches a profile only for the
+parent app. Release `ResignAppOperation` then visits every direct PlugIns child
+and demands a profile for the XCTest bundle. The missing dictionary entry
+produces the reported error. This path was reproduced with Foundation bundle
+enumeration against the actual release IPA. Inspected sources are AltStore
+56854e66fef2eac32dad88dcbad1dc131d430e60 (`ResignAppOperation.swift`,
+`FetchProvisioningProfilesOperation.swift`) and its AltSign submodule
+790b9ccdaf2cec831689395c527e80f1f2838041 (`ALTApplication.mm`).
+The main app contains no PlugIns bundle and does not trigger this condition.
+Its separately reported OperationError 1008 is an unresolved AltStore install
+context/precondition failure; the client/server versions and detailed error
+are needed to identify the failing stage. No packaging remedy is yet validated.
+Removing the XCTest bundle would remove phone automation, so it is not a fix.
+Development-signed device checks, anonymous downloads and IPA signature
+inspection did not cover AltStore/SideStore re-signing; that gate remains open.
+
 A release tag starts from an older source snapshot than current main. Publishing
 merges against current main and keeps all earlier versions in numeric order.
 The freshly inspected CI artifact replaces metadata for its own version/build,
