@@ -149,6 +149,16 @@ actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
 
+Device testing found message-container identifiers replacing the code-copy and
+image controls' identifiers. Make message rows explicit accessibility containers,
+and attach the transcript identifier to the scroll view before its overlay.
+Switching from a tall phone-operation transcript to a shorter conversation also
+produced an empty visible transcript while all messages remained in storage.
+Key each transcript view by conversation ID so its scroll state is recreated for
+the selected content. On the reference device, tall-to-short switching and
+relaunch now retain visible messages; code-copy and image-preview controls remain
+individually accessible, with copied code verified through the system paste action.
+
 Image import initially combined Foundation's atomic and without-overwriting
 write options, which traps instead of returning a catchable write error.
 Use a fresh UUID path, reject an existing file and perform a protected atomic

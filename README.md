@@ -27,6 +27,7 @@ Use the list icon to open conversations and Settings. Tap the chat title to
 rename it, or use the conversation's menu in the list. The top-right icon starts
 a new conversation. The model chip above the input chooses this conversation's
 provider and model.
+The concrete model name appears first; the picker shows API information beneath it.
 
 The input grows to six lines and accepts up to six images from Photos, the
 camera or the system paste button. Images can be removed or previewed before

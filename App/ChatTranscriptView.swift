@@ -29,6 +29,9 @@ struct ChatTranscriptView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
         }
+        // On the scroll view itself (a real accessibility container), before
+        // the overlay, so the jump button keeps its own identifier.
+        .accessibilityIdentifier("chatTranscript")
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .scrollDismissesKeyboard(.interactively)
@@ -40,10 +43,6 @@ struct ChatTranscriptView: View {
         }
         .onChange(of: TranscriptProgress(messages)) { _, _ in
             if nearBottom { position.scrollTo(edge: .bottom) } else { unseen = true }
-        }
-        .onChange(of: chat.selectedID) { _, _ in
-            unseen = false; nearBottom = true
-            position.scrollTo(edge: .bottom)
         }
         .overlay(alignment: .bottomTrailing) {
             if !nearBottom {
@@ -71,7 +70,6 @@ struct ChatTranscriptView: View {
             Button("在浏览器中打开") { systemOpenURL(url) }
             Button("拷贝链接") { UIPasteboard.general.url = url }
         } message: { url in Text(url.absoluteString) }
-        .accessibilityIdentifier("chatTranscript")
     }
 
 }
@@ -122,6 +120,8 @@ private struct UserBubble: View {
                 }
             }
         }
+        // A container element: children keep their own content and identifiers.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.id.uuidString)")
     }
 }
@@ -155,6 +155,8 @@ private struct AssistantBody: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // A container element: copy/load buttons keep their own identifiers.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.id.uuidString)")
     }
 }

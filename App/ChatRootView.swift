@@ -87,7 +87,10 @@ struct ChatRootView: View {
             if !providers.storageError.isEmpty { banner(providers.storageError, color: .red) }
             if !providers.notice.isEmpty { banner(providers.notice, color: .orange) }
             if providers.isConfigured {
+                // One transcript identity per conversation: switching recreates
+                // its scroll position and lazy layout state, starting at the bottom.
                 ChatTranscriptView(chat: chat)
+                    .id(chat.selectedID)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if let selected = chat.selected {
                             VStack(spacing: 0) {
