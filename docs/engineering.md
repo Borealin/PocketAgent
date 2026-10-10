@@ -9,6 +9,17 @@ private Borealin/PocketAgent. Existing installed conversations and local API
 settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
 remain outside this iteration.
 
+The requested next chat UI revision is pending implementation. Its header has
+only a list icon, a tappable title for renaming and a new-conversation icon.
+Session actions and settings belong in the session list. Input needs user images
+and adaptive height; replies need block Markdown and attachment views. Real
+model/tool phases must remain visible both in the chat and through the system
+task surface while another app is foreground. The review proposes native SwiftUI
+components over the existing AgentKit events; attachment persistence and its
+migration must be specified before changing the history format. Images remain
+outside portable synchronization. Current UI assessment artifacts are local;
+no UI rewrite or attachment migration is included in the teardown fix.
+
 ## Decisions
 
 Retain pinned AgentKit 8108c9bb87c546860cfc1769571e115af919fe8a and the verified
