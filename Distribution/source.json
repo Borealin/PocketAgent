@@ -1,0 +1,85 @@
+{
+  "name": "PocketAgent",
+  "apps": [
+    {
+      "name": "PocketAgent",
+      "bundleIdentifier": "io.github.borealin.PocketAgent",
+      "developerName": "Borealin",
+      "localizedDescription": "Native multi-session phone assistant with configurable model providers.",
+      "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png",
+      "category": "developer",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "buildVersion": "1",
+          "minOSVersion": "26.0",
+          "size": 4624372,
+          "sha256": "132136c1636f6edbc56b50b72ae7e04ae42c65afbdead8ef6381643bfeb92ed8",
+          "date": "2026-10-10T03:28:38Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.2.0/PocketAgent-0.2.0.ipa"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "get-task-allow"
+        ],
+        "privacy": {
+          "NSLocalNetworkUsageDescription": "通过本机 VPN 连接这台 iPhone 的开发服务，执行你在对话中请求的手机操作。"
+        }
+      }
+    },
+    {
+      "name": "PocketAgent Automation",
+      "bundleIdentifier": "io.github.borealin.PocketAgent.WDA.xctrunner",
+      "developerName": "Borealin",
+      "localizedDescription": "XCTest automation companion required for phone tools.",
+      "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png",
+      "category": "developer",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "buildVersion": "1",
+          "minOSVersion": "26.0",
+          "size": 615097,
+          "sha256": "d5116a178a0533a94fb3ce0cfa8733d50862d4e7b4f958c6d5fbe30d472aba57",
+          "date": "2026-10-10T03:28:38Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.2.0/PocketAgent-WDA-0.2.0.ipa"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "get-task-allow"
+        ],
+        "privacy": {
+          "NFCReaderUsageDescription": "Access is necessary for automated testing.",
+          "NSAppleMusicUsageDescription": "Access is necessary for automated testing.",
+          "NSBluetoothAlwaysUsageDescription": "Access is necessary for automated testing.",
+          "NSBluetoothPeripheralUsageDescription": "Access is necessary for automated testing.",
+          "NSCalendarsUsageDescription": "Access is necessary for automated testing.",
+          "NSCameraUsageDescription": "Access is necessary for automated testing.",
+          "NSContactsUsageDescription": "Access is necessary for automated testing.",
+          "NSFaceIDUsageDescription": "Access is necessary for automated testing.",
+          "NSHealthClinicalHealthRecordsShareUsageDescription": "Access is necessary for automated testing.",
+          "NSHealthShareUsageDescription": "Access is necessary for automated testing.",
+          "NSHealthUpdateUsageDescription": "Access is necessary for automated testing.",
+          "NSHomeKitUsageDescription": "Access is necessary for automated testing.",
+          "NSLocalNetworkUsageDescription": "Access is necessary for automated testing.",
+          "NSLocationAlwaysAndWhenInUseUsageDescription": "Access is necessary for automated testing.",
+          "NSLocationWhenInUseUsageDescription": "Access is necessary for automated testing.",
+          "NSMicrophoneUsageDescription": "Access is necessary for automated testing.",
+          "NSMotionUsageDescription": "Access is necessary for automated testing.",
+          "NSPhotoLibraryUsageDescription": "Access is necessary for automated testing.",
+          "NSRemindersUsageDescription": "Access is necessary for automated testing.",
+          "NSSensorKitUsageDescription": "Access is necessary for automated testing.",
+          "NSSiriUsageDescription": "Access is necessary for automated testing.",
+          "NSSpeechRecognitionUsageDescription": "Access is necessary for automated testing.",
+          "NSUserTrackingUsageDescription": "Access is necessary for automated testing.",
+          "NSVideoSubscriberAccountUsageDescription": "Access is necessary for automated testing."
+        }
+      }
+    }
+  ],
+  "news": [],
+  "website": "https://github.com/Borealin/PocketAgent",
+  "tintColor": "#6554E8"
+}

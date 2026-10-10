@@ -1,0 +1,441 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 49BF9B5D946340940F5C4C82 /* RustLicenses */; };
+		095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */; };
+		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
+		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
+		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
+		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
+		4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */; };
+		6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */; };
+		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
+		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
+		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
+		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
+		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
+		A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D61AC91A09838169F172CE15 /* BackgroundTasks.framework */; };
+		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
+		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
+		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
+		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
+		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
+		FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F24A784103BF8F2532963F /* ChatHistory.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1F266439E5ACA1E35405D10A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
+		1F9EC154A7B819D774BFB985 /* ProviderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderViews.swift; sourceTree = "<group>"; };
+		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
+		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
+		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
+		4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AgentKit-LICENSE.txt"; sourceTree = "<group>"; };
+		5243D878A3E7F546CA6EF591 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
+		59F24A784103BF8F2532963F /* ChatHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistory.swift; sourceTree = "<group>"; };
+		64A275A3B478025AE3327E64 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		73652AF715C4968790030FB2 /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
+		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
+		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
+		C08CD702C33D2019607205D8 /* DeviceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSettings.swift; sourceTree = "<group>"; };
+		CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
+		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
+		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		50105D989524B55EE3326337 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */,
+				CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */,
+				4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */,
+				A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5D695D0E583F9F4E6BC0201C = {
+			isa = PBXGroup;
+			children = (
+				E0DFDF0C26A6F26CDB84C5A4 /* App */,
+				9983CE4C99C31B81EE9B4DCB /* Frameworks */,
+				BAC2CBC1659C78F25D37FF6F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8095CDEFD963DB49E62171F1 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				59F24A784103BF8F2532963F /* ChatHistory.swift */,
+				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
+				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		9983CE4C99C31B81EE9B4DCB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D61AC91A09838169F172CE15 /* BackgroundTasks.framework */,
+				64A275A3B478025AE3327E64 /* Security.framework */,
+				CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		BAC2CBC1659C78F25D37FF6F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E901918E882C6D22A1FA4148 /* PocketAgent.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E0DFDF0C26A6F26CDB84C5A4 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				5243D878A3E7F546CA6EF591 /* AgentRunner.swift */,
+				F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */,
+				1F266439E5ACA1E35405D10A /* CloudSync.swift */,
+				7B1523AE79BCB523972CA3A5 /* Controller.swift */,
+				C08CD702C33D2019607205D8 /* DeviceSettings.swift */,
+				977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */,
+				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
+				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
+				6CE88C9FB1A659621C93A20A /* SettingsView.swift */,
+				8095CDEFD963DB49E62171F1 /* Core */,
+				F5CBB7BF3CC0BC4C5B65F5B7 /* Resources */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F5CBB7BF3CC0BC4C5B65F5B7 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */,
+				0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */,
+				49BF9B5D946340940F5C4C82 /* RustLicenses */,
+				1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9CD94193A95764321AF71ABE /* PocketAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BEE8F7E091B2912613B482B2 /* Build configuration list for PBXNativeTarget "PocketAgent" */;
+			buildPhases = (
+				9B11857713AA500D58245F89 /* Sources */,
+				ACE7D8E630E175740EDDBCC0 /* Resources */,
+				50105D989524B55EE3326337 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PocketAgent;
+			packageProductDependencies = (
+				4E3CCB903EB2A196726DC963 /* AgentKit */,
+			);
+			productName = PocketAgent;
+			productReference = E901918E882C6D22A1FA4148 /* PocketAgent.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8195E6DC41FEFBEAC1016EFC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = B934AB503F0D47B705AB1B12 /* Build configuration list for PBXProject "PocketAgent" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5D695D0E583F9F4E6BC0201C;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BAC2CBC1659C78F25D37FF6F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9CD94193A95764321AF71ABE /* PocketAgent */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ACE7D8E630E175740EDDBCC0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */,
+				832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */,
+				026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */,
+				095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9B11857713AA500D58245F89 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */,
+				FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */,
+				6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */,
+				72018019477198B62A047CE7 /* CloudSync.swift in Sources */,
+				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
+				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
+				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
+				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
+				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
+				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
+				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
+				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		23E4B034B13EA700EAFCD39C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = .build/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2DA6F37052011CC535476342 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.2.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
+				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
+				POCKETAGENT_LEGACY_KEYCHAIN_SERVICE = "";
+				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Native";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7D80D408E272990FA7225031 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.2.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
+				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
+				POCKETAGENT_LEGACY_KEYCHAIN_SERVICE = "";
+				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Native";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		DE06670504D2B0CB38A2EE8C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = .build/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B934AB503F0D47B705AB1B12 /* Build configuration list for PBXProject "PocketAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2DA6F37052011CC535476342 /* Debug */,
+				7D80D408E272990FA7225031 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BEE8F7E091B2912613B482B2 /* Build configuration list for PBXNativeTarget "PocketAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DE06670504D2B0CB38A2EE8C /* Debug */,
+				23E4B034B13EA700EAFCD39C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AkinoKaede/AgentKit.git";
+			requirement = {
+				kind = revision;
+				revision = 8108c9bb87c546860cfc1769571e115af919fe8a;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4E3CCB903EB2A196726DC963 /* AgentKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */;
+			productName = AgentKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 8195E6DC41FEFBEAC1016EFC /* Project object */;
+}

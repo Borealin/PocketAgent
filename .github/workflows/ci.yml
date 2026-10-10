@@ -1,0 +1,24 @@
+name: Validate
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.2.app
+      - name: Core regression tests
+        run: env -u SDKROOT swift test
+      - name: Distribution regression tests
+        run: python3 -m unittest discover -s Tests/DistributionTests
+      - name: Repository privacy check
+        run: python3 Scripts/check_repository.py

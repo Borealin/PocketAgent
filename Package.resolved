@@ -1,0 +1,32 @@
+{
+  "originHash" : "fa2ce3caa61c3a095b03e34d3cc206d58df346d935ac086d63ed79094e52cb96",
+  "pins" : [
+    {
+      "identity" : "agentkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/AkinoKaede/AgentKit.git",
+      "state" : {
+        "revision" : "8108c9bb87c546860cfc1769571e115af919fe8a"
+      }
+    },
+    {
+      "identity" : "scrubberkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Lakr233/ScrubberKit.git",
+      "state" : {
+        "revision" : "b69932dc44461dd4a73aafeb78d514222f68d3e1",
+        "version" : "0.2.0"
+      }
+    },
+    {
+      "identity" : "swiftsoup",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/scinfu/SwiftSoup",
+      "state" : {
+        "revision" : "18b80329749eca5ea29fc50211dca5c7eff5bfec",
+        "version" : "2.13.9"
+      }
+    }
+  ],
+  "version" : 3
+}

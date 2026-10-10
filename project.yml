@@ -1,0 +1,78 @@
+name: PocketAgent
+options:
+  deploymentTarget:
+    iOS: '26.0'
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    MARKETING_VERSION: '0.2.0'
+    CURRENT_PROJECT_VERSION: '1'
+    CODE_SIGNING_ALLOWED: NO
+    SWIFT_INCLUDE_PATHS: '$(SRCROOT)/Native'
+    OTHER_SWIFT_FLAGS: '$(inherited) -file-prefix-map $(SRCROOT)=.'
+    HEADER_SEARCH_PATHS: '$(SRCROOT)/Native'
+    OTHER_LDFLAGS: '$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a'
+    POCKETAGENT_RUNNER_BUNDLE_ID: io.github.borealin.PocketAgent.WDA.xctrunner
+    POCKETAGENT_LEGACY_KEYCHAIN_SERVICE: ''
+packages:
+  AgentKit:
+    url: https://github.com/AkinoKaede/AgentKit.git
+    revision: 8108c9bb87c546860cfc1769571e115af919fe8a
+targets:
+  PocketAgent:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes: [Resources/RustLicenses, Resources/SwiftLicenses]
+      - path: App/Resources/RustLicenses
+        type: folder
+      - path: App/Resources/SwiftLicenses
+        type: folder
+    dependencies:
+      - package: AgentKit
+        product: AgentKit
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: BackgroundTasks.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.borealin.PocketAgent
+        TARGETED_DEVICE_FAMILY: '1,2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: .build/Info.plist
+      properties:
+        CFBundleDisplayName: PocketAgent
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes: [processing]
+        BGTaskSchedulerPermittedIdentifiers:
+          - '$(PRODUCT_BUNDLE_IDENTIFIER).run.*'
+        NSLocalNetworkUsageDescription: 通过本机 VPN 连接这台 iPhone 的开发服务，执行你在对话中请求的手机操作。
+        NSBonjourServices: [_pocketagent._tcp]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        PocketAgentRunnerBundleID: '$(POCKETAGENT_RUNNER_BUNDLE_ID)'
+        PocketAgentLegacyKeychainService: '$(POCKETAGENT_LEGACY_KEYCHAIN_SERVICE)'
+schemes:
+  PocketAgent:
+    build:
+      targets:
+        PocketAgent: all
+    run:
+      config: Debug
+    archive:
+      config: Release

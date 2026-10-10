@@ -1,0 +1,14 @@
+{
+  "idevice": {
+    "url": "https://github.com/jkcoxson/idevice.git",
+    "revision": "3854a5df4a5a6dee71ffce4d8befc2ea356a8065"
+  },
+  "AgentKit": {
+    "url": "https://github.com/AkinoKaede/AgentKit.git",
+    "revision": "8108c9bb87c546860cfc1769571e115af919fe8a"
+  },
+  "WebDriverAgent": {
+    "url": "https://github.com/appium/WebDriverAgent.git",
+    "revision": "d15c0b2dbaa850fa712fba817e51cf8d5026d9f2"
+  }
+}

@@ -1,0 +1,45 @@
+name: Build IPA
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.2.app
+      - name: Tools
+        run: |
+          brew install xcodegen
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Tests
+        run: |
+          env -u SDKROOT swift test
+          python3 -m unittest discover -s Tests/DistributionTests
+          python3 Scripts/check_repository.py
+      - name: Build clean app and runner IPAs
+        run: env -u SDKROOT python3 Scripts/build.py
+      - name: Inspect IPA and generate Classic source
+        run: python3 Scripts/distribution.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketAgent-IPA
+          path: |
+            dist/*.ipa
+            dist/SHA256SUMS
+            Distribution/source.json
+          if-no-files-found: error
+      - name: Publish matching tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 Scripts/publish.py
