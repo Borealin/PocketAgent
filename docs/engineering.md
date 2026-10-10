@@ -142,6 +142,88 @@ contain no private gateway or company identity. Local build overrides preserve
 the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
 
+## Proposed on-device workspace and scripting
+
+Status: design under review, last checked 2026-10-10. The user's next capability
+scope includes project directories, global/project AGENTS.md, skills, native
+file and HTTP tools, and on-device scripts that can invoke phone operations.
+Phone control remains central; scripts perform data processing and compose those
+operations. Deferring scripts in favor of a phone-only reliability iteration
+does not match this scope. Existing sessions, drafts and model choices must remain
+intact. This section describes a proposal, not an implemented runtime.
+
+Opus 5.5 and Fable 5.1 independently read the reference sources, exchanged their
+analyses and reviewed the proposed integration. Their source-based lessons are:
+
+| Reference and inspected revision | Mechanism to borrow | Boundary |
+|---|---|---|
+| [Operit](https://github.com/AAswordman/Operit/tree/dbf71916fae9750cfdc9f9a774f5a0fee56633fb) | Inject workspace rules and advertise skills through metadata before loading bodies | Its root rule reader is not a complete global/nested rule system |
+| [Operit2](https://github.com/AAswordman/Operit2/tree/c539c203c91d7c14006b8d82f67f2a2bf1abcfa1) | Embed iSH and mount native workspace files into its Linux guest at the same path | Its timeout sends Ctrl-C without confirming exit; its current external-cwd bridge accepts container paths only |
+| [Zafiro](https://github.com/niki914/zafiro/tree/6c7f7756d698f9ea02627e54e6e912317314fe9a) | Isolate Python execution, check worker health and coordinate cancellation | Android's dedicated app process is not a directly portable iOS process model |
+| [Shelly](https://github.com/RYOITABASHI/Shelly/tree/b08b01b7a5d37db53a8afeb4a6bb73e0460bd1e1) | Package Bash, Node and Python as explicit runtime capabilities | Its Android linker/bionic executable path does not establish an iOS implementation |
+| [Gemini Android](https://github.com/aciderix/gemini-android-app/tree/2c4d9bb085b0f026fbab1f52c60ddc9c447f7349) | Report when a selected document directory cannot become the shell cwd | A picker URI and a runtime path are not automatically the same workspace |
+| [ClosePaw](https://github.com/imoonkey/closepaw/tree/75dae2653f5a6b25d5df51ee7008b0f830de1536) | Load app-specific skill instructions for the current foreground app | Cancelling an HTTP wait is not proof that a remote shell command stopped |
+| [Kira/DroidClaw](https://github.com/levilyf/droidclaw/tree/5cc2bfd02d5bfb7f70d0404a5afc40369ccda262) | Bridge a script runtime to native phone actions | Its workspace creates AGENTS.md, but the inspected context builder does not load that file |
+| [ZeroAI](https://github.com/Natfii/ZeroAI/tree/bbf422a7940bc6c5608685098b6ae28f48deadaa) | Generate tools from one capability-aware registry shared across agent entry points | Registration is not proof of runtime availability or callback behavior |
+| [ClawMobile](https://github.com/ClawMobile/ClawMobile/tree/e15557122d95afbe3f91e2cd3300068760826f95) | Declare capability and platform limitations explicitly | Public material describes iOS app-local/shared-content scope; it does not expose a complete iOS phone-control implementation |
+
+Keep native Swift and the pinned AgentKit as the sole agent loop. Validate iSH
+first as a runtime candidate for Bash, Python and Node; do not migrate the whole
+Operit2 agent framework. Native CPython embedding and NodeMobile are alternative
+components, not evidence of a full Unix process environment on iOS. Runtime
+performance, package compatibility and distribution requirements remain open.
+
+Use an app-container project root shared by native filesystem tools and the
+guest. Persist relative project identifiers, not an installation-specific
+container path; freeze workspace selection when accepting a turn, alongside
+the model configuration. Initially use native operations and explicit import/
+export for external folders. Broader security-scoped/hostfs integration needs
+its own validation. Preserve the existing portable chat synchronization; do not
+automatically synchronize guest rootfs, caches, pairing records or credentials.
+AgentKit scratch is bounded conversation staging, not an arbitrary project root.
+
+Load app-global AGENTS.md, the project's root AGENTS.md and a skills catalog into
+the actual model context, with skill bodies read on demand. Nested rule inheritance
+is a later extension. A single ToolRegistry should produce tool descriptions,
+authorization policies and capability prompt fragments. Native filesystem tools
+need list/read/search/write/patch operations; native http_request needs method,
+headers, body and structured responses beyond AgentKit's webpage Fetch tool.
+
+Extract a shared PhoneExecutor from the current PhoneAgent/PhoneApproval path.
+It owns action serialization, observation validation, effect authorization,
+cancellation and WDA execution. AgentKit tools and script helpers must use that
+entry point: directly invoking the current perform method bypasses the existing
+approval broker. MainActor isolation alone does not serialize operations across
+await. run_script waits asynchronously without holding a phone-action lock or
+recursively entering AgentKit's single-tool scheduler. Script phone sub-actions
+appear under that script's trace/progress; they must not create unpaired model
+tool-result messages. Ordinary filesystem, computation and authorized network
+operations need no per-step confirmation.
+
+The first runtime probe must establish bidirectional workspace visibility, real
+exit codes, separate stdout/stderr and bounded output with full output files.
+Cancellation first revokes the script's bridge authorization, then interrupts
+and, after a grace period, terminates remaining guest processes; inspect the
+process tree before declaring completion. A timeout code, closed terminal or
+cancelled HTTP request alone does not prove that execution stopped. Mount only
+the project root. A token protects our bridge but does not protect WDA's raw
+unauthenticated listener: test whether a guest can bypass the executor by calling
+that listener, and establish isolation or authenticated access before claiming
+the bridge enforces the action policy.
+
+The proposed combined device task reads reminders, fetches HTTPS itinerary JSON,
+uses Python to normalize dates and remove duplicates, writes a shared CSV, creates
+the missing reminders through the phone bridge and reads back the result. Also
+exercise cancellation, timeout, lost action results, duplicate submission and a
+subsequent session. Unknown action outcomes require fresh observation, not replay.
+Record cold start, memory and IPA size, then validate with USB disconnected on the
+reference iPhone. No new runtime was built, installed or exercised for this source
+review. Implementation assignment and schedule remain unassigned.
+
+Only PocketAgent's iOS app/runtime and companion integration are affected by this
+proposal. The Looktech Android app, firmware, schema, rpc and audio modules are
+unaffected because this introduces no glasses-device contract or algorithm change.
+
 ## Delivery and rejected alternatives
 
 Owner: Codex integrator and Opus 5.5 app developer.
