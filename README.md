@@ -23,6 +23,30 @@ UI automation; enter it only in the system page on the phone.
 
 ## Conversations and providers
 
+Use the list icon to open conversations and Settings. Tap the chat title to
+rename it, or use the conversation's menu in the list. The top-right icon starts
+a new conversation. The model chip above the input chooses this conversation's
+provider and model.
+
+The input grows to six lines and accepts up to six images from Photos, the
+camera or the system paste button. Images can be removed or previewed before
+sending; image-only messages require a model configured to accept images.
+Text-only models show an explicit choice before sending text without its images.
+Photos are normalized and stored locally without their source EXIF/GPS metadata.
+
+Replies render headings, lists, quotes, code and tables. Code has a copy button;
+wide tables scroll horizontally. Local images open a full-screen preview.
+Remote Markdown images load over HTTPS only after tapping Load. Streaming
+follows the bottom while you are there and offers a return-to-bottom button
+while you read earlier content. Phone steps are folded into an expandable
+timeline with outcomes and optional details.
+
+During a turn, a status strip shows the actual model/tool phase, current app or
+action, completed steps and elapsed time. The system task surface shows the same
+phase while another app is foreground. Stop remains separate from the input,
+which can accept an additional instruction for the active turn. Other
+conversations join the serial queue and display their waiting position.
+
 Open the provider page to add a service name, API format, complete inference
 URL, API key and one or more model IDs. Supported formats are OpenAI Chat
 Completions, OpenAI Responses, Anthropic Messages and Gemini. A model catalog
@@ -55,8 +79,10 @@ provider configuration. Each device needs its own API keys, pairing record,
 runner settings and folder permission.
 
 Portable snapshots contain conversation text, tool calls/results, model
-selection and nonsecret provider settings. Screenshots, attachments, keys,
-pairing records, drafts and running jobs are kept local. A synced conversation
+selection, image-presence metadata and nonsecret provider settings. Image bytes,
+screenshots, keys, pairing records, drafts and running jobs are kept local.
+An image synced from another device appears unavailable unless its bytes are
+already on this device. A synced conversation
 does not trigger phone actions. Concurrent divergent histories are preserved as
 conflict copies; deletions retain tombstones to prevent stale devices restoring
 deleted items. Unknown snapshot versions fail without overwriting the file.
