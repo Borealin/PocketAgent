@@ -20,6 +20,16 @@ migration must be specified before changing the history format. Images remain
 outside portable synchronization. Current UI assessment artifacts are local;
 no UI rewrite or attachment migration is included in the teardown fix.
 
+Android UI references add explicit queued and waiting-for-user states, compact
+tool rows with step outcomes, and an outside-chat current-app/action indicator.
+Keep Stop separate from the composer so running turns can still accept steering.
+Use iOS's system task surface for outside-app status; Android application-overlay
+windows are not an iOS implementation path. Manual takeover is a proposal, not
+verified pause/resume support: continuation requires a fresh observation and
+must not reuse stale nodes or replay past actions. References are PalmClaw's
+session/attachment/tool UI, MobileClaw's inline action rows, MobileAgent-Android's
+phase bubble and Doubao's official task-queue illustration.
+
 ## Decisions
 
 Retain pinned AgentKit 8108c9bb87c546860cfc1769571e115af919fe8a and the verified
@@ -137,6 +147,10 @@ conflict resolution still require separate runtime verification.
 
 ## Primary references
 
+- [PalmClaw Android UI](https://github.com/ModalityDance/PalmClaw)
+- [MobileClaw Android UI](https://github.com/ChenKuanSun/MobileClaw)
+- [MobileAgent-Android task status](https://github.com/GiggleWang/MobileAgent-Android)
+- [Doubao phone assistant official UI demonstrations](https://o.doubao.com/)
 - [AltStore Classic source schema](https://faq.altstore.io/developers/make-a-source)
 - [EHPanda packaging workflow](https://github.com/EhPanda-Team/EhPanda/blob/main/.github/workflows/deploy.yml)
 - [LiveContainer installation](https://livecontainer.github.io/docs/installation)
