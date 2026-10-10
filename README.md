@@ -10,7 +10,8 @@ provider you configure.
 - iOS 26 or later, Developer Mode enabled.
 - PocketAgent and its separate **PocketAgent Automation** companion installed
   with a development-capable signature, such as AltStore Classic or SideStore.
-- A device pairing record created during initial computer setup.
+- An idevice RP pairing property list created during initial setup. An ordinary
+  USB/Lockdown pairing record has a different format and cannot replace it.
 - A local VPN exposing the device's developer services, such as LocalDevVPN.
 - An API provider supporting tool calls. Image input is optional; select the
   capability only for models that support it.

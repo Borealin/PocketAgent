@@ -16,7 +16,7 @@ def main():
     issues = []
     for name in filter(None, names):
         path = ROOT / name
-        if path.suffix in BLOCKED_SUFFIXES or path.name in BLOCKED_NAMES or any(x in path.parts for x in ['.deps', '.build', 'dist', 'work']):
+        if path.suffix in BLOCKED_SUFFIXES or path.name in BLOCKED_NAMES or any(x in Path(name).parts for x in ['.deps', '.build', 'dist', 'work']):
             issues.append(name + ': private/generated file')
             continue
         if not path.is_file():

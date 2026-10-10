@@ -72,6 +72,11 @@ actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
 
+The first CI privacy check matched the absolute checkout's `work` directory and
+rejected every file on GitHub runners. Directory exclusions now inspect only
+repository-relative paths. A temporary Git checkout under a runner-like path
+verifies that clean source passes while a private child directory still fails.
+
 WDA's Release build-for-testing embeds debug symbol bundles and linker object
 paths. Packaging removes the debug bundles, strips debug records while retaining
 runtime symbols, maps compiler source paths and signs the prepared copy. IPA
