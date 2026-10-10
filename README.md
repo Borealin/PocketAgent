@@ -5,6 +5,56 @@ providers and phone automation through AgentKit, idevice and WebDriverAgent.
 The model loop and phone tools run on the iPhone. Model inference uses the API
 provider you configure.
 
+## Installation
+
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
+[![AltStore source](https://img.shields.io/badge/AltStore-Source-38A169?style=for-the-badge)](#altstore-classicsidestore-source)
+
+**Private preview:** GitHub sign-in and repository access are currently required
+to download. The source cannot yet be added as an anonymous subscription.
+
+1. Install [AltStore Classic](https://altstore.io/) or
+   [SideStore](https://docs.sidestore.io/).
+2. Open [the latest release](https://github.com/Borealin/PocketAgent/releases/latest)
+   in Safari while signed into GitHub. Download both `PocketAgent-<version>.ipa`
+   and `PocketAgent-WDA-<version>.ipa` to Files.
+3. Import and sign **both** IPAs in your sideloading app. The second one is
+   **PocketAgent Automation**, required for phone tools. Keep both installed
+   and refresh their signatures using the sideloading app.
+4. Enable Developer Mode, configure the local VPN and import this phone's
+   **idevice RP pairing record**. In PocketAgent's device settings, enter the
+   installed Automation companion's bundle ID; signing can change it.
+5. Add your API provider and model in Settings, then start a conversation.
+
+For an existing installation, update using the same signing account and bundle
+IDs to retain its local data. Do not delete the app first. A separately signed
+installation needs its own credentials and device configuration; portable
+conversations can be imported through the same iCloud Drive sync folder.
+
+### AltStore Classic/SideStore source
+
+The feed contains **PocketAgent** and **PocketAgent Automation** and is updated
+automatically after a release. Once the feed, icon and IPA downloads are publicly
+accessible, open the button below on your iPhone to add the source in AltStore
+Classic. For SideStore, copy the source URL into its Sources screen.
+
+**Public hosting is not enabled yet.** The button and URL below are prepared for
+that step; while the repository is private, use the manual download steps above.
+
+[![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
+
+```text
+https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json
+```
+
+After adding the source, install both apps from it. New releases appear as
+updates in the sideloading app. Adding a source still requires signing and the
+initial device setup described below.
+
+This uses the [official AltStore deep-link format](https://faq.altstore.io/developers/download-on-altstore-badge).
+The feed targets Classic/SideStore; AltStore PAL notarization and LiveContainer
+guest execution are separate, unverified paths.
+
 ## Requirements
 
 - iOS 26 or later, Developer Mode enabled.
@@ -193,17 +243,12 @@ The release workflow builds both IPAs and uploads them with checksums. A matchin
 `main`, retaining older releases. Version/build settings live in
 `Distribution/config.json`.
 
-When this repository is public, its source URL is:
-
-```text
-https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json
-```
-
-A private GitHub repository requires authentication for both source and assets;
-it cannot serve an anonymous AltStore subscription. While private, download the
-release IPAs through your authenticated GitHub account and install them manually.
-This feed targets AltStore Classic/SideStore. AltStore PAL notarization and
-LiveContainer guest execution are separate distribution/runtime paths.
+See [Installation](#installation) for IPA downloads and the source URL. A private
+GitHub repository requires authentication for the source, icon and release
+assets; an anonymous subscription needs public hosting for all three. Public
+distribution can use this repository or a separate release repository containing
+the feed, icon, both IPAs, checksums and complete corresponding source. The
+published feed must point to that repository's publicly accessible assets.
 
 ## Development
 

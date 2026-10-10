@@ -120,6 +120,16 @@ record. A separate WDA companion IPA is necessary for phone automation. The
 AltStore Classic feed lists real versions, sizes, hashes and permissions. PAL
 notarization and LiveContainer guest execution are separate and untested paths.
 
+The README has a quick installation section, manual IPA download and the
+official HTTPS AltStore source deep link. Anonymous source installation remains
+unavailable while the feed, icon and IPA assets are in the private repository.
+Public hosting is an outstanding user decision: making the development
+repository public or using a separate public release repository. A release
+mirror must publish both IPAs, their checksums and complete corresponding source,
+and rewrite feed download/icon URLs to the mirror. Keeping the development
+repository private does not make the distributed release's corresponding source
+private.
+
 ## Architecture and compatibility
 
 App: SwiftUI sessions/provider/sync views. AgentKit: model protocols and agent
