@@ -10,6 +10,15 @@
       "category": "developer",
       "versions": [
         {
+          "version": "0.3.0",
+          "buildVersion": "3",
+          "minOSVersion": "26.0",
+          "size": 56206702,
+          "sha256": "16f639137ea3a032c3e01d3e6deece19f2b8adf6e7f668ceedce7a554dba5655",
+          "date": "2026-10-10T14:48:59Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.3.0/PocketAgent-0.3.0.ipa"
+        },
+        {
           "version": "0.2.0",
           "buildVersion": "1",
           "minOSVersion": "26.0",
@@ -24,6 +33,7 @@
           "get-task-allow"
         ],
         "privacy": {
+          "NSCameraUsageDescription": "拍摄照片并作为图片附加到你发送给助手的消息中。",
           "NSLocalNetworkUsageDescription": "通过本机 VPN 连接这台 iPhone 的开发服务，执行你在对话中请求的手机操作。"
         }
       }
@@ -36,6 +46,15 @@
       "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png",
       "category": "developer",
       "versions": [
+        {
+          "version": "0.3.0",
+          "buildVersion": "3",
+          "minOSVersion": "26.0",
+          "size": 614563,
+          "sha256": "359d89a0cf1bf6c91721a04a75eb4c8c04cc73d9810a6603e6501ab487e6c871",
+          "date": "2026-10-10T14:48:59Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/v0.3.0/PocketAgent-WDA-0.3.0.ipa"
+        },
         {
           "version": "0.2.0",
           "buildVersion": "1",
