@@ -1,5 +1,28 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
+
+/// Local display preference (UserDefaults); never synchronized.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let storageKey = "appearance"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: "跟随系统"
+        case .light: "浅色"
+        case .dark: "深色"
+        }
+    }
+    /// `.unspecified` hands appearance back to the system.
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .system: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
 
 struct SettingsView: View {
     @ObservedObject var providers: ProviderStore
@@ -9,10 +32,18 @@ struct SettingsView: View {
     @State private var pickingFolder = false
     @State private var importingPairing = false
     @State private var pickingDefault = false
+    @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("外观", selection: $appearance) {
+                        ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("appearance")
+                } header: { Text("外观") } footer: { Text("只保存在本机，不会同步。") }
                 Section("模型") {
                     NavigationLink { ProviderListView(store: providers) } label: {
                         LabeledContent("模型服务", value: "\(providers.providers.count) 个")

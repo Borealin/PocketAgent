@@ -71,10 +71,14 @@ Android UI references add explicit queued and waiting-for-user states, compact
 tool rows with step outcomes, and an outside-chat current-app/action indicator.
 Keep Stop separate from the composer so running turns can still accept steering.
 Use iOS's system task surface for outside-app status; Android application-overlay
-windows are not an iOS implementation path. Manual takeover is a proposal, not
-verified pause/resume support: continuation requires a fresh observation and
-must not reuse stale nodes or replay past actions. References are PalmClaw's
-session/attachment/tool UI, MobileClaw's inline action rows, MobileAgent-Android's
+windows are not an iOS implementation path. That surface is the system Live
+Activity of BGContinuedProcessingTask; there is no custom ActivityKit/widget
+extension or Dynamic Island design. A local appearance choice (system, light,
+dark) is stored in UserDefaults and applied as the hosting window's interface
+style, which every sheet presented in that window inherits.
+Manual takeover is a proposal, not verified pause/resume support: continuation
+requires a fresh observation and must not reuse stale nodes or replay past actions.
+References are PalmClaw's session/attachment/tool UI, MobileClaw's inline action rows, MobileAgent-Android's
 phase bubble and Doubao's official task-queue illustration.
 
 ## Decisions
@@ -148,6 +152,15 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+With the phone in dark mode, choosing Light and then System in an open Settings
+sheet left that sheet light, although the chat underneath and a cold launch
+returned to dark. The chat root and the sheet each set SwiftUI's presentation
+color-scheme preference, and clearing it did not reset the open sheet. The
+choice is now applied once, as the window's override style; System clears it
+to unspecified so the window and all its presentations take the system value.
+A hidden, non-interactive probe applies only to its hosting window on attachment
+and preference updates; changing appearance does not rebuild navigation state.
 
 Device testing found message-container identifiers replacing the code-copy and
 image controls' identifiers. Make message rows explicit accessibility containers,

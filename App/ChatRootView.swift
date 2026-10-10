@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Chat screen: header with only the session-list icon, the renamable title
 /// and a new-conversation icon. Sessions and Settings live in a slide-over
@@ -18,6 +19,7 @@ struct ChatRootView: View {
     @State private var renaming: UUID?
     @State private var newTitle = ""
     @FocusState private var inputFocused: Bool
+    @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
 
     var body: some View {
         GeometryReader { geometry in
@@ -79,6 +81,9 @@ struct ChatRootView: View {
             if phase == .active { sync.foreground() } else { chat.persist() }
         }
         .onChange(of: engine.busy) { _, _ in chat.foregroundChanged(scenePhase == .active) }
+        // Applied to the hosting window only. Open sheets (Settings, model
+        // picker, providers) are presented in that window and inherit it.
+        .background(WindowAppearance(style: appearance.interfaceStyle))
     }
 
     private var main: some View {
@@ -247,4 +252,29 @@ private struct SessionDrawer: View {
         let state = chat.status(for: session.id).map(\.phaseLabel) ?? session.state.label
         return "\(state) · \(session.messages.count) 条 · \(providers.describe(session.selection).label)"
     }
+}
+
+/// Sets the hosting window's `overrideUserInterfaceStyle`. A presentation-level
+/// `preferredColorScheme` override could stay light on an open sheet after
+/// switching back to the system setting; clearing the window to
+/// `.unspecified` returns every presentation in it to the system appearance.
+private struct WindowAppearance: UIViewRepresentable {
+    let style: UIUserInterfaceStyle
+
+    final class Probe: UIView {
+        var style = UIUserInterfaceStyle.unspecified { didSet { apply() } }
+        override func didMoveToWindow() { super.didMoveToWindow(); apply() }
+        private func apply() {
+            guard let window, window.overrideUserInterfaceStyle != style else { return }
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe()
+        view.isUserInteractionEnabled = false
+        view.isHidden = true
+        return view
+    }
+    func updateUIView(_ view: Probe, context: Context) { view.style = style }
 }
