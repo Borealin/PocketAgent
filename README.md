@@ -98,24 +98,75 @@ eventual. An active turn is deferred until it completes. This uses a user-chosen
 folder rather than CloudKit entitlements, so ordinary personal sideload signing
 does not need an app-owned iCloud container.
 
+## Projects, rules and scripts
+
+The folder chip beside the model chip chooses the conversation's project. A
+project is an app-local directory; create one, import a folder from Files, or
+manage files in Settings → 项目与规则 (browse, create, edit text, import,
+export a copy, delete). Accepted turns use the project selected when they were
+sent. Projects, rules and script runtimes are not synchronized.
+
+Each turn's model context includes the global AGENTS.md (Settings → 全局
+AGENTS.md), the project's root AGENTS.md and a catalog of skills
+(`skills/<name>/SKILL.md` globally, `.agents/skills/<name>/SKILL.md` in a
+project; name and description from front matter). The model reads a skill's
+full text with `read_skill`. Nested AGENTS.md files are not loaded.
+
+With a project selected the model can list, read, search, write and patch its
+files; paths are relative to the project root and symbolic links are never
+followed. `http_request` sends any method, headers and text/JSON body to public
+HTTPS hosts only (plain `http://` is refused because it cannot prove which host
+answered), with bounded responses and a whole-request time limit. Local and
+private addresses, and names resolving to them, are refused before connecting
+and on each redirect; TLS proves the hostname, not that its address is public,
+so this is not a guarantee against a server that changes its DNS answer.
+Neither tool asks for confirmation step by step. Scripts have their own guest
+network for pip, npm and similar tools, limited to public addresses and never
+the phone's WebDriverAgent/lockdown ports.
+
+`run_script` runs bash, sh, Python 3 or Node.js on the phone in an embedded iSH
+Linux (x86 Alpine, emulated; noticeably slower than native code). The project is
+mounted at `/workspace` and is the only app data the guest can see. Results
+report the real exit status and separate stdout/stderr; full output stays under
+`.pocketagent/runs/` in the project. Scripts can operate the phone with
+`pocketagent-phone <tool> '<json>'`, which goes through the same validation and
+serial action queue as the model's phone tools; failures are never retried
+automatically. Stopping a turn revokes that permission first, then interrupts and
+finally kills the script's processes. The first script imports the Linux root
+filesystem (excluded from backup), which takes extra time. A project used by a
+queued or running turn cannot be deleted until that turn ends.
+
+The app binary includes the iSH runtime and the Linux kernel and is therefore
+distributed under the GNU GPL version 2 (iSH is dual-licensed GPL-3.0/GPL-2.0
+for this purpose; see THIRD_PARTY_NOTICES.md). Each release publishes its
+complete corresponding source next to the IPA.
+
 ## Build
 
-On macOS, install Xcode 26.2 or later, XcodeGen and Rust 1.95.0. Select the full
+On macOS, install Xcode 26.2 or later, XcodeGen, Rust 1.95.0, meson and lld, plus
+Docker able to run linux/386 containers for the script rootfs. Select the full
 Xcode developer directory, then run from the repository root:
 
 ```sh
-brew install xcodegen
+brew install xcodegen meson lld
 rustup toolchain install 1.95.0 --profile minimal
 rustup default 1.95.0
 env -u SDKROOT swift test
 python3 -m unittest discover -s Tests/DistributionTests
+python3 -m unittest discover -s Tests/RuntimeTests
 env -u SDKROOT python3 Scripts/build.py
 python3 Scripts/distribution.py
 ```
 
 The build fetches exact revisions from `dependencies.json`, applies the local
-idevice patch, builds its static iOS library, archives the app and builds the
-automation companion. Dependencies and generated products stay in ignored
+idevice patch, builds its static iOS library, builds the patched iSH runtime and
+the pinned Alpine rootfs (`Scripts/ish_runtime.py`), archives the app and builds
+the automation companion. `dist/` also receives the GPL corresponding source
+archive (repository snapshot, pinned iSH/Linux/libarchive archives, Swift package
+and idevice sources, vendored Rust crates). The rootfs build pins every Alpine
+package in `dependencies.json` and fails if the repository can no longer supply
+that exact closure; `python3 Scripts/ish_runtime.py verify-rootfs` checks an
+existing archive. Dependencies and generated products stay in ignored
 directories. `project.yml` is the XcodeGen source of truth.
 
 `dist/` contains both IPAs and `SHA256SUMS`. Release IPAs use ad-hoc signatures,

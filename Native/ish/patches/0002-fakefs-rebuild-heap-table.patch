@@ -1,0 +1,25 @@
+--- a/fs/fake-rebuild.c
++++ b/fs/fake-rebuild.c
+@@ -45,8 +45,12 @@
+     sqlite3_stmt *write_path = PREPARE("insert into paths (path, inode) values (?, ?)");
+     sqlite3_stmt *write_stat = PREPARE("replace into stats (inode, stat) values (?, ?)");
+ 
+-    struct list hashtable[2000];
+-#define HASH_SIZE (sizeof(hashtable)/sizeof(hashtable[0]))
++    // 2000 list heads are 32 KB on a 64-bit host: too large for the Linux
++    // task stack this runs on.
++    enum { HASH_SIZE = 2000 };
++    struct list *hashtable = malloc(HASH_SIZE * sizeof(*hashtable));
++    if (hashtable == NULL)
++        return _ENOMEM;
+     for (unsigned i = 0; i < HASH_SIZE; i++)
+         list_init(&hashtable[i]);
+ 
+@@ -111,6 +115,7 @@
+         }
+     }
+ 
++    free(hashtable);
+     EXEC("drop table paths_old");
+     EXEC("drop table stats_old");
+     EXEC("commit");

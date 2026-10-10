@@ -371,15 +371,19 @@ struct ControllerApp: App {
     @StateObject private var chat: ChatController
     @StateObject private var sync: SyncCoordinator
     @StateObject private var device = DeviceSettingsModel()
+    @StateObject private var workspaces: WorkspaceStore
     init() {
-        let model = Model(), providers = ProviderStore()
-        let chat = ChatController(engine: model, providers: providers)
+        let model = Model(), providers = ProviderStore(), workspaces = WorkspaceStore()
+        let chat = ChatController(engine: model, providers: providers, workspaces: workspaces)
         _model = StateObject(wrappedValue: model)
+        _workspaces = StateObject(wrappedValue: workspaces)
         _providers = StateObject(wrappedValue: providers)
         _chat = StateObject(wrappedValue: chat)
         _sync = StateObject(wrappedValue: SyncCoordinator(chat: chat, providers: providers))
     }
     var body: some Scene {
-        WindowGroup { ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device) }
+        WindowGroup {
+            ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
+        }
     }
 }

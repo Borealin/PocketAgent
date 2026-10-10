@@ -10,11 +10,13 @@ struct ChatRootView: View {
     @ObservedObject var providers: ProviderStore
     @ObservedObject var sync: SyncCoordinator
     @ObservedObject var device: DeviceSettingsModel
+    @ObservedObject var workspaces: WorkspaceStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var drawerOpen = false
     @State private var drag: CGFloat = 0
     @State private var showSettings = false
     @State private var showModels = false
+    @State private var showWorkspaces = false
     @State private var showProviders = false
     @State private var renaming: UUID?
     @State private var newTitle = ""
@@ -57,7 +59,14 @@ struct ChatRootView: View {
         }
         .alert(item: $chat.imageWarning) { warning in imageAlert(warning) }
         .sheet(isPresented: $showSettings) {
-            SettingsView(providers: providers, sync: sync, device: device) { showSettings = false }
+            SettingsView(providers: providers, sync: sync, device: device, workspaces: workspaces) { showSettings = false }
+        }
+        .sheet(isPresented: $showWorkspaces) {
+            if let selected = chat.selected {
+                WorkspacePickerSheet(store: workspaces, current: selected.workspaceID) { id in
+                    chat.setWorkspace(id, for: selected.id); showWorkspaces = false
+                }
+            }
         }
         .sheet(isPresented: $showModels) {
             if let selected = chat.selected {
@@ -100,8 +109,9 @@ struct ChatRootView: View {
                         if let selected = chat.selected {
                             VStack(spacing: 0) {
                                 ExecutionStrip(chat: chat, session: selected)
-                                ChatComposer(chat: chat, providers: providers, session: selected,
-                                             inputFocused: $inputFocused, chooseModel: { inputFocused = false; showModels = true })
+                                ChatComposer(chat: chat, providers: providers, workspaces: workspaces, session: selected,
+                                             inputFocused: $inputFocused, chooseModel: { inputFocused = false; showModels = true },
+                                             chooseWorkspace: { inputFocused = false; showWorkspaces = true })
                             }
                             .background(.bar)
                         }

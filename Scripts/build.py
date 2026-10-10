@@ -123,6 +123,11 @@ def main():
     number = args.build_version or config['buildVersion']
     if not args.skip_bootstrap:
         run(['python3', ROOT / 'Scripts/bootstrap.py'] + (['--native-only'] if args.app_only else []))
+    # Embedded Linux runtime: static libraries and the rootfs (CI supplies it
+    # from a Linux job; it is verified against the locked closure either way).
+    run(['python3', ROOT / 'Scripts/ish_runtime.py', 'build'])
+    rootfs = 'verify-rootfs' if (ROOT / '.build/ish/ish-root.tar.gz').is_file() else 'rootfs'
+    run(['python3', ROOT / 'Scripts/ish_runtime.py', rootfs])
     (ROOT / 'App/Resources/SwiftLicenses').mkdir(parents=True, exist_ok=True)
     run(['xcodegen', 'generate', '--spec', ROOT / 'project.yml'])
     archive = ROOT / '.build/PocketAgent.xcarchive'
@@ -137,6 +142,9 @@ def main():
          '-scheme', 'PocketAgent', '-derivedDataPath', ROOT / '.build/DerivedData',
          '-onlyUsePackageVersionsFromResolvedFile'], env=env)
     swift_licenses()
+    # Complete corresponding source of the GPL-2.0 app binary (needs the
+    # resolved Swift packages and the idevice checkout).
+    run(['python3', ROOT / 'Scripts/ish_runtime.py', 'source', '--strict'])
     run(['xcodebuild', '-project', ROOT / 'PocketAgent.xcodeproj', '-scheme', 'PocketAgent',
          '-configuration', 'Release', '-destination', 'generic/platform=iOS',
          '-derivedDataPath', ROOT / '.build/DerivedData', '-archivePath', archive,
@@ -146,6 +154,7 @@ def main():
     out = ROOT / ('build/development' if signing else 'dist')
     out.mkdir(parents=True, exist_ok=True)
     ipa(app, out / f'PocketAgent-{version}.ipa')
+    shutil.copy2(ROOT / '.build/ish/PocketAgent-iSH-source.tar.gz', out / f'PocketAgent-iSH-source-{version}.tar.gz')
     if not args.app_only:
         wda = ROOT / '.deps/WebDriverAgent'
         run(['xcodebuild', '-project', wda / 'WebDriverAgent.xcodeproj', '-scheme', 'WebDriverAgentRunner',

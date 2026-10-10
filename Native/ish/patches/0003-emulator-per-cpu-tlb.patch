@@ -1,0 +1,14 @@
+--- a/linux/emu_asbestos.c
++++ b/linux/emu_asbestos.c
+@@ -20,7 +20,10 @@
+ 	struct emu_mm *emu_mm;
+ };
+ 
+-static __thread struct tlb the_tlb;
++/* One TLB per emulated CPU, looked up on every use: Linux tasks switch host
++ * pthreads via ksetjmp/klongjmp and a cached __thread address can go stale. */
++static struct tlb cpu_tlbs[NR_CPUS];
++#define the_tlb (cpu_tlbs[get_smp_processor_id()])
+ 
+ static void *ishemu_translate(struct mmu *mem, addr_t addr, int type)
+ {

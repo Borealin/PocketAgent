@@ -28,6 +28,7 @@ struct SettingsView: View {
     @ObservedObject var providers: ProviderStore
     @ObservedObject var sync: SyncCoordinator
     @ObservedObject var device: DeviceSettingsModel
+    @ObservedObject var workspaces: WorkspaceStore
     let close: () -> Void
     @State private var pickingFolder = false
     @State private var importingPairing = false
@@ -52,6 +53,7 @@ struct SettingsView: View {
                         LabeledContent("新会话默认模型", value: providers.describe(providers.defaultSelection).label)
                     }.accessibilityIdentifier("defaultModel")
                 }
+                RulesSettingsSection(store: workspaces)
                 Section {
                     LabeledContent("文件夹", value: sync.folderName ?? "未选择")
                     Button(sync.folderName == nil ? "选择 iCloud Drive 文件夹…" : "更换文件夹…") { pickingFolder = true }

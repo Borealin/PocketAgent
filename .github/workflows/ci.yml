@@ -20,5 +20,9 @@ jobs:
         run: env -u SDKROOT swift test
       - name: Distribution regression tests
         run: python3 -m unittest discover -s Tests/DistributionTests
+      - name: Runtime host regression tests (patched hostfs confinement)
+        run: |
+          python3 Scripts/ish_runtime.py fetch
+          python3 -m unittest discover -s Tests/RuntimeTests -v
       - name: Repository privacy check
         run: python3 Scripts/check_repository.py

@@ -9,15 +9,32 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
+  rootfs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned i386 Alpine rootfs
+        run: python3 Scripts/ish_runtime.py rootfs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ish-rootfs
+          path: .build/ish/ish-root.tar.gz
+          if-no-files-found: error
+          retention-days: 1
   ipa:
+    needs: rootfs
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ish-rootfs
+          path: .build/ish
       - name: Select Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.2.app
       - name: Tools
         run: |
-          brew install xcodegen
+          brew install xcodegen meson lld
           rustup toolchain install 1.95.0 --profile minimal
           rustup default 1.95.0
       - name: Tests
@@ -34,6 +51,7 @@ jobs:
           name: PocketAgent-IPA
           path: |
             dist/*.ipa
+            dist/*-iSH-source-*.tar.gz
             dist/SHA256SUMS
             Distribution/source.json
           if-no-files-found: error

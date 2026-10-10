@@ -57,7 +57,9 @@ def main():
     previous = json.loads(latest.stdout) if latest.returncode == 0 else {'name': 'PocketAgent', 'apps': [], 'news': []}
     source = merge_published_source(previous, source)
     (ROOT / 'Distribution/source.json').write_text(json.dumps(source, ensure_ascii=False, indent=2) + '\n')
-    assets = [*sorted((ROOT / 'dist').glob('*.ipa')), ROOT / 'dist/SHA256SUMS', ROOT / 'Distribution/source.json']
+    # The GPL runtime's corresponding source is published with every IPA.
+    assets = [*sorted((ROOT / 'dist').glob('*.ipa')), *sorted((ROOT / 'dist').glob('*-iSH-source-*.tar.gz')),
+              ROOT / 'dist/SHA256SUMS', ROOT / 'Distribution/source.json']
     exists = subprocess.run(['gh', 'release', 'view', tag], cwd=ROOT,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if exists.returncode == 0:

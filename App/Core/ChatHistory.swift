@@ -39,12 +39,15 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
     var attachments: [String: [ChatAttachment]] = [:]
     /// Images picked for the unsent draft; local only, never synchronized.
     var draftAttachments: [ChatAttachment] = []
+    /// Project directory used by this conversation's next turns. Local only:
+    /// projects are not part of portable sync, so it is never synchronized.
+    var workspaceID: UUID?
 
     init(selection: ModelSelection? = nil) { self.selection = selection }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, messages, draft, state, detail, updatedAt, selection, metadataUpdatedAt, attributions, conflictOf
-        case attachments, draftAttachments
+        case attachments, draftAttachments, workspaceID
     }
     // v1/v2 rows lack the newer fields; real IDs and messages are mandatory.
     init(from decoder: any Decoder) throws {
@@ -62,6 +65,7 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
         conflictOf = try c.decodeIfPresent(UUID.self, forKey: .conflictOf)
         attachments = try c.decodeIfPresent([String: [ChatAttachment]].self, forKey: .attachments) ?? [:]
         draftAttachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .draftAttachments) ?? []
+        workspaceID = try c.decodeIfPresent(UUID.self, forKey: .workspaceID)
     }
 
     func attachments(of message: AgentTranscriptMessage) -> [ChatAttachment] {

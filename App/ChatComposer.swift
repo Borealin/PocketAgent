@@ -93,9 +93,11 @@ struct ExecutionStrip: View {
 struct ChatComposer: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var providers: ProviderStore
+    @ObservedObject var workspaces: WorkspaceStore
     let session: ChatSession
     var inputFocused: FocusState<Bool>.Binding
     let chooseModel: () -> Void
+    let chooseWorkspace: () -> Void
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showCamera = false
@@ -121,7 +123,14 @@ struct ChatComposer: View {
             }
             if !session.draftAttachments.isEmpty || chat.isImporting(session.id) { draftImages }
             HStack(spacing: 8) {
-                modelChip
+                // Model first. On a narrow row the provider name goes, then the
+                // project name becomes its icon; neither is clipped mid-word.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { modelChip(provider: true); workspaceChip(title: true) }
+                    HStack(spacing: 8) { modelChip(provider: false); workspaceChip(title: true) }
+                    HStack(spacing: 8) { modelChip(provider: false); workspaceChip(title: false) }
+                }
+                .layoutPriority(1)
                 Spacer(minLength: 4)
                 Button { showPhotos = true } label: { Image(systemName: "photo.on.rectangle") }
                     .disabled(remaining == 0).accessibilityLabel("照片图库").accessibilityIdentifier("addPhoto")
@@ -166,15 +175,14 @@ struct ChatComposer: View {
         }
     }
 
-    private var modelChip: some View {
+    private func modelChip(provider showProvider: Bool) -> some View {
         let state = providers.describe(session.selection)
         return Button(action: chooseModel) {
             HStack(spacing: 4) {
                 Image(systemName: state.problem == nil ? "cpu" : "exclamationmark.triangle")
                 if let selection = session.selection, let provider = providers.provider(selection.providerID) {
-                    // Model first; the provider name gives way on narrow screens.
                     Text(selection.modelID).lineLimit(1).layoutPriority(1)
-                    Text(provider.name).foregroundStyle(.tertiary).lineLimit(1)
+                    if showProvider { Text(provider.name).foregroundStyle(.tertiary).lineLimit(1).fixedSize() }
                 } else {
                     Text(state.label).lineLimit(1)
                 }
@@ -184,7 +192,29 @@ struct ChatComposer: View {
             .background(Color.secondary.opacity(0.1), in: Capsule())
             .foregroundStyle(state.problem == nil ? Color.secondary : Color.orange)
         }
-        .buttonStyle(.plain).accessibilityIdentifier("modelSelection")
+        .buttonStyle(.plain).layoutPriority(1).accessibilityIdentifier("modelSelection")
+    }
+
+    /// The conversation's project; a missing project is shown, never replaced.
+    /// The name is shown whole or not at all (icon only, with the full name
+    /// as its accessibility label); without a project the chip is an icon.
+    private func workspaceChip(title showTitle: Bool) -> some View {
+        let record = workspaces.record(session.workspaceID)
+        let missing = session.workspaceID != nil && record == nil
+        let title = missing ? "项目已删除" : record?.name
+        return Button(action: chooseWorkspace) {
+            HStack(spacing: 4) {
+                Image(systemName: missing ? "exclamationmark.triangle" : record == nil ? "folder.badge.plus" : "folder")
+                if let title, showTitle { Text(title).lineLimit(1).fixedSize() }
+            }
+            .font(.caption).padding(.horizontal, title == nil || !showTitle ? 8 : 10).padding(.vertical, 5)
+            .fixedSize()
+            .background(Color.secondary.opacity(0.1), in: Capsule())
+            .foregroundStyle(missing ? Color.orange : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title.map { "项目：\($0)" } ?? "选择项目")
+        .accessibilityIdentifier("workspaceSelection")
     }
 
     private var draftImages: some View {

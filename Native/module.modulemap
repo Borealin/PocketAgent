@@ -1,4 +1,5 @@
 module PocketAgentNative [system] {
-    header "launch.h"
+    header "pocketagent_launch.h"
+    header "ish/PocketISH.h"
     export *
 }

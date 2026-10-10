@@ -30,6 +30,8 @@ private final class ChatJob {
     let priorAttachments: [String: [ChatAttachment]]
     /// Frozen at enqueue; later provider or selection edits do not reach it.
     let config: RunConfiguration
+    /// Project directory frozen at enqueue, like the model configuration.
+    let workspace: WorkspaceSnapshot?
     /// Composer content this turn consumed; returned only if it never starts.
     let draft: DraftSnapshot
     /// AgentKit emitted runStarted; from then on nothing is restored or replayed.
@@ -41,9 +43,9 @@ private final class ChatJob {
     var cancelled = false
     var terminal = false
     init(session: ChatSession, prompt: AgentTranscriptMessage, attachments: [ChatAttachment], config: RunConfiguration,
-         revision: Int) {
+         workspace: WorkspaceSnapshot?, revision: Int) {
         sessionID = session.id; self.prompt = prompt; promptAttachments = attachments
-        prior = session.messages; priorAttachments = session.attachments; self.config = config
+        prior = session.messages; priorAttachments = session.attachments; self.config = config; self.workspace = workspace
         draft = DraftSnapshot(text: session.draft, attachments: session.draftAttachments, revision: revision)
     }
     var referencedAttachmentIDs: Set<UUID> {
@@ -86,6 +88,7 @@ final class ChatController: ObservableObject {
     @Published private var foreground = false
     let engine: Model
     let providers: ProviderStore
+    let workspaces: WorkspaceStore
     /// Called once when the last active job finishes (deferred sync rounds).
     var onIdle: (() -> Void)?
     private let file = documents.appendingPathComponent("chat-sessions.json")
@@ -99,9 +102,10 @@ final class ChatController: ObservableObject {
     private var draftWrite: Task<Void, Never>?
     /// Attachment files written but not yet recorded; cleanup never removes them.
     private var pendingAttachmentIDs: Set<UUID> = []
-    init(engine: Model, providers: ProviderStore) {
+    init(engine: Model, providers: ProviderStore, workspaces: WorkspaceStore) {
         self.engine = engine
         self.providers = providers
+        self.workspaces = workspaces
         do {
             if FileManager.default.fileExists(atPath: file.path) {
                 let stored = try HistoryMigration.decode(Data(contentsOf: file), legacySelection: providers.legacySelection)
@@ -114,6 +118,7 @@ final class ChatController: ObservableObject {
             persist()
             cleanupAttachments()
         } catch { storageError = "历史读取失败，原文件已保留：\(error.localizedDescription)" }
+        workspaces.inUse = { [weak self] id in self?.workspaceInUse(id) ?? false }
     }
     var selected: ChatSession? { sessions.first { $0.id == selectedID } }
     var active: Bool { selectedID.map { jobs[$0] != nil } ?? false }
@@ -212,6 +217,14 @@ final class ChatController: ObservableObject {
         }
         persist()
     }
+    /// Affects only turns enqueued afterwards.
+    func setWorkspace(_ workspace: UUID?, for id: UUID) {
+        edit(id) { $0.workspaceID = workspace; if $0.state == .failed { $0.detail = "" } }
+        persist()
+    }
+    /// Whether a queued or running turn froze this project.
+    func workspaceInUse(_ id: UUID) -> Bool { jobs.values.contains { $0.workspace?.id == id } }
+
     func delete(_ id: UUID) {
         guard jobs[id] == nil, storageError.isEmpty else { return }
         sessions.removeAll { $0.id == id }
@@ -368,8 +381,16 @@ final class ChatController: ObservableObject {
             return
         }
         guard images.allSatisfy(attachmentFiles.exists) else { notice = AttachmentError.missingFile.localizedDescription; return }
+        // A selected project that no longer exists is an explicit problem, never a silent fallback.
+        var workspace: WorkspaceSnapshot?
+        if let id = session.workspaceID {
+            guard let snapshot = workspaces.snapshot(id) else {
+                notice = "本会话选择的项目已不存在；请重新选择项目或选择“不使用项目”。"; return
+            }
+            workspace = snapshot
+        }
         let message = AgentTranscriptMessage(role: .user, text: text)
-        let job = ChatJob(session: session, prompt: message, attachments: images, config: config,
+        let job = ChatJob(session: session, prompt: message, attachments: images, config: config, workspace: workspace,
                           revision: draftRevisions[session.id, default: 0])
         // `session.draft` is the raw text, restored verbatim if the turn never starts.
         jobs[session.id] = job
@@ -437,26 +458,35 @@ final class ChatController: ObservableObject {
         guard foreground, !engine.busy, phoneSessionID == nil, !queuedPhone.isEmpty else { return }
         let job = queuedPhone.removeFirst()
         guard !job.cancelled else { drainPhone(); return }
-        // Image bytes are read only now, from the frozen references.
-        let promptImages: [AgentImageAttachment]
-        do { promptImages = try AttachmentHydration.images(job.promptAttachments, load: attachmentFiles.data) }
-        catch {
+        func fail(_ message: String) {
             var status = ExecutionStatus(modelLabel: job.config.label)
             status.finish(successful: false, cancelled: false)
             statuses[job.sessionID] = status
             let restored = restoreDraft(job)
-            finish(job, state: .failed, detail: error.localizedDescription + DraftRestore.note(restored: restored))
-            drainPhone(); return
+            finish(job, state: .failed, detail: message + DraftRestore.note(restored: restored))
+            drainPhone()
         }
+        // The frozen project must still exist; it is never swapped for another.
+        if let workspace = job.workspace, workspaces.snapshot(workspace.id)?.root != workspace.root {
+            fail("本轮选择的项目已不存在，任务未开始。"); return
+        }
+        // Image bytes are read only now, from the frozen references.
+        let promptImages: [AgentImageAttachment]
+        do { promptImages = try AttachmentHydration.images(job.promptAttachments, load: attachmentFiles.data) }
+        catch { fail(error.localizedDescription); return }
         let prior = AttachmentHydration.context(job.prior, attachments: job.priorAttachments,
                                                 supportsImages: job.config.supportsImages, load: attachmentFiles.data)
         phoneSessionID = job.sessionID
         statuses[job.sessionID] = ExecutionStatus(modelLabel: job.config.label)
         edit(job.sessionID) { $0.state = .running; $0.detail = "" }; persist()
-        engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, conversationID: job.sessionID,
-            promptID: job.prompt.id, priorMessages: prior,
+        engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, workspace: job.workspace,
+            conversationID: job.sessionID, promptID: job.prompt.id, priorMessages: prior,
             onEvent: { [weak self, weak job] event, status in
                 guard let self, let job else { return }; handle(event, status: status, job: job)
+            }, onStatus: { [weak self, weak job] status in
+                // Script phone actions update progress only; they add no transcript message.
+                guard let self, let job, jobs[job.sessionID] === job else { return }
+                statuses[job.sessionID] = status
             }, onFinished: { [weak self, weak job] successful, cleanupWarning, status in
                 guard let self, let job else { return }
                 phoneSessionID = nil

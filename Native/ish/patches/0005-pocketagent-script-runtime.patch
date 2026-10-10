@@ -1,0 +1,231 @@
+--- a/app/LinuxInterop.h
++++ b/app/LinuxInterop.h
+@@ -23,6 +23,10 @@
+ // call into ios from kernel:
+ 
+ void actuate_kernel(const char *cmdline);
++// PocketAgent: boots like actuate_kernel but stops waiting after `seconds`.
++// 0 once the kernel has started; nonzero means it did not start in time (the
++// boot may still be running) and the kernel must not be used.
++int actuate_kernel_bounded(const char *cmdline, unsigned seconds);
+ 
+ void ReportPanic(const char *message);
+ void ConsoleLog(const char *data, unsigned len);
+@@ -68,4 +72,21 @@
+ ssize_t linux_write_file(const char *path, const char *buf, size_t size);
+ int linux_remove_directory(const char *path);
+ 
++// PocketAgent script runtime (call from a Linux work item):
++// Mounts a host directory (absolute) at an existing guest directory.
++int pocket_mount_workspace(const char *host_directory, const char *mount_point);
++int pocket_unmount_workspace(const char *mount_point);
++// Starts argv as a new session with uid/gid `uid`, no capabilities and
++// no_new_privs; `done` receives the wait status (or a negative errno) and pid.
++typedef void (^PocketProcessDone)(int status, int pid);
++void pocket_run_process(const char *const *argv, const char *const *envp, int uid, PocketProcessDone done);
++// Counts live (non-zombie) threads owned by `uid`; signals each if sig > 0.
++int pocket_user_tasks(int uid, int sig);
++// Host-side (any thread): IPv4 addresses guest traffic may not reach, in
++// addition to loopback/private/link-local/CGNAT/multicast (at most 32).
++void pocket_set_blocked_hosts(const uint32_t *addresses_network_order, unsigned count);
++// Host-side (any thread): the canonical directory every hostfs operation
++// must stay below; NULL refuses all hostfs access.
++int pocket_hostfs_set_root(const char *root);
++
+ #endif /* LinuxInterop_h */
+--- a/app/LinuxInterop.c
++++ b/app/LinuxInterop.c
+@@ -21,9 +21,17 @@
+ #include <linux/utsname.h>
+ #include <linux/panic_notifier.h>
+ #include <linux/init_syscalls.h>
++#include <linux/cred.h>
++#include <linux/capability.h>
++#include <linux/mm.h>
++#include <linux/sched/signal.h>
++#include <linux/fdtable.h>
++#include <linux/file.h>
++#include <uapi/linux/mount.h>
+ #include <asm/irq.h>
+ #include <user/fs.h>
+ #include <user/irq.h>
++#include <user/user.h>
+ 
+ extern void run_kernel(void);
+ 
+@@ -32,11 +40,24 @@
+     run_kernel();
+ }
+ 
++extern int run_kernel_bounded(unsigned seconds);
++int actuate_kernel_bounded(const char *cmdline, unsigned seconds) {
++    strcpy(boot_command_line, cmdline);
++    return run_kernel_bounded(seconds);
++}
++
++extern void pocket_startup_failed(void);
+ static int panic_report(struct notifier_block *nb, unsigned long action, void *data) {
+     const char *message = data;
+-    async_do_in_ios(^{
+-        ReportPanic(message);
+-    });
++    // PocketAgent: returning lets panic() reach machine_emergency_restart,
++    // a debug trap that kills the whole app (CONFIG_PANIC_TIMEOUT=-1), so an
++    // asynchronous report never ran. Report synchronously (the host copies
++    // the message and poisons the runtime), end a bounded startup wait and
++    // park this CPU thread; the host makes no further kernel calls.
++    ReportPanic(message);
++    pocket_startup_failed();
++    for (;;)
++        host_pause();
+     return 0;
+ }
+ 
+@@ -185,3 +206,87 @@
+ int linux_remove_directory(const char *path) {
+     return init_rmdir(path);
+ }
++
++int pocket_mount_workspace(const char *host_directory, const char *mount_point) {
++    if (host_directory == NULL || mount_point == NULL || host_directory[0] != '/' || mount_point[0] != '/')
++        return -EINVAL;
++    size_t length = strnlen(host_directory, PAGE_SIZE);
++    if (length == PAGE_SIZE)
++        return -ENAMETOOLONG;
++    // path_mount() treats the data argument as a whole writable page.
++    char *page = kzalloc(PAGE_SIZE, GFP_KERNEL);
++    if (page == NULL)
++        return -ENOMEM;
++    memcpy(page, host_directory, length);
++    int err = do_mount("pocketagent", mount_point, "hostfs", MS_SILENT | MS_NOSUID | MS_NODEV, page);
++    kfree(page);
++    return err;
++}
++
++int pocket_unmount_workspace(const char *mount_point) {
++    return init_umount(mount_point, MNT_DETACH);
++}
++
++struct pocket_process {
++    int uid;
++    int pid;
++};
++
++static int pocket_process_init(struct subprocess_info *info, struct cred *new) {
++    struct pocket_process *process = info->data;
++    kuid_t uid = KUIDT_INIT(process->uid);
++    kgid_t gid = KGIDT_INIT(process->uid);
++    new->uid = new->euid = new->suid = new->fsuid = uid;
++    new->gid = new->egid = new->sgid = new->fsgid = gid;
++    new->cap_inheritable = new->cap_permitted = new->cap_effective = CAP_EMPTY_SET;
++    new->cap_bset = new->cap_ambient = CAP_EMPTY_SET;
++    task_set_no_new_privs(current);
++    int err = ksys_setsid();
++    if (err < 0)
++        return err;
++    // Standard streams start on /dev/null, so the first file the script
++    // opens never becomes fd 0-2 (best effort: the wrapper redirects too).
++    struct file *null = filp_open("/dev/null", O_RDWR, 0);
++    if (!IS_ERR(null)) {
++        for (int fd = 0; fd <= 2; fd++)
++            replace_fd(fd, null, 0);
++        fput(null);
++    }
++    process->pid = task_pid_nr(current);
++    return 0;
++}
++
++void pocket_run_process(const char *const *argv, const char *const *envp, int uid, PocketProcessDone done) {
++    struct pocket_process *process = kzalloc(sizeof(*process), GFP_KERNEL);
++    if (process == NULL) {
++        done(-ENOMEM, 0);
++        return;
++    }
++    process->uid = uid;
++    struct subprocess_info *info = call_usermodehelper_setup(argv[0], (char **) argv, (char **) envp,
++                                                             GFP_KERNEL, pocket_process_init, NULL, process);
++    int status = info == NULL ? -ENOMEM : call_usermodehelper_exec(info, UMH_WAIT_PROC);
++    int pid = process->pid;
++    kfree(process);
++    done(status, pid);
++}
++
++int pocket_user_tasks(int uid, int sig) {
++    struct task_struct *task;
++    int count = 0;
++    struct task_struct *thread;
++    rcu_read_lock();
++    // Every thread is examined: a process whose leader already exited can
++    // still have live threads. send_sig() targets the whole thread group.
++    for_each_process_thread(task, thread) {
++        if ((thread->flags & PF_KTHREAD) || thread->exit_state)
++            continue;
++        if (!uid_eq(task_uid(thread), KUIDT_INIT(uid)))
++            continue;
++        count++;
++        if (sig > 0)
++            send_sig(sig, thread, 1);
++    }
++    rcu_read_unlock();
++    return count;
++}
+--- a/deps/linux/arch/ish/kernel/setup.c
++++ b/deps/linux/arch/ish/kernel/setup.c
+@@ -53,6 +53,19 @@
+ 	wait_for_startup();
+ }
+ 
++/* PocketAgent: run_kernel without the unbounded wait. The boot thread uses
++ * only static state (init_task and its stack, boot_command_line), so it can
++ * keep running, or never finish, after the caller stopped waiting; the caller
++ * then treats the kernel as unusable. 0 once started, nonzero otherwise. */
++extern int wait_for_startup_bounded(unsigned seconds);
++int run_kernel_bounded(unsigned seconds)
++{
++	setup_current();
++	if (start_cpu_thread(0, (void *) start_main, &init_task, task_stack_page(&init_task), THREAD_SIZE) != 0)
++		return -1;
++	return wait_for_startup_bounded(seconds);
++}
++
+ late_initcall(notify_startup);
+ 
+ #ifdef CONFIG_ISH_LINK_EXECUTABLE
+--- a/deps/linux/arch/ish/kernel/setup_user.c
++++ b/deps/linux/arch/ish/kernel/setup_user.c
+@@ -1,5 +1,7 @@
++#include <errno.h>
+ #include <pthread.h>
+ #include <stdbool.h>
++#include <time.h>
+ 
+ static pthread_mutex_t status_lock = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_cond_t status_cond = PTHREAD_COND_INITIALIZER;
+@@ -19,3 +21,27 @@
+ 		pthread_cond_wait(&status_cond, &status_lock);
+ 	pthread_mutex_unlock(&status_lock);
+ }
++
++/* PocketAgent: a kernel panic ends a bounded wait at once. */
++static bool startup_failed = false;
++void pocket_startup_failed(void) {
++	pthread_mutex_lock(&status_lock);
++	startup_failed = true;
++	pthread_cond_broadcast(&status_cond);
++	pthread_mutex_unlock(&status_lock);
++}
++
++/* PocketAgent: wait_for_startup with a bound. Returns 0 once the kernel has
++ * reached its late initcalls, -1 if it has not after `seconds` or panicked. */
++int wait_for_startup_bounded(unsigned seconds) {
++	struct timespec deadline;
++	clock_gettime(CLOCK_REALTIME, &deadline);
++	deadline.tv_sec += seconds;
++	pthread_mutex_lock(&status_lock);
++	int err = 0;
++	while (!started && !startup_failed && err != ETIMEDOUT)
++		err = pthread_cond_timedwait(&status_cond, &status_lock, &deadline);
++	bool done = started;
++	pthread_mutex_unlock(&status_lock);
++	return done ? 0 : -1;
++}

@@ -172,12 +172,18 @@ private struct ToolTimeline: View {
         let statuses = steps.map { $0.status(running: running) }
         let failed = statuses.filter { $0 == .failed }.count
         let latest = steps.last
+        // Phone actions (including those a script performed) are counted
+        // separately from file, network and script steps.
+        let phone = steps.filter { ExecutionStatus.phase(for: $0.call.name) == .phoneAction }.count
+            + steps.reduce(0) { $0 + $1.children.count }
+        let other = steps.filter { ExecutionStatus.phase(for: $0.call.name) != .phoneAction }.count
+        let title = other == 0 ? "手机操作 · \(phone) 步" : (phone == 0 ? "工具 · \(other) 步" : "工具 · \(other) 步，手机操作 \(phone) 步")
         VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
                 HStack(spacing: 8) {
                     StepIcon(status: statuses.last ?? .noResult)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("手机操作 · \(steps.count) 步" + (failed > 0 ? "，\(failed) 步失败" : ""))
+                        Text(title + (failed > 0 ? "，\(failed) 步失败" : ""))
                             .font(.footnote.weight(.medium)).foregroundStyle(.primary)
                         if !expanded, let latest {
                             Text(latest.label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -238,6 +244,17 @@ private struct ToolStepRow: View {
                     RawText(title: "参数", text: step.call.arguments.prettyJSON)
                     if let result = step.result { RawText(title: result.isError ? "错误" : "结果", text: result.text) }
                 }.padding(.leading, 24)
+            }
+            // A script's phone actions stay nested under its run_script step.
+            if !step.children.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(step.children.enumerated()), id: \.offset) { _, child in
+                        HStack(spacing: 6) {
+                            StepIcon(status: child.ok ? .succeeded : .failed).scaleEffect(0.8)
+                            Text(child.label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                }.padding(.leading, 24).accessibilityIdentifier("scriptPhoneActions")
             }
         }
     }

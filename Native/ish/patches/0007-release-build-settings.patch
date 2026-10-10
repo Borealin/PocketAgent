@@ -1,0 +1,30 @@
+--- a/app/xcode-meson.sh
++++ b/app/xcode-meson.sh
+@@ -31,7 +31,7 @@
+     endian = 'little'
+ 
+     [built-in options]
+-    c_args = [$arch_args]
++    c_args = [$arch_args${POCKETAGENT_MESON_C_ARGS:+, $POCKETAGENT_MESON_C_ARGS}]
+     
+     [properties]
+     needs_exe_wrapper = true
+@@ -42,7 +42,7 @@
+ 
+ buildtype=debug
+ b_ndebug=false
+-if [[ $CONFIGURATION == Release ]]; then
++if [[ $CONFIGURATION == Release* ]]; then
+     buildtype=debugoptimized
+ fi
+ b_sanitize=none
+--- a/deps/linux.config
++++ b/deps/linux.config
+@@ -1,6 +1,6 @@
+ CONFIG_BLK_DEV_INITRD=n
+ CONFIG_ISH_LINK_OBJECT=y
+ CONFIG_KALLSYMS=y
+-CONFIG_DEBUG_INFO=y
++CONFIG_DEBUG_INFO=n
+ CONFIG_IP_PNP=n
+ CONFIG_STDIO_CONSOLE=n

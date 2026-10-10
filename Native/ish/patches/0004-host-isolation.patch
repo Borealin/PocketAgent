@@ -1,0 +1,726 @@
+--- a/deps/linux/fs/hostfs/hostfs_kern.c
++++ b/deps/linux/fs/hostfs/hostfs_kern.c
+@@ -986,6 +986,10 @@
+ 			  int flags, const char *dev_name,
+ 			  void *data)
+ {
++	/* PocketAgent: only the host bridge (kernel context) may mount host
++	 * directories; a guest process must not reach the app container. */
++	if (current->mm)
++		return ERR_PTR(-EPERM);
+ 	return mount_nodev(type, flags, data, hostfs_fill_sb_common);
+ }
+ 
+--- a/deps/linux/fs/hostfs/hostfs_user.c
++++ b/deps/linux/fs/hostfs/hostfs_user.c
+@@ -11,6 +11,7 @@
+ #include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <pthread.h>
+ #include <string.h>
+ #include <sys/stat.h>
+ #include <sys/time.h>
+@@ -34,6 +35,134 @@
+ #define st_ts(x) st_##x##tim
+ #endif
+ 
++/*
++ * PocketAgent: every host path here is <mount root>/<guest path>, and the
++ * guest or the app may rename directories or replace them with symbolic
++ * links while an operation runs. No operation resolves a whole path:
++ * pocket_at() checks the path against the canonical mount root, opens the
++ * containing directory with O_NOFOLLOW_ANY (no symbolic link anywhere in the
++ * path) and the caller acts on the last component relative to that
++ * descriptor without following it. The root must be canonical (realpath);
++ * with no root set every operation is refused.
++ */
++#ifndef O_NOFOLLOW_ANY
++#error "hostfs requires O_NOFOLLOW_ANY"
++#endif
++
++static pthread_rwlock_t pocket_root_lock = PTHREAD_RWLOCK_INITIALIZER;
++static char pocket_root[PATH_MAX];
++
++int pocket_hostfs_set_root(const char *root)
++{
++	int err = 0;
++
++	pthread_rwlock_wrlock(&pocket_root_lock);
++	if (root == NULL) {
++		pocket_root[0] = '\0';
++	} else if (root[0] != '/' || root[1] == '\0' || strlen(root) >= sizeof(pocket_root)) {
++		pocket_root[0] = '\0';
++		err = -EINVAL;
++	} else {
++		strcpy(pocket_root, root);
++	}
++	pthread_rwlock_unlock(&pocket_root_lock);
++	return err;
++}
++
++/* 1 when `path` is the mount root, 0 when it lies below it through plain
++ * components (no ".", ".."), -EACCES otherwise. Repeated slashes are
++ * ignored, as the kernel builds "/" + root + guest path. */
++static int pocket_in_root(const char *path)
++{
++	const char *p = path, *r;
++	int ok;
++
++	pthread_rwlock_rdlock(&pocket_root_lock);
++	r = pocket_root;
++	ok = r[0] == '/' && p[0] == '/';
++	while (ok) {
++		size_t n;
++
++		while (*r == '/')
++			r++;
++		while (*p == '/')
++			p++;
++		if (*r == '\0')
++			break;
++		n = strcspn(r, "/");
++		if (strncmp(p, r, n) != 0 || (p[n] != '/' && p[n] != '\0'))
++			ok = 0;
++		p += n;
++		r += n;
++	}
++	pthread_rwlock_unlock(&pocket_root_lock);
++	if (!ok)
++		return -EACCES;
++	ok = 1;
++	for (;;) {
++		size_t n;
++
++		while (*p == '/')
++			p++;
++		if (*p == '\0')
++			return ok;
++		n = strcspn(p, "/");
++		if ((n == 1 && p[0] == '.') || (n == 2 && p[0] == '.' && p[1] == '.'))
++			return -EACCES;
++		ok = 0;
++		p += n;
++	}
++}
++
++struct pocket_at {
++	int dir;
++	char name[NAME_MAX + 1];
++};
++
++/* Opens the directory containing the last component of `path`; `name`
++ * receives that component, or "." for the mount root itself. This runs on a
++ * 32 KB Linux task stack, so the copy is limited to the host's PATH_MAX
++ * (1024 on Darwin), beyond which the host could not open the path anyway. */
++static int pocket_at(const char *path, struct pocket_at *at)
++{
++	char buffer[PATH_MAX];
++	size_t length = strlen(path);
++	int root = pocket_in_root(path);
++	char *slash;
++
++	at->dir = -1;
++	if (root < 0)
++		return root;
++	if (length >= sizeof(buffer))
++		return -ENAMETOOLONG;
++	memcpy(buffer, path, length + 1);
++	while (length > 1 && buffer[length - 1] == '/')
++		buffer[--length] = '\0';
++	if (root) {
++		strcpy(at->name, ".");
++	} else {
++		slash = strrchr(buffer, '/');
++		if (strlen(slash + 1) > NAME_MAX)
++			return -ENAMETOOLONG;
++		strcpy(at->name, slash + 1);
++		/* The parent of a component below the root is the root or deeper. */
++		while (slash > buffer && slash[-1] == '/')
++			slash--;
++		*slash = '\0';
++	}
++	at->dir = open(buffer, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC);
++	if (at->dir < 0)
++		return -errno;
++	return 0;
++}
++
++static void pocket_at_close(struct pocket_at *at)
++{
++	if (at->dir >= 0)
++		close(at->dir);
++	at->dir = -1;
++}
++
+ static void stat_to_hostfs(const struct stat *buf, struct hostfs_stat *p)
+ {
+ 	p->ino = buf->st_ino;
+@@ -57,12 +186,20 @@
+ int stat_file(const char *path, struct hostfs_stat *p, int fd)
+ {
+ 	struct stat buf;
++	struct pocket_at at;
++	int err;
+ 
+ 	if (fd >= 0) {
+ 		if (fstat(fd, &buf) < 0)
+ 			return -errno;
+-	} else if (lstat(path, &buf) < 0) {
+-		return -errno;
++	} else {
++		err = pocket_at(path, &at);
++		if (err)
++			return err;
++		err = fstatat(at.dir, at.name, &buf, AT_SYMLINK_NOFOLLOW) < 0 ? -errno : 0;
++		pocket_at_close(&at);
++		if (err)
++			return err;
+ 	}
+ 	stat_to_hostfs(&buf, p);
+ 	return 0;
+@@ -70,7 +207,8 @@
+ 
+ int access_file(char *path, int r, int w, int x)
+ {
+-	int mode = 0;
++	struct pocket_at at;
++	int mode = 0, err;
+ 
+ 	if (r)
+ 		mode = R_OK;
+@@ -78,14 +216,18 @@
+ 		mode |= W_OK;
+ 	if (x)
+ 		mode |= X_OK;
+-	if (access(path, mode) != 0)
+-		return -errno;
+-	else return 0;
++	err = pocket_at(path, &at);
++	if (err)
++		return err;
++	err = faccessat(at.dir, at.name, mode, AT_SYMLINK_NOFOLLOW) != 0 ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int open_file(char *path, int r, int w, int append)
+ {
+-	int mode = 0, fd;
++	struct pocket_at at;
++	int mode = 0, fd, err;
+ 
+ 	if (r && !w)
+ 		mode = O_RDONLY;
+@@ -97,18 +239,33 @@
+ 
+ 	if (append)
+ 		mode |= O_APPEND;
+-	fd = open(path, mode);
+-	if (fd < 0)
+-		return -errno;
+-	else return fd;
++	err = pocket_at(path, &at);
++	if (err)
++		return err;
++	fd = openat(at.dir, at.name, mode | O_NOFOLLOW | O_CLOEXEC);
++	err = fd < 0 ? -errno : fd;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ void *open_dir(char *path, int *err_out)
+ {
+-	DIR *dir;
++	struct pocket_at at;
++	DIR *dir = NULL;
++	int fd, err;
+ 
+-	dir = opendir(path);
++	err = pocket_at(path, &at);
++	if (err) {
++		*err_out = -err;
++		return NULL;
++	}
++	fd = openat(at.dir, at.name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++	if (fd >= 0)
++		dir = fdopendir(fd);
+ 	*err_out = errno;
++	if (dir == NULL && fd >= 0)
++		close(fd);
++	pocket_at_close(&at);
+ 
+ 	return dir;
+ }
+@@ -202,25 +359,29 @@
+ 
+ int file_create(char *name, int mode)
+ {
+-	int fd;
++	struct pocket_at at;
++	int fd, err;
+ 
+-	fd = open(name, O_CREAT | O_RDWR, mode);
+-	if (fd < 0)
+-		return -errno;
+-	return fd;
++	err = pocket_at(name, &at);
++	if (err)
++		return err;
++	fd = openat(at.dir, at.name, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, mode);
++	err = fd < 0 ? -errno : fd;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+-int set_attr(const char *file, struct hostfs_iattr *attrs, int fd)
++static int set_attr_at(struct pocket_at *at, struct hostfs_iattr *attrs, int fd)
+ {
+-	struct hostfs_stat st;
+-	struct timeval times[2];
+-	int err, ma;
++	struct stat st;
++	struct timespec times[2];
++	int ma;
+ 
+ 	if (attrs->ia_valid & HOSTFS_ATTR_MODE) {
+ 		if (fd >= 0) {
+ 			if (fchmod(fd, attrs->ia_mode) != 0)
+ 				return -errno;
+-		} else if (chmod(file, attrs->ia_mode) != 0) {
++		} else if (fchmodat(at->dir, at->name, attrs->ia_mode, AT_SYMLINK_NOFOLLOW) != 0) {
+ 			return -errno;
+ 		}
+ 	}
+@@ -228,7 +389,7 @@
+ 		if (fd >= 0) {
+ 			if (fchown(fd, attrs->ia_uid, -1))
+ 				return -errno;
+-		} else if (chown(file, attrs->ia_uid, -1)) {
++		} else if (fchownat(at->dir, at->name, attrs->ia_uid, -1, AT_SYMLINK_NOFOLLOW)) {
+ 			return -errno;
+ 		}
+ 	}
+@@ -236,7 +397,7 @@
+ 		if (fd >= 0) {
+ 			if (fchown(fd, -1, attrs->ia_gid))
+ 				return -errno;
+-		} else if (chown(file, -1, attrs->ia_gid)) {
++		} else if (fchownat(at->dir, at->name, -1, attrs->ia_gid, AT_SYMLINK_NOFOLLOW)) {
+ 			return -errno;
+ 		}
+ 	}
+@@ -244,164 +405,216 @@
+ 		if (fd >= 0) {
+ 			if (ftruncate(fd, attrs->ia_size))
+ 				return -errno;
+-		} else if (truncate(file, attrs->ia_size)) {
+-			return -errno;
++		} else {
++			int tfd = openat(at->dir, at->name, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
++			int err;
++
++			if (tfd < 0)
++				return -errno;
++			err = ftruncate(tfd, attrs->ia_size) ? -errno : 0;
++			close(tfd);
++			if (err)
++				return err;
+ 		}
+ 	}
+ 
+ 	/*
+ 	 * Update accessed and/or modified time, in two parts: first set
+-	 * times according to the changes to perform, and then call futimes()
+-	 * or utimes() to apply them.
++	 * times according to the changes to perform, and then call futimens()
++	 * or utimensat() to apply them.
+ 	 */
+ 	ma = (HOSTFS_ATTR_ATIME_SET | HOSTFS_ATTR_MTIME_SET);
+ 	if (attrs->ia_valid & ma) {
+-		err = stat_file(file, &st, fd);
+-		if (err != 0)
+-			return err;
++		if (fd >= 0 ? fstat(fd, &st) : fstatat(at->dir, at->name, &st, AT_SYMLINK_NOFOLLOW))
++			return -errno;
+ 
+-		times[0].tv_sec = st.atime.tv_sec;
+-		times[0].tv_usec = st.atime.tv_nsec / 1000;
+-		times[1].tv_sec = st.mtime.tv_sec;
+-		times[1].tv_usec = st.mtime.tv_nsec / 1000;
++		times[0] = st.st_ts(a);
++		times[1] = st.st_ts(m);
+ 
+ 		if (attrs->ia_valid & HOSTFS_ATTR_ATIME_SET) {
+ 			times[0].tv_sec = attrs->ia_atime.tv_sec;
+-			times[0].tv_usec = attrs->ia_atime.tv_nsec / 1000;
++			times[0].tv_nsec = attrs->ia_atime.tv_nsec;
+ 		}
+ 		if (attrs->ia_valid & HOSTFS_ATTR_MTIME_SET) {
+ 			times[1].tv_sec = attrs->ia_mtime.tv_sec;
+-			times[1].tv_usec = attrs->ia_mtime.tv_nsec / 1000;
++			times[1].tv_nsec = attrs->ia_mtime.tv_nsec;
+ 		}
+ 
+ 		if (fd >= 0) {
+-			if (futimes(fd, times) != 0)
++			if (futimens(fd, times) != 0)
+ 				return -errno;
+-		} else if (utimes(file, times) != 0) {
++		} else if (utimensat(at->dir, at->name, times, AT_SYMLINK_NOFOLLOW) != 0) {
+ 			return -errno;
+ 		}
+ 	}
+ 
+ 	/* Note: ctime is not handled */
+ 	if (attrs->ia_valid & (HOSTFS_ATTR_ATIME | HOSTFS_ATTR_MTIME)) {
+-		err = stat_file(file, &st, fd);
+-		attrs->ia_atime = st.atime;
+-		attrs->ia_mtime = st.mtime;
+-		if (err != 0)
+-			return err;
++		if (fd >= 0 ? fstat(fd, &st) : fstatat(at->dir, at->name, &st, AT_SYMLINK_NOFOLLOW))
++			return -errno;
++		attrs->ia_atime.tv_sec = st.st_ts(a).tv_sec;
++		attrs->ia_atime.tv_nsec = st.st_ts(a).tv_nsec;
++		attrs->ia_mtime.tv_sec = st.st_ts(m).tv_sec;
++		attrs->ia_mtime.tv_nsec = st.st_ts(m).tv_nsec;
+ 	}
+ 	return 0;
+ }
+ 
++int set_attr(const char *file, struct hostfs_iattr *attrs, int fd)
++{
++	struct pocket_at at = { .dir = -1 };
++	int err;
++
++	if (fd < 0) {
++		err = pocket_at(file, &at);
++		if (err)
++			return err;
++	}
++	err = set_attr_at(&at, attrs, fd);
++	pocket_at_close(&at);
++	return err;
++}
++
+ int make_symlink(const char *from, const char *to)
+ {
++	struct pocket_at at;
+ 	int err;
+ 
+-	err = symlink(to, from);
++	/* The target text is stored, never resolved on the host. */
++	err = pocket_at(from, &at);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = symlinkat(to, at.dir, at.name) ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int unlink_file(const char *file)
+ {
++	struct pocket_at at;
+ 	int err;
+ 
+-	err = unlink(file);
++	err = pocket_at(file, &at);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = unlinkat(at.dir, at.name, 0) ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int do_mkdir(const char *file, int mode)
+ {
++	struct pocket_at at;
+ 	int err;
+ 
+-	err = mkdir(file, mode);
++	err = pocket_at(file, &at);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = mkdirat(at.dir, at.name, mode) ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int hostfs_do_rmdir(const char *file)
+ {
++	struct pocket_at at;
+ 	int err;
+ 
+-	err = rmdir(file);
++	err = pocket_at(file, &at);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = unlinkat(at.dir, at.name, AT_REMOVEDIR) ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int do_mknod(const char *file, int mode, unsigned int major, unsigned int minor)
+ {
++	struct pocket_at at;
+ 	int err;
+ 
+-	err = mknod(file, mode, makedev(major, minor));
++	err = pocket_at(file, &at);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = mknodat(at.dir, at.name, mode, makedev(major, minor)) ? -errno : 0;
++	pocket_at_close(&at);
++	return err;
+ }
+ 
+ int link_file(const char *to, const char *from)
+ {
++	struct pocket_at target, link;
+ 	int err;
+ 
+-	err = link(to, from);
++	err = pocket_at(to, &target);
+ 	if (err)
+-		return -errno;
+-	return 0;
++		return err;
++	err = pocket_at(from, &link);
++	if (err) {
++		pocket_at_close(&target);
++		return err;
++	}
++	err = linkat(target.dir, target.name, link.dir, link.name, 0) ? -errno : 0;
++	pocket_at_close(&target);
++	pocket_at_close(&link);
++	return err;
+ }
+ 
+ int hostfs_do_readlink(char *file, char *buf, int size)
+ {
++	struct pocket_at at;
+ 	int n;
+ 
+-	n = readlink(file, buf, size);
++	n = pocket_at(file, &at);
++	if (n)
++		return n;
++	n = readlinkat(at.dir, at.name, buf, size);
+ 	if (n < 0)
+-		return -errno;
++		n = -errno;
++	pocket_at_close(&at);
++	if (n < 0)
++		return n;
+ 	if (n < size)
+ 		buf[n] = '\0';
+ 	return n;
+ }
+ 
+-int rename_file(char *from, char *to)
++static int rename_at(const char *from, const char *to, unsigned int darwin_flags)
+ {
++	struct pocket_at source, target;
+ 	int err;
+ 
+-	err = rename(from, to);
+-	if (err < 0)
+-		return -errno;
+-	return 0;
++	err = pocket_at(from, &source);
++	if (err)
++		return err;
++	err = pocket_at(to, &target);
++	if (err) {
++		pocket_at_close(&source);
++		return err;
++	}
++	if (darwin_flags)
++		err = renameatx_np(source.dir, source.name, target.dir, target.name, darwin_flags);
++	else
++		err = renameat(source.dir, source.name, target.dir, target.name);
++	err = err ? -errno : 0;
++	pocket_at_close(&source);
++	pocket_at_close(&target);
++	return err;
+ }
+ 
+-int rename2_file(char *from, char *to, unsigned int flags)
++int rename_file(char *from, char *to)
+ {
+-	int err;
++	return rename_at(from, to, 0);
++}
+ 
+-#ifdef __linux__
+-#  ifndef SYS_renameat2
+-#    ifdef __x86_64__
+-#      define SYS_renameat2 316
+-#    endif
+-#    ifdef __i386__
+-#      define SYS_renameat2 353
+-#    endif
+-#  endif
+-#endif
+-
+-#ifdef SYS_renameat2
+-	err = syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, flags);
+-	if (err < 0) {
+-		if (errno != ENOSYS)
+-			return -errno;
+-		else
+-			return -EINVAL;
+-	}
+-	return 0;
+-#else
++int rename2_file(char *from, char *to, unsigned int flags)
++{
++	/* Linux RENAME_NOREPLACE (1) and RENAME_EXCHANGE (2). */
++	if (flags == 1)
++		return rename_at(from, to, RENAME_EXCL);
++	if (flags == 2)
++		return rename_at(from, to, RENAME_SWAP);
+ 	return -EINVAL;
+-#endif
+ }
+ 
+ int do_statfs(char *root, long *bsize_out, long long *blocks_out,
+@@ -410,11 +623,23 @@
+ 	      void *fsid_out, int fsid_size, long *namelen_out)
+ {
+ 	struct statfs buf;
+-	int err;
++	struct pocket_at at;
++	int err, fd;
+ 
+-	err = statfs(root, &buf);
++	err = pocket_at(root, &at);
++	if (err)
++		return err;
++	fd = openat(at.dir, at.name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++	err = fd < 0 ? -errno : 0;
++	pocket_at_close(&at);
++	if (err)
++		return err;
++	err = fstatfs(fd, &buf);
+ 	if (err < 0)
+-		return -errno;
++		err = -errno;
++	close(fd);
++	if (err < 0)
++		return err;
+ 
+ 	*bsize_out = buf.f_bsize;
+ 	*blocks_out = buf.f_blocks;
+--- a/linux/fakefs.c
++++ b/linux/fakefs.c
+@@ -702,6 +702,9 @@
+ }
+ 
+ static int fakefs_get_tree(struct fs_context *fc) {
++    /* PocketAgent: fakefs takes a host path; only the kernel mounts it. */
++    if (current->mm)
++        return -EPERM;
+     fc->s_fs_info = kzalloc(sizeof(struct fakefs_super), GFP_KERNEL);
+     if (fc->s_fs_info == NULL)
+         return -ENOMEM;
+--- a/deps/linux/arch/ish/kernel/syscalls_user.c
++++ b/deps/linux/arch/ish/kernel/syscalls_user.c
+@@ -9,6 +9,7 @@
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <sys/poll.h>
+@@ -291,8 +292,53 @@
+ 	}
+ }
+ 
++/* PocketAgent egress policy. Every guest TCP connection, UDP datagram and
++ * ping leaves the GOLP device through host_connect/host_sendmsg in this file.
++ * Loopback (where the WebDriverAgent listener lives), private, link-local,
++ * CGNAT, multicast and broadcast destinations are refused regardless of guest
++ * privileges, and so is every address in the host-supplied list: the phone's
++ * own interface addresses (WebDriverAgent listens on all interfaces, so a
++ * public address assigned to the phone also reaches it) and the tunnel
++ * address. Ports 8100 (WebDriverAgent) and 62078 (lockdown) are refused on
++ * every destination, so a phone address that is not in the list yet (it is
++ * refreshed about once a second) still cannot reach those listeners. Both the
++ * Linux and Darwin IPv4 sockaddr layouts keep the port at offset 2 and the
++ * address at offset 4, network byte order. */
++#define POCKET_BLOCKED_MAX 32
++static _Atomic uint32_t pocket_blocked[POCKET_BLOCKED_MAX];
++void pocket_set_blocked_hosts(const uint32_t *addresses_network_order, unsigned count)
++{
++	for (unsigned i = 0; i < POCKET_BLOCKED_MAX; i++)
++		pocket_blocked[i] = i < count ? addresses_network_order[i] : 0;
++}
++int pocket_destination_allowed(const void *name, unsigned name_len)
++{
++	if (name == NULL)
++		return 1;
++	if (name_len < 8)
++		return 0;
++	uint16_t port;
++	memcpy(&port, (const char *) name + 2, sizeof(port));
++	if (ntohs(port) == 8100 || ntohs(port) == 62078)
++		return 0;
++	uint32_t raw;
++	memcpy(&raw, (const char *) name + 4, sizeof(raw));
++	uint32_t a = ntohl(raw);
++	for (unsigned i = 0; i < POCKET_BLOCKED_MAX; i++)
++		if (raw == pocket_blocked[i])
++			return 0;
++	return !((a >> 24) == 0 || (a >> 24) == 10 || (a >> 24) == 127 ||
++		 (a & 0xfff00000) == 0xac100000 || (a & 0xffff0000) == 0xc0a80000 ||
++		 (a & 0xffc00000) == 0x64400000 || (a & 0xffff0000) == 0xa9fe0000 ||
++		 a >= 0xe0000000);
++}
++
+ ssize_t host_sendmsg(int fd, struct user_iovec *iov, size_t iov_len, void *name, unsigned name_len, int flags)
+ {
++	if (!pocket_destination_allowed(name, name_len)) {
++		errno = EACCES;
++		return errno_map();
++	}
+ 	/* need to translate flags */
+ 	/* need to translate name */
+ 	assert(flags == 0);
+@@ -343,6 +389,13 @@
+ 	int err;
+ 
+ 	sockaddr_from_kernel(name, name_len);
++	/* PocketAgent: GOLP opens a host UDP socket for each guest UDP port.
++	 * The host never binds the guest's port number: the system picks an
++	 * ephemeral one (replies still reach the guest port, golp_udp4_rx
++	 * rewrites it), so a guest service is not exposed on a known port.
++	 * GOLP has no host listen/accept, so guest TCP servers are internal. */
++	if (name_len >= 4)
++		memset((char *) name + 2, 0, 2);
+ 	err = bind(fd, name, name_len);
+ 	if (err < 0)
+ 		return errno_map();
+@@ -353,6 +406,10 @@
+ {
+ 	int err;
+ 
++	if (!pocket_destination_allowed(name, name_len)) {
++		errno = EACCES;
++		return errno_map();
++	}
+ 	sockaddr_from_kernel(name, name_len);
+ 	err = connect(fd, name, name_len);
+ 	if (err < 0)

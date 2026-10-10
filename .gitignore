@@ -25,3 +25,4 @@ providers.json
 __pycache__/
 App/Resources/RustLicenses/
 App/Resources/SwiftLicenses/
+App/Resources/iSHLicenses/

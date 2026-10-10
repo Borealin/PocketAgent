@@ -8,31 +8,42 @@
 
 /* Begin PBXBuildFile section */
 		026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 49BF9B5D946340940F5C4C82 /* RustLicenses */; };
+		0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */; };
 		095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */; };
+		0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */ = {isa = PBXBuildFile; fileRef = 21C75A8C07B02E84366B00D3 /* PocketISH.m */; settings = {COMPILER_FLAGS = "-I$(SRCROOT)/.build/ish/sources/ish -I$(SRCROOT)/.build/ish/sources/ish/app"; }; };
 		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
 		166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */; };
 		19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A45359ABA3EE41F69474549 /* ChatComposer.swift */; };
 		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
+		341233CF7A70637134AD1A8B /* iSHLicenses in Resources */ = {isa = PBXBuildFile; fileRef = E53F96B6F3F454BD229C1E52 /* iSHLicenses */; };
 		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
 		3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19938EABD2390F0D02B28600 /* ChatPolicies.swift */; };
 		4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */; };
+		55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B9777F694312D830BE8C77 /* HTTPTool.swift */; };
+		57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */; };
+		58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */; };
 		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
 		6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */; };
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
+		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
 		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
 		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
 		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
 		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
+		9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38833AB31402CD8F11B2F334 /* Workspace.swift */; };
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
 		A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D61AC91A09838169F172CE15 /* BackgroundTasks.framework */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
+		D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9546B4615DB532FC42BF7335 /* Rules.swift */; };
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
 		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
+		F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6EC72EE2D00391C3C55564C /* NativeTools.swift */; };
+		F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */ = {isa = PBXBuildFile; fileRef = 383A79C611AE1573F3276AA9 /* ish-root.tar.gz */; };
 		F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */; };
 		FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F24A784103BF8F2532963F /* ChatHistory.swift */; };
 /* End PBXBuildFile section */
@@ -45,11 +56,16 @@
 		1F266439E5ACA1E35405D10A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		1F9EC154A7B819D774BFB985 /* ProviderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderViews.swift; sourceTree = "<group>"; };
 		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
+		21B9777F694312D830BE8C77 /* HTTPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTool.swift; sourceTree = "<group>"; };
+		21C75A8C07B02E84366B00D3 /* PocketISH.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PocketISH.m; sourceTree = "<group>"; };
+		383A79C611AE1573F3276AA9 /* ish-root.tar.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; path = "ish-root.tar.gz"; sourceTree = "<group>"; };
+		38833AB31402CD8F11B2F334 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
 		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
 		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
 		4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AgentKit-LICENSE.txt"; sourceTree = "<group>"; };
 		5243D878A3E7F546CA6EF591 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
+		55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptRuntime.swift; sourceTree = "<group>"; };
 		59F24A784103BF8F2532963F /* ChatHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistory.swift; sourceTree = "<group>"; };
 		64A275A3B478025AE3327E64 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -57,15 +73,21 @@
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
+		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
+		B6EC72EE2D00391C3C55564C /* NativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTools.swift; sourceTree = "<group>"; };
 		BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
+		BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspaces.swift; sourceTree = "<group>"; };
 		C08CD702C33D2019607205D8 /* DeviceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSettings.swift; sourceTree = "<group>"; };
 		CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		CC78893A183661157A2CB031 /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
+		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
+		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
+		F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptBridge.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,13 +105,39 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1032DC4BACB2FEE17FDBA678 /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				721979E16BD39EAB9D8AA54E /* ish */,
+			);
+			path = Native;
+			sourceTree = "<group>";
+		};
+		41DC56DD059BF3D3EB19C2E6 /* ish */ = {
+			isa = PBXGroup;
+			children = (
+				383A79C611AE1573F3276AA9 /* ish-root.tar.gz */,
+			);
+			path = ish;
+			sourceTree = "<group>";
+		};
 		5D695D0E583F9F4E6BC0201C = {
 			isa = PBXGroup;
 			children = (
+				EA6841C2B198407CEF8C908C /* .build */,
 				E0DFDF0C26A6F26CDB84C5A4 /* App */,
+				1032DC4BACB2FEE17FDBA678 /* Native */,
 				9983CE4C99C31B81EE9B4DCB /* Frameworks */,
 				BAC2CBC1659C78F25D37FF6F /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		721979E16BD39EAB9D8AA54E /* ish */ = {
+			isa = PBXGroup;
+			children = (
+				21C75A8C07B02E84366B00D3 /* PocketISH.m */,
+			);
+			path = ish;
 			sourceTree = "<group>";
 		};
 		8095CDEFD963DB49E62171F1 /* Core */ = {
@@ -99,10 +147,16 @@
 				59F24A784103BF8F2532963F /* ChatHistory.swift */,
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
+				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				CC78893A183661157A2CB031 /* Markdown.swift */,
+				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
 				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
+				9546B4615DB532FC42BF7335 /* Rules.swift */,
+				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
+				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
+				38833AB31402CD8F11B2F334 /* Workspace.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -139,11 +193,21 @@
 				977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */,
 				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
 				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
+				55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */,
 				6CE88C9FB1A659621C93A20A /* SettingsView.swift */,
+				BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */,
 				8095CDEFD963DB49E62171F1 /* Core */,
 				F5CBB7BF3CC0BC4C5B65F5B7 /* Resources */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		EA6841C2B198407CEF8C908C /* .build */ = {
+			isa = PBXGroup;
+			children = (
+				41DC56DD059BF3D3EB19C2E6 /* ish */,
+			);
+			path = .build;
 			sourceTree = "<group>";
 		};
 		F5CBB7BF3CC0BC4C5B65F5B7 /* Resources */ = {
@@ -151,6 +215,7 @@
 			children = (
 				4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */,
 				0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */,
+				E53F96B6F3F454BD229C1E52 /* iSHLicenses */,
 				49BF9B5D946340940F5C4C82 /* RustLicenses */,
 				1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */,
 			);
@@ -222,6 +287,8 @@
 				832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */,
 				026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */,
 				095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */,
+				341233CF7A70637134AD1A8B /* iSHLicenses in Resources */,
+				F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -244,14 +311,23 @@
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
+				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
+				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
+				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
 				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
+				D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */,
+				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
+				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
+				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
+				9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */,
+				73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -264,10 +340,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = .build/Info.plist;
+				ISH_PRODUCTS = "$(SRCROOT)/.build/ish/Release-iphoneos";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv";
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -417,10 +495,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = .build/Info.plist;
+				ISH_PRODUCTS = "$(SRCROOT)/.build/ish/Release-iphoneos";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv";
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -26,11 +26,17 @@ targets:
     platform: iOS
     sources:
       - path: App
-        excludes: [Resources/RustLicenses, Resources/SwiftLicenses]
+        excludes: [Resources/RustLicenses, Resources/SwiftLicenses, Resources/iSHLicenses]
       - path: App/Resources/RustLicenses
         type: folder
       - path: App/Resources/SwiftLicenses
         type: folder
+      - path: App/Resources/iSHLicenses
+        type: folder
+      - path: .build/ish/ish-root.tar.gz
+        buildPhase: resources
+      - path: Native/ish/PocketISH.m
+        compilerFlags: '-I$(SRCROOT)/.build/ish/sources/ish -I$(SRCROOT)/.build/ish/sources/ish/app'
     dependencies:
       - package: AgentKit
         product: AgentKit
@@ -42,6 +48,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.borealin.PocketAgent
         TARGETED_DEVICE_FAMILY: '1,2'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The iSH kernel libraries need their sections aligned and every
+        # initcall object loaded (Scripts/ish_runtime.py builds them).
+        ISH_PRODUCTS: '$(SRCROOT)/.build/ish/Release-iphoneos'
+        OTHER_LDFLAGS: >-
+          $(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20
+          -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a
+          $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a
+          $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv
     info:
       path: .build/Info.plist
       properties:
