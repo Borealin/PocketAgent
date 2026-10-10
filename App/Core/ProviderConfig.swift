@@ -150,7 +150,9 @@ nonisolated struct RunConfiguration: Sendable, CustomStringConvertible, CustomDe
     let supportsImages: Bool
     let secret: String
 
-    var label: String { "\(providerName) · \(modelID)" }
+    /// Model first, then the provider. Recorded as attribution for new
+    /// replies; attributions already in history are shown verbatim.
+    var label: String { "\(modelID) · \(providerName)" }
     var description: String { label }
     var debugDescription: String { label }
 

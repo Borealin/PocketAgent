@@ -99,7 +99,7 @@ struct ProviderConfigTests {
                                       models: [ProviderModelEntry(id: "text-only", supportsImages: false)])
         let selection = ModelSelection(providerID: provider.id, modelID: "text-only")
         let config = try RunConfiguration.resolve(selection, providers: [provider], secret: { _ in "sk-secret" }, boundOrigins: { _ in provider.credentialOrigins })
-        #expect(config.label == "Work · text-only" && config.format == .messages && !config.supportsImages)
+        #expect(config.label == "text-only · Work" && config.format == .messages && !config.supportsImages)
         #expect(config.secret == "sk-secret")
         #expect(!String(describing: config).contains("sk-secret") && !String(reflecting: config).contains("sk-secret"))
         #expect(config.agentModel.isVision == false)

@@ -91,7 +91,7 @@ final class ProviderStore: ObservableObject {
         guard let provider = provider(selection.providerID) else {
             return ("\(selection.modelID)（服务商已删除）", ProviderError.providerDeleted.localizedDescription)
         }
-        let label = "\(provider.name) · \(selection.modelID)"
+        let label = "\(selection.modelID) · \(provider.name)"
         if !provider.isEnabled { return (label, ProviderError.providerDisabled(provider.name).localizedDescription) }
         if provider.model(selection.modelID) == nil {
             return (label, ProviderError.modelMissing(provider.name, selection.modelID).localizedDescription)

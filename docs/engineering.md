@@ -12,6 +12,8 @@ remain outside this iteration.
 The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
 for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
+Model controls show the concrete model name first; provider and API format are
+secondary information in the picker. Existing recorded attributions remain intact.
 Session actions and settings belong in the session list. Input uses an adaptive
 one-to-six-line composer, removable image thumbnails and Photos, camera and
 user-initiated paste. Replies use native block Markdown and attachment views. Real

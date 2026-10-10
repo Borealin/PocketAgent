@@ -171,7 +171,13 @@ struct ChatComposer: View {
         return Button(action: chooseModel) {
             HStack(spacing: 4) {
                 Image(systemName: state.problem == nil ? "cpu" : "exclamationmark.triangle")
-                Text(state.label).lineLimit(1)
+                if let selection = session.selection, let provider = providers.provider(selection.providerID) {
+                    // Model first; the provider name gives way on narrow screens.
+                    Text(selection.modelID).lineLimit(1).layoutPriority(1)
+                    Text(provider.name).foregroundStyle(.tertiary).lineLimit(1)
+                } else {
+                    Text(state.label).lineLimit(1)
+                }
                 Image(systemName: "chevron.up.chevron.down").font(.caption2)
             }
             .font(.caption).padding(.horizontal, 10).padding(.vertical, 5)

@@ -184,15 +184,27 @@ struct ModelPickerSheet: View {
                 if let problem = providers.describe(current).problem, current != nil {
                     Section { Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 }
-                ForEach(providers.providers.filter(\.isEnabled)) { provider in
-                    Section(provider.name) {
-                        if provider.models.isEmpty { Text("尚未添加模型").foregroundStyle(.secondary) }
+                // Model name is the row; provider and API format are its caption.
+                Section {
+                    ForEach(providers.providers.filter(\.isEnabled)) { provider in
+                        if provider.models.isEmpty {
+                            Text("\(provider.name) 尚未添加模型").font(.footnote).foregroundStyle(.secondary)
+                        }
                         ForEach(provider.models) { model in
                             let selection = ModelSelection(providerID: provider.id, modelID: model.id)
                             Button { onSelect(selection, makeDefault) } label: {
                                 HStack {
-                                    Text(model.id).foregroundStyle(.primary)
-                                    if model.supportsImages { Image(systemName: "photo").foregroundStyle(.secondary) }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(model.id).foregroundStyle(.primary)
+                                            if model.supportsImages {
+                                                Image(systemName: "photo").font(.caption).foregroundStyle(.secondary)
+                                                    .accessibilityLabel("支持图片")
+                                            }
+                                        }
+                                        Text("\(provider.name) · \(provider.format.title)")
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
                                     Spacer()
                                     if current == selection { Image(systemName: "checkmark") }
                                 }
