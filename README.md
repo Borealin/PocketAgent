@@ -8,15 +8,16 @@ provider you configure.
 ## Installation
 
 [![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
-[![AltStore source](https://img.shields.io/badge/AltStore-Source-38A169?style=for-the-badge)](#altstore-classicsidestore-source)
+[![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
-**Private preview:** GitHub sign-in and repository access are currently required
-to download. The source cannot yet be added as an anonymous subscription.
+Recommended: [add the source](#altstore-classicsidestore-source) and install
+**PocketAgent** and **PocketAgent Automation** from it. Both are required for
+phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
 2. Open [the latest release](https://github.com/Borealin/PocketAgent/releases/latest)
-   in Safari while signed into GitHub. Download both `PocketAgent-<version>.ipa`
+   in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both** IPAs in your sideloading app. The second one is
    **PocketAgent Automation**, required for phone tools. Keep both installed
@@ -33,13 +34,10 @@ conversations can be imported through the same iCloud Drive sync folder.
 
 ### AltStore Classic/SideStore source
 
-The feed contains **PocketAgent** and **PocketAgent Automation** and is updated
-automatically after a release. Once the feed, icon and IPA downloads are publicly
-accessible, open the button below on your iPhone to add the source in AltStore
-Classic. For SideStore, copy the source URL into its Sources screen.
-
-**Public hosting is not enabled yet.** The button and URL below are prepared for
-that step; while the repository is private, use the manual download steps above.
+The public feed contains **PocketAgent** and **PocketAgent Automation** and is
+updated automatically after a release. Open the button below on your iPhone to
+add the source in AltStore Classic. For SideStore, copy the source URL into its
+Sources screen. No GitHub sign-in is required.
 
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
@@ -243,12 +241,10 @@ The release workflow builds both IPAs and uploads them with checksums. A matchin
 `main`, retaining older releases. Version/build settings live in
 `Distribution/config.json`.
 
-See [Installation](#installation) for IPA downloads and the source URL. A private
-GitHub repository requires authentication for the source, icon and release
-assets; an anonymous subscription needs public hosting for all three. Public
-distribution can use this repository or a separate release repository containing
-the feed, icon, both IPAs, checksums and complete corresponding source. The
-published feed must point to that repository's publicly accessible assets.
+See [Installation](#installation) for IPA downloads and the source URL. The
+repository, feed, icon and release assets are public. Each release includes both
+IPAs, checksums and complete corresponding source; users can subscribe and
+download without a GitHub account.
 
 ## Development
 

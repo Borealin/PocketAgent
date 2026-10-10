@@ -4,8 +4,8 @@
 
 Native provider management on a dedicated page, provider/model selection per
 conversation, iCloud Drive synchronization of portable data, reproducible IPA
-builds and AltStore Classic/SideStore source publication. Initial repository is
-private Borealin/PocketAgent. Existing installed conversations and local API
+builds and AltStore Classic/SideStore source publication. Borealin/PocketAgent is
+public following the user's authorization on 2026-10-11. Existing installed conversations and local API
 settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
 remain outside this iteration.
 
@@ -120,15 +120,13 @@ record. A separate WDA companion IPA is necessary for phone automation. The
 AltStore Classic feed lists real versions, sizes, hashes and permissions. PAL
 notarization and LiveContainer guest execution are separate and untested paths.
 
-The README has a quick installation section, manual IPA download and the
-official HTTPS AltStore source deep link. Anonymous source installation remains
-unavailable while the feed, icon and IPA assets are in the private repository.
-Public hosting is an outstanding user decision: making the development
-repository public or using a separate public release repository. A release
-mirror must publish both IPAs, their checksums and complete corresponding source,
-and rewrite feed download/icon URLs to the mirror. Keeping the development
-repository private does not make the distributed release's corresponding source
-private.
+The user chose to make Borealin/PocketAgent directly public on 2026-10-11.
+Use its existing main-branch feed and GitHub release assets; no separate release
+mirror is needed. The README provides the official HTTPS AltStore source deep
+link, a source URL for SideStore, manual IPA downloads and initial device setup.
+The feed, icon, both IPAs, checksums and complete corresponding source are
+publicly accessible without GitHub authentication. Public hosting does not
+remove sideload signing, the separate automation companion or device setup.
 
 ## Architecture and compatibility
 
@@ -176,8 +174,9 @@ Swift and the pinned AgentKit remain the only agent loop.
 
 The user requested an installable release before the remaining physical unplug
 check. v0.3.0 (build 3) publishes generic, ad-hoc-signed app and WDA IPAs,
-the corresponding source and the Classic source feed in the private repository.
-Download with GitHub authentication and re-sign both IPAs for installation.
+the corresponding source and the Classic source feed. The repository and release
+are now public; download or subscribe without GitHub authentication, then re-sign
+both IPAs for installation.
 The release uses the configured distribution bundle IDs; the bench installation uses
 a separate local test identity. Keep that test app installed to retain its local
 data, and select the same iCloud Drive folder in the release to import portable
