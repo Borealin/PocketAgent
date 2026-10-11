@@ -208,6 +208,14 @@ Automation process separately exited when its system passcode authorization
 timed out. Its log established an authorization timeout; later bundle loading
 and UI automation still need validation.
 
+The existing confinement stress test initially failed in CI with zero reads:
+its rename/unlink gap allowed a normal write to create a new parent, leaving
+the original read fixture parked elsewhere. The test now atomically exchanges
+the directory and outside symlink, keeping both entries present. It retains
+concurrent successful-read and no-escape assertions, adds actual-swap/error
+witnesses and checks the normal read before and after the attack. Production
+file confinement is unchanged.
+
 ## On-device workspace and scripting
 
 Status: implemented by Opus 5.5 on 2026-10-10 and independently reviewed by

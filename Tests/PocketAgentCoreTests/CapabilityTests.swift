@@ -66,10 +66,24 @@ struct WorkspaceConfinementTests {
         let paths = try WorkspacePaths(root: box.root)
         let parent = box.root.appendingPathComponent("parent").path, parked = box.root.appendingPathComponent("parked").path
         let outside = box.outside.path
+        // Keep both entries present. A rename/unlink gap lets a legitimate
+        // write create a new parent, stranding the original file at parked
+        // and turning all later reads into not-found errors.
+        try FileManager.default.createSymbolicLink(atPath: parked, withDestinationPath: outside)
+        #expect(try paths.readFile("parent/file", limit: 64) == Data("inside".utf8))
         let stop = Atomic()
+        let swaps = Counter(), swapErrors = Counter()
         let swapper = Thread {
             while !stop.value {
-                if rename(parent, parked) == 0 { symlink(outside, parent); usleep(5); unlink(parent); rename(parked, parent) }
+                if renameatx_np(AT_FDCWD, parent, AT_FDCWD, parked, UInt32(RENAME_SWAP)) != 0 {
+                    swapErrors.increment(); break
+                }
+                swaps.increment()
+                usleep(5)
+                if renameatx_np(AT_FDCWD, parent, AT_FDCWD, parked, UInt32(RENAME_SWAP)) != 0 {
+                    swapErrors.increment(); break
+                }
+                usleep(5)
             }
         }
         swapper.start()
@@ -83,8 +97,11 @@ struct WorkspaceConfinementTests {
         }
         stop.value = true
         while !swapper.isFinished { usleep(1000) }
+        #expect(swapErrors.value == 0)
+        #expect(swaps.value > 0)
         #expect(reads > 0)
         #expect(escaped == 0)
+        #expect(try paths.readFile("parent/file", limit: 64) == Data("inside".utf8))
         #expect(!FileManager.default.fileExists(atPath: box.outside.appendingPathComponent("out.txt").path))
     }
 
