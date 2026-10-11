@@ -186,6 +186,17 @@ limits import size and retains the native parser validation. A temporary tunnel
 handshake checks pairing and VPN without starting an automation runner. That
 result does not establish Automation installation or XCTest authorization.
 
+The Mac onboarding guide uses upstream idevice_pair v1.1.0's universal GUI and
+documents the released 0.3.1 and staged 0.3.2 import locations. An optional Bash
+download helper pins its official DMG URL and SHA-256, uses an independently
+created private Downloads directory, verifies before opening and never reads or
+writes a pairing record. It does not install the GUI or change the phone. The
+tagged GUI prepares DDI and enables wireless debugging on USB selection; this
+is stated in the guide. RP export is structurally compatible, but GUI pairing
+still needs a live Mac check. The command-line alternative uses a unique host
+name because idevice derives the RP peer identifier from that name; regenerating
+with a reused name can replace the key behind an existing peer identity.
+
 The app automatically imports/boots the bundled Linux environment and runs
 Bash, Python and Node startup checks. These read-only checks share the existing
 script queue, mount no project and expose no phone bridge. Readiness changes

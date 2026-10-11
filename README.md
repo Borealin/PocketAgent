@@ -37,7 +37,8 @@ phone tools. To install manually:
    **PocketAgent Automation**, required for phone tools. Keep both installed
    and refresh their signatures using the sideloading app.
 4. Enable Developer Mode, configure the local VPN and import this phone's
-   **idevice RP pairing record**. In PocketAgent's device settings, enter the
+   **idevice RP pairing record** using the [Mac setup guide (中文)](docs/pairing-zh.md).
+   In PocketAgent's device settings, enter the
    installed Automation companion's bundle ID; signing can change it.
 5. Add your API provider and model in Settings, then start a conversation.
 
@@ -138,11 +139,26 @@ replayed after restarting the app.
 
 Settings → 手机操作配置 walks through installing Automation, connecting
 LocalDevVPN and importing this phone's **RP pairing file** from Files. The
-**配对文件从哪里获取？** page includes the initial trusted-USB command:
+easiest first setup uses the upstream **idevice_pair** GUI: choose the USB phone,
+select **Remote pairing**, then **Create → Validate → Save to file…**.
+Another compatible Mac can create the record; this does not depend on your
+Apple ID or IPA signing account.
 
-```sh
-idevice-tools remotepairing_lockdown pair PocketAgent rp_pairing_file.plist
-```
+[![Mac pairing guide](https://img.shields.io/badge/Mac-配对教程-6554E8?style=for-the-badge)](docs/pairing-zh.md)
+[![Download pairing tool](https://img.shields.io/badge/Download-Mac配对工具-38A169?style=for-the-badge)](https://github.com/jkcoxson/idevice_pair/releases/download/v1.1.0/idevice_pair--macos-universal.dmg)
+
+The [Chinese guide](docs/pairing-zh.md) covers USB trust, the GUI, AirDrop and
+both 0.3.1/0.3.2 import locations. The official DMG supports Apple Silicon and
+Intel without Rust, Python or Xcode. The optional
+[download script](Scripts/download_pairing_tool.command) downloads that fixed
+release, verifies SHA-256 and opens its DMG; it does not install software or
+generate a record. The GUI prepares developer services and enables wireless
+debugging on the selected phone. Its full pairing workflow still awaits a Mac
+UI check; package/source inspection does not establish real-device success.
+
+For existing CLI users, the guide also includes the trusted-USB command with
+explicit device selection, a unique host name and a fresh output directory.
+Use that command when generating a new record.
 
 Transfer the file to the iPhone using AirDrop or Files. A SideStore/Jitterbug
 USB pairing file has a different format; import explains that error and retains
