@@ -49,16 +49,57 @@ def ipa(app, path):
                 z.write(item, Path('Payload') / app.name / item.relative_to(app))
 
 
+def relocate_runner_test_bundle(runner):
+    """Keep XCTest code in a nested code bundle recognized by sideload signers.
+
+    AltStore prepares every direct PlugIns child as a separately provisioned
+    app extension, but only discovers .appex extensions when fetching profiles.
+    A framework is recursively signed without needing a separate app profile.
+    Keep the original XCTest bundle metadata and executable unchanged; the
+    launcher explicitly selects this path instead of relying on PlugIns lookup.
+    """
+    plugins = runner / 'PlugIns'
+    tests = plugins / 'WebDriverAgentRunner.xctest'
+    destination = runner / 'Frameworks/WebDriverAgentRunner.framework'
+    if not tests.is_dir() or tests.is_symlink():
+        raise ValueError('Runner is missing PlugIns/WebDriverAgentRunner.xctest')
+    remaining = sorted(p.name for p in plugins.iterdir() if p != tests)
+    if remaining:
+        raise ValueError('Unexpected runner PlugIns entries: ' + ', '.join(remaining))
+    if destination.exists() or destination.is_symlink():
+        raise ValueError('Runner test destination already exists: ' + str(destination.relative_to(runner)))
+    try:
+        info = plistlib.loads((tests / 'Info.plist').read_bytes())
+    except (OSError, plistlib.InvalidFileException) as error:
+        raise ValueError('Runner XCTest bundle has no readable Info.plist') from error
+    if info.get('CFBundlePackageType') != 'BNDL' or info.get('CFBundleExecutable') != 'WebDriverAgentRunner':
+        raise ValueError('Runner XCTest bundle has unexpected executable or package type')
+    executable = tests / info['CFBundleExecutable']
+    if not executable.is_file() or executable.is_symlink() or executable.stat().st_size == 0:
+        raise ValueError('Runner XCTest bundle is missing its executable')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tests.rename(destination)
+    plugins.rmdir()
+    return destination
+
+
 def prepare_runner(config, version, number, signing=None):
     """Prepare a copy so packaging never changes Xcode's build products."""
     original = ROOT / '.build/WDA/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app'
     runner = ROOT / '.build/Packaging/WebDriverAgentRunner-Runner.app'
     shutil.rmtree(runner, ignore_errors=True)
     shutil.copytree(original, runner)
+    # Do not discard a conflicting test bundle during runtime-library cleanup.
+    destination = runner / 'Frameworks/WebDriverAgentRunner.framework'
+    if destination.exists() or destination.is_symlink():
+        raise ValueError('Runner test destination already exists: ' + str(destination.relative_to(runner)))
     # XCTest runtime libraries are supplied by iOS's mounted developer image.
     shutil.rmtree(runner / 'Frameworks', ignore_errors=True)
+    # build-for-testing also places the test module's dSYM beside it in PlugIns.
+    # Remove symbols before validating that only the expected code bundle remains.
     for symbols in runner.rglob('*.dSYM'):
         shutil.rmtree(symbols)
+    relocate_runner_test_bundle(runner)
     # build-for-testing retains linker debug records even in Release; those
     # records include absolute object paths that compiler prefix maps cannot
     # rewrite. Preserve runtime/exported symbols and remove only debug records.

@@ -513,12 +513,45 @@ enumeration against the actual release IPA. Inspected sources are AltStore
 `FetchProvisioningProfilesOperation.swift`) and its AltSign submodule
 790b9ccdaf2cec831689395c527e80f1f2838041 (`ALTApplication.mm`).
 The main app contains no PlugIns bundle and does not trigger this condition.
-Its separately reported OperationError 1008 is an unresolved AltStore install
-context/precondition failure; the client/server versions and detailed error
-are needed to identify the failing stage. No packaging remedy is yet validated.
-Removing the XCTest bundle would remove phone automation, so it is not a fix.
-Development-signed device checks, anonymous downloads and IPA signature
-inspection did not cover AltStore/SideStore re-signing; that gate remains open.
+The user subsequently reported successful main-app installation through SideStore.
+That does not identify the cause of the earlier OperationError 1008. The screenshot
+was from SideStore; the installed client revision is unknown. Current SideStore
+0dd743f75afc358b0ba4a002feb5f19474492371 uses SideSign
+6b68651697f99791ef85404b7aea1891a26a285d and CodeSignKit
+d0c67710fda9a2646b9e829cb2cf443892728371, which recognize XCTest code and
+do not share the inspected AltStore's indiscriminate PlugIns preparation path.
+The old AltStore mechanism explains its own failure, but attributing that exact
+mechanism to the user's unknown SideStore version remains unconfirmed.
+
+v0.3.1 retains the entire XCTest module, resources and nested WebDriverAgentLib
+under `Frameworks/WebDriverAgentRunner.framework`. Its executable stays MH_BUNDLE,
+its package type stays BNDL, and its relative library paths remain unchanged.
+Pinned ldid and CodeSignKit recursively sign this framework hierarchy without
+requesting a separate app-extension profile. The main app passes relative
+`XCTestBundlePath=Frameworks/WebDriverAgentRunner.framework`; XCTest resolves it
+against the runner's current app bundle, including after a signing tool changes
+the installation path. No removal of test code or additional provisioning
+entitlement is needed. Both apps must be upgraded together; mixed v0.3.0/v0.3.1
+installations are unsupported. Same-account, same-bundle-ID updates preserve data.
+
+Preparation changes only the packaging copy. A real Xcode build revealed a
+`PlugIns/WebDriverAgentRunner.xctest.dSYM` sibling, so symbol cleanup precedes
+the strict test-module migration. Regression tests cover that actual layout,
+retention of resources/library/executable metadata and rejection of unexpected
+PlugIns code or a conflicting destination. The original build products remain
+unchanged. Core tests (120) and distribution tests (17) pass; the Release app
+archive and WDA build-for-testing succeed. The prepared companion passes local
+development signing and deep signature verification. Pinned ldid signing of a
+separate framework-layout fixture also passes deep signature verification;
+that fixture is structural signing proof, not Apple-profile installation proof.
+
+The development prototype installs separately on the 12 mini. Its initial launch
+attempts encountered the system's UI Automation passcode authorization page;
+that prevents a conclusion about framework-path runtime loading. User input is
+pending, followed by launch using the exact minimal relative environment used
+by the app. Actual AltStore/SideStore re-sign/install verification and runtime
+validation of this layout remain open. Existing conversations must be retained
+through the same-identity upgrade. Success-only logs and snapshots stay local.
 
 A release tag starts from an older source snapshot than current main. Publishing
 merges against current main and keeps all earlier versions in numeric order.

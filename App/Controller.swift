@@ -142,7 +142,10 @@ final class DeviceConnection {
         try check(process_control_new(server, &process))
         guard let process else { throw failure("Missing process control") }
         let runnerID = DeviceSettings.runnerBundleID
-        let environment = ["USE_PORT=8100", "USE_IP=127.0.0.1", "WDA_PRODUCT_BUNDLE_IDENTIFIER=\(runnerID)"]
+        // XCTest resolves relative bundle paths against the runner's main app
+        // bundle. This stays valid when sideload signing changes its install path.
+        let environment = ["USE_PORT=8100", "USE_IP=127.0.0.1", "WDA_PRODUCT_BUNDLE_IDENTIFIER=\(runnerID)",
+                           "XCTestBundlePath=Frameworks/WebDriverAgentRunner.framework"]
         let allocated = environment.map { strdup($0)! }
         defer { allocated.forEach { free($0) } }
         let pointers: [UnsafePointer<CChar>?] = allocated.map { UnsafePointer($0) }

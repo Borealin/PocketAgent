@@ -10,8 +10,9 @@ provider you configure.
 > [!IMPORTANT]
 > The v0.3.0 Automation companion has a confirmed AltStore re-signing issue:
 > its embedded XCTest bundle causes "Could not find matching provisioning
-> profile." A packaging fix and actual sideload re-sign/install verification
-> are pending. Public downloads and feed checks do not establish successful
+> profile." The v0.3.1 packaging moves the complete test module into a nested
+> framework and explicitly selects it at launch. Actual sideload re-sign/install
+> verification is pending. Public downloads and feed checks do not establish successful
 > installation through AltStore or SideStore.
 
 [![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
@@ -26,7 +27,7 @@ phone tools. To install manually:
 2. Open [the latest release](https://github.com/Borealin/PocketAgent/releases/latest)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
-3. Import and sign **both** IPAs in your sideloading app. The second one is
+3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
    **PocketAgent Automation**, required for phone tools. Keep both installed
    and refresh their signatures using the sideloading app.
 4. Enable Developer Mode, configure the local VPN and import this phone's
@@ -38,6 +39,8 @@ For an existing installation, update using the same signing account and bundle
 IDs to retain its local data. Do not delete the app first. A separately signed
 installation needs its own credentials and device configuration; portable
 conversations can be imported through the same iCloud Drive sync folder.
+When upgrading from v0.3.0 to v0.3.1, update both apps: the test module's location
+changed, so mixing these versions does not support phone automation.
 
 ### AltStore Classic/SideStore source
 
