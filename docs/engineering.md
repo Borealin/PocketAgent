@@ -558,12 +558,16 @@ retained through the same-identity upgrade. Success-only logs and snapshots stay
 
 The fix is committed at 480e0be. Its clean GitHub validation and full IPA workflow
 both pass. `candidate-0.3.1` publishes the locally inspected generic pair,
-corresponding source and checksums as a manual-install prerelease. The candidate
-does not update the default source feed or replace v0.3.0 assets. Its release
-notes distinguish packaging/signature checks from pending actual client
-installation and phone runtime. After system authorization, verify WDA startup
-and a same-identity native app update with all current data retained before
-publishing a stable tag and advancing the feed.
+corresponding source and checksums as a prerelease. Initially only the candidate
+release was published, leaving the main-branch feed at 0.3.0; refreshing a
+sideloading client therefore could not discover 0.3.1. At the user's request,
+the feed now offers 0.3.1/build 4 for both apps, using the existing candidate
+asset URLs and their inspected sizes and SHA256 hashes. Earlier versions and
+v0.3.0 assets remain available. Feed descriptions, README and release notes
+identify the candidate and distinguish packaging/signature checks from pending
+actual client installation and phone runtime. After system authorization,
+verify WDA startup and a same-identity native app update with all current data
+retained before publishing a stable tag.
 
 A release tag starts from an older source snapshot than current main. Publishing
 merges against current main and keeps all earlier versions in numeric order.

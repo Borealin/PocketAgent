@@ -15,13 +15,13 @@ provider you configure.
 > verification is pending. Public downloads and feed checks do not establish successful
 > installation through AltStore or SideStore.
 
-For manual signing validation, download both IPAs from the
+The source now offers both apps from the
 [v0.3.1 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1).
 Its builds, privacy checks and signature inspection pass; phone automation
-runtime still awaits system authorization. The default source feed remains on
-the previous release until that runtime check is complete.
+runtime still awaits system authorization. It remains a prerelease while
+actual sideload installation and phone automation are validated.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
@@ -30,7 +30,7 @@ phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the latest release](https://github.com/Borealin/PocketAgent/releases/latest)
+2. Open [the v0.3.1 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
@@ -50,8 +50,10 @@ changed, so mixing these versions does not support phone automation.
 
 ### AltStore Classic/SideStore source
 
-The public feed contains **PocketAgent** and **PocketAgent Automation** and is
-updated automatically after a release. Open the button below on your iPhone to
+The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
+offering the **0.3.1 candidate (build 4)** for both apps. Stable releases update
+the feed automatically; this candidate was added explicitly for signing validation.
+Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its
 Sources screen. No GitHub sign-in is required.
 
