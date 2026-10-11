@@ -545,13 +545,25 @@ development signing and deep signature verification. Pinned ldid signing of a
 separate framework-layout fixture also passes deep signature verification;
 that fixture is structural signing proof, not Apple-profile installation proof.
 
-The development prototype installs separately on the 12 mini. Its initial launch
-attempts encountered the system's UI Automation passcode authorization page;
-that prevents a conclusion about framework-path runtime loading. User input is
-pending, followed by launch using the exact minimal relative environment used
-by the app. Actual AltStore/SideStore re-sign/install verification and runtime
-validation of this layout remain open. Existing conversations must be retained
-through the same-identity upgrade. Success-only logs and snapshots stay local.
+The development prototype installs separately on the 12 mini. Launch using the
+exact minimal relative environment used by the app reached the system's UI
+Automation passcode authorization page. The owned runner later exited while
+authorization remained pending; that does not establish a framework-loading
+failure or successful WDA startup. The temporary probe remains installed under
+recorded ownership to retain the system authorization page; it has not replaced
+the original app. User input is pending, followed by a retry with the same
+minimal environment. Actual AltStore/SideStore re-sign/install verification and
+runtime validation of this layout remain open. Existing conversations must be
+retained through the same-identity upgrade. Success-only logs and snapshots stay local.
+
+The fix is committed at 480e0be. Its clean GitHub validation and full IPA workflow
+both pass. `candidate-0.3.1` publishes the locally inspected generic pair,
+corresponding source and checksums as a manual-install prerelease. The candidate
+does not update the default source feed or replace v0.3.0 assets. Its release
+notes distinguish packaging/signature checks from pending actual client
+installation and phone runtime. After system authorization, verify WDA startup
+and a same-identity native app update with all current data retained before
+publishing a stable tag and advancing the feed.
 
 A release tag starts from an older source snapshot than current main. Publishing
 merges against current main and keeps all earlier versions in numeric order.

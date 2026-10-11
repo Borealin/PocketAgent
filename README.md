@@ -15,6 +15,12 @@ provider you configure.
 > verification is pending. Public downloads and feed checks do not establish successful
 > installation through AltStore or SideStore.
 
+For manual signing validation, download both IPAs from the
+[v0.3.1 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1).
+Its builds, privacy checks and signature inspection pass; phone automation
+runtime still awaits system authorization. The default source feed remains on
+the previous release until that runtime check is complete.
+
 [![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/latest)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
