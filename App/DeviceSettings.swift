@@ -79,10 +79,13 @@ enum DeviceSettings {
     static func importPairing(from url: URL) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size <= 1_048_576 else { throw failure("配对文件过大。") }
-        let data = try Data(contentsOf: url)
-        try validatedPlist(data)
+        let data = try await Task.detached(priority: .userInitiated) {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: PairingImport.maximumBytes + 1) ?? Data()
+            try PairingImport.validate(data)
+            return data
+        }.value
         let probe = FileManager.default.temporaryDirectory.appendingPathComponent("pairing-\(UUID().uuidString).plist")
         try data.write(to: probe, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         defer { try? FileManager.default.removeItem(at: probe) }
@@ -97,6 +100,7 @@ enum DeviceSettings {
 
     @discardableResult
     private static func validatedPlist(_ data: Data) throws -> [String: Any] {
+        try PairingImport.validate(data)
         guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               !plist.isEmpty else { throw failure("所选文件不是 RP 配对属性列表。") }
         return plist
@@ -127,20 +131,60 @@ final class DeviceSettingsModel: ObservableObject {
     @Published var saveScreenshots = DeviceSettings.saveScreenshots
     @Published var saveLogs = DeviceSettings.saveDiagnosticLogs
     @Published private(set) var hasPairing = DeviceSettings.hasPairing
+    @Published private(set) var importing = false
+    @Published private(set) var checking = false
+    @Published private(set) var connectionStatus = "尚未检查连接"
+    @Published private(set) var connectionVerified = false
     @Published var status = ""
+    private var generation = 0
 
     func save() {
-        do { try DeviceSettings.save(runner: runner, tunnel: tunnel, screenshots: saveScreenshots, logs: saveLogs); status = "已保存。" }
+        do {
+            try DeviceSettings.save(runner: runner, tunnel: tunnel, screenshots: saveScreenshots, logs: saveLogs)
+            generation += 1
+            connectionVerified = false; connectionStatus = "设置已更改，请检查连接"
+            status = "已保存。"
+        }
         catch { status = error.localizedDescription }
     }
 
     func importPairing(_ result: Result<URL, any Error>) {
+        guard !importing, !checking else { return }
+        importing = true
         Task {
+            defer { importing = false }
             do {
                 try await DeviceSettings.importPairing(from: result.get())
-                status = "配对文件已导入。"
+                generation += 1
+                connectionVerified = false; connectionStatus = "配对文件已导入，请检查连接"
+                status = "导入成功。连接 LocalDevVPN 后，点“检查连接”。"
             } catch { status = "导入失败：\(error.localizedDescription)" }
             hasPairing = DeviceSettings.hasPairing
+        }
+    }
+
+    /// Verifies the pairing and VPN tunnel without starting WDA or phone actions.
+    func checkConnection() {
+        guard !checking, !importing, hasPairing else { return }
+        checking = true; connectionVerified = false; connectionStatus = "正在验证配对与 VPN…"
+        let connection = generation
+        Task {
+            defer { checking = false }
+            do {
+                try await runOnFFIThread {
+                    let device = DeviceConnection()
+                    try device.connect()
+                    // The local connection is released when this scope ends.
+                }
+                guard generation == connection else { return }
+                connectionVerified = true
+                connectionStatus = "配对与 VPN 连接正常"
+                status = "连接检查通过；Automation 安装、开发者模式及首次 XCTest 授权仍需完成。"
+            } catch {
+                guard generation == connection else { return }
+                connectionStatus = "连接未通过"
+                status = "请确认手机已解锁、LocalDevVPN 已连接、配对文件属于这台手机。\n\(error.localizedDescription)"
+            }
         }
     }
 }

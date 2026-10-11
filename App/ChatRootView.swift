@@ -90,6 +90,7 @@ struct ChatRootView: View {
             if phase == .active { sync.foreground() } else { chat.persist() }
         }
         .onChange(of: engine.busy) { _, _ in chat.foregroundChanged(scenePhase == .active) }
+        .task { try? await ScriptRuntime.shared.checkTools() }
         // Applied to the hosting window only. Open sheets (Settings, model
         // picker, providers) are presented in that window and inherit it.
         .background(WindowAppearance(style: appearance.interfaceStyle))

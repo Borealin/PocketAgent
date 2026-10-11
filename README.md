@@ -115,11 +115,20 @@ phase while another app is foreground. Stop remains separate from the input,
 which can accept an additional instruction for the active turn. Other
 conversations join the serial queue and display their waiting position.
 
-Open the provider page to add a service name, API format, complete inference
-URL, API key and one or more model IDs. Supported formats are OpenAI Chat
-Completions, OpenAI Responses, Anthropic Messages and Gemini. A model catalog
-URL is optional; manual model IDs work without one. URLs must use HTTPS and
-must not contain credentials.
+Open Settings → 模型服务 to choose a connection preset, enter one **Base URL**
+and your API key, then tap **连接并加载模型**. Presets support OpenAI-compatible
+Chat Completions, OpenAI Responses, Sub2API, Anthropic Messages and Gemini. The
+app derives the inference and `/models` endpoints, displays loading/errors, and
+lets you search the returned models. A refresh retains existing manual models
+and image capabilities. Model IDs can also be added manually when a catalog is
+unavailable. URLs must use HTTPS and must not contain credentials.
+
+For Sub2API, use the base supplied by your gateway and the protocol supported
+by your key's group. Common routes use `/v1`; Antigravity uses explicit
+`/antigravity/v1` for Messages or `/antigravity/v1beta` for Gemini. The Sub2API
+preset starts with Responses; change the protocol if your group requires it.
+Existing addresses and keys stay unchanged. Advanced custom addresses remain
+available for services with different inference and catalog routes.
 
 Choose a provider and model for each conversation. Accepted turns capture
 their selection and credential before joining the serial phone action queue.
@@ -127,10 +136,20 @@ Later configuration changes apply to subsequent turns. Conversations preserve
 their own history and model attribution. Interrupted phone actions are never
 replayed after restarting the app.
 
-In device settings, import this phone's pairing record and configure the local
-VPN address, port and installed automation runner's bundle ID. Sideloading tools
-can change bundle IDs during signing: use the ID of the companion actually
-installed on your device.
+Settings → 手机操作配置 walks through installing Automation, connecting
+LocalDevVPN and importing this phone's **RP pairing file** from Files. The
+**配对文件从哪里获取？** page includes the initial trusted-USB command:
+
+```sh
+idevice-tools remotepairing_lockdown pair PocketAgent rp_pairing_file.plist
+```
+
+Transfer the file to the iPhone using AirDrop or Files. A SideStore/Jitterbug
+USB pairing file has a different format; import explains that error and retains
+the previous working record. **检查连接** checks the saved pairing/VPN settings
+without opening another app. The local VPN address, port and Automation bundle
+ID are under advanced settings. Sideloading can change bundle IDs: use the ID of
+the companion actually installed on your device.
 
 API keys live in the local Keychain. Pairing records stay in protected local
 application storage and are excluded from backup. Diagnostic file output is
@@ -141,10 +160,14 @@ the new address.
 
 ## iCloud Drive synchronization
 
-Choose a folder in **iCloud Drive** with the system folder picker, then sync.
-Choose that same folder on another device to share conversations and nonsecret
-provider configuration. Each device needs its own API keys, pairing record,
-runner settings and folder permission.
+Tap **启用 iCloud 同步**, then choose a location in **iCloud Drive** once with
+the system folder picker. The app creates/reuses a `PocketAgent` folder there
+and remembers its permission; later app openings sync automatically. Existing
+installations keep their selected folder. **使用已有同步文件夹 / 更改同步位置**
+selects an exact folder without creating another child. Choose the same
+`PocketAgent` folder on another device to share conversations and nonsecret
+provider configuration. Local folders do not sync across devices. Each device
+needs its own API keys, pairing record, runner settings and folder permission.
 
 Portable snapshots contain conversation text, tool calls/results, model
 selection, image-presence metadata and nonsecret provider settings. Image bytes,
@@ -198,8 +221,11 @@ report the real exit status and separate stdout/stderr; full output stays under
 `pocketagent-phone <tool> '<json>'`, which goes through the same validation and
 serial action queue as the model's phone tools; failures are never retried
 automatically. Stopping a turn revokes that permission first, then interrupts and
-finally kills the script's processes. The first script imports the Linux root
-filesystem (excluded from backup), which takes extra time. A project used by a
+finally kills the script's processes. On app opening the bundled Linux root
+filesystem initializes automatically (excluded from backup), and the app
+actually runs Bash, Python and Node startup checks. Settings → 脚本环境 shows
+preparing, checking, ready or a specific restart-required error. No JIT or
+runtime download is needed. The initial preparation takes extra time. A project used by a
 queued or running turn cannot be deleted until that turn ends.
 
 The app binary includes the iSH runtime and the Linux kernel and is therefore

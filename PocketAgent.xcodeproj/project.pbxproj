@@ -19,6 +19,7 @@
 		341233CF7A70637134AD1A8B /* iSHLicenses in Resources */ = {isa = PBXBuildFile; fileRef = E53F96B6F3F454BD229C1E52 /* iSHLicenses */; };
 		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
 		3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19938EABD2390F0D02B28600 /* ChatPolicies.swift */; };
+		44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E51E4C8A00C974E4731352 /* PairingImport.swift */; };
 		4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */; };
 		55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B9777F694312D830BE8C77 /* HTTPTool.swift */; };
 		57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */; };
@@ -35,6 +36,7 @@
 		9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38833AB31402CD8F11B2F334 /* Workspace.swift */; };
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
 		A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D61AC91A09838169F172CE15 /* BackgroundTasks.framework */; };
+		A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
 		D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9546B4615DB532FC42BF7335 /* Rules.swift */; };
@@ -71,6 +73,7 @@
 		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		73652AF715C4968790030FB2 /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
+		88E51E4C8A00C974E4731352 /* PairingImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingImport.swift; sourceTree = "<group>"; };
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
@@ -86,6 +89,7 @@
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEndpoints.swift; sourceTree = "<group>"; };
 		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
 		F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptBridge.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -150,8 +154,10 @@
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
+				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
+				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
 				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
@@ -314,10 +320,12 @@
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
+				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
 				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
 				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
+				A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
 				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
@@ -387,7 +395,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -407,7 +415,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -459,7 +467,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -473,7 +481,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";

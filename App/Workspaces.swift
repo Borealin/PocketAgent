@@ -345,7 +345,6 @@ struct FolderExporter: UIViewControllerRepresentable {
 /// Settings section: projects, global rules and skills, script runtime state.
 struct RulesSettingsSection: View {
     @ObservedObject var store: WorkspaceStore
-    @State private var runtime = ""
 
     var body: some View {
         Section {
@@ -358,15 +357,6 @@ struct RulesSettingsSection: View {
             NavigationLink {
                 FileBrowserView(store: store, project: nil, root: WorkspaceStore.globalDirectory, relative: "skills", title: "全局技能")
             } label: { Text("全局技能") }.accessibilityIdentifier("globalSkills")
-            if ScriptRuntime.shared.isBundled {
-                Button(runtime.isEmpty ? "准备脚本运行环境" : runtime) {
-                    runtime = "正在准备…"
-                    Task {
-                        do { try await ScriptRuntime.shared.prepare(); runtime = "脚本运行环境可用" }
-                        catch { runtime = error.localizedDescription }
-                    }
-                }.accessibilityIdentifier("prepareRuntime")
-            }
         } header: { Text("项目与规则") } footer: {
             Text("全局 AGENTS.md 和所选项目根目录的 AGENTS.md 会加入每轮的模型上下文；技能放在 skills/<名称>/SKILL.md（项目内为 .agents/skills），模型按需读取。项目和规则只保存在本机，不会同步。脚本在本机的 Linux 环境中运行，只能看到所选项目。")
         }

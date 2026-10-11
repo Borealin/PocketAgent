@@ -70,74 +70,209 @@ struct ProviderEditorView: View {
     let original: ProviderRecord?
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ProviderRecord
+    @State private var preset: ProviderConnectionPreset
+    @State private var baseURL = ""
     @State private var secret = ""
     @State private var removeKey = false
     @State private var newModel = ""
     @State private var newModelImages = false
+    @State private var modelSearch = ""
     @State private var fetching = false
+    @State private var catalogMessage = ""
+    @State private var catalogFailed = false
     @State private var message = ""
+    @State private var activeCatalogRequest: UUID?
+    @State private var catalogTask: Task<Void, Never>?
 
     init(store: ProviderStore, original: ProviderRecord?) {
         self.store = store; self.original = original
-        _draft = State(initialValue: original ?? ProviderRecord())
+        let record = original ?? ProviderRecord()
+        let input = original.flatMap(ProviderEndpoints.standardInput)
+        _draft = State(initialValue: record)
+        _baseURL = State(initialValue: input ?? "")
+        // Recognize a standard pair only by exact, reversible addresses.
+        // Custom routes stay untouched; a gateway brand is never guessed.
+        _preset = State(initialValue: original == nil ? .compatible
+                        : (input == nil ? .custom : .matching(record.format)))
     }
 
     private var hasStoredKey: Bool { store.keyed.contains(draft.id) }
+    private var visibleModels: [ProviderModelEntry] {
+        let search = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return draft.models.filter { search.isEmpty || $0.id.localizedCaseInsensitiveContains(search) }
+    }
+    private var endpoints: ProviderEndpoints? {
+        guard preset != .custom else { return nil }
+        return try? ProviderEndpoints.resolve(baseURL: baseURL, format: draft.format)
+    }
+    private var canFetch: Bool {
+        guard let record = try? preparedRecord() else { return false }
+        return !record.modelsBaseURL.isEmpty
+    }
+
+    /// Keys participate in stale-response detection only in memory.
+    private struct CatalogInput: Equatable {
+        let preset: ProviderConnectionPreset
+        let baseURL: String
+        let format: ModelAPIFormat
+        let inferenceURL: String
+        let catalogBaseURL: String
+        let secret: String
+        let removeKey: Bool
+    }
+    private var catalogInput: CatalogInput {
+        CatalogInput(preset: preset, baseURL: baseURL, format: draft.format,
+                     inferenceURL: draft.inferenceURL, catalogBaseURL: draft.modelsBaseURL,
+                     secret: secret.trimmingCharacters(in: .whitespacesAndNewlines), removeKey: removeKey)
+    }
 
     var body: some View {
         Form {
-            Section("服务商") {
-                TextField("名称", text: $draft.name).accessibilityIdentifier("providerName")
-                Picker("API 格式", selection: $draft.format) {
+            Section {
+                Picker("接入类型", selection: Binding(get: { preset }, set: selectPreset)) {
+                    ForEach(ProviderConnectionPreset.allCases) { Text($0.title).tag($0) }
+                }.accessibilityIdentifier("providerPreset")
+                if preset != .custom {
+                    TextField("Base URL，例如 https://example.com/v1", text: $baseURL, axis: .vertical)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .accessibilityIdentifier("providerBaseURL")
+                }
+                Picker("API 协议", selection: $draft.format) {
                     ForEach(ModelAPIFormat.allCases) { Text($0.title).tag($0) }
                 }.accessibilityIdentifier("providerFormat")
-                Toggle("启用", isOn: $draft.isEnabled)
-            }
-            Section {
-                TextField(draft.format.urlHint, text: $draft.inferenceURL, axis: .vertical)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    .accessibilityIdentifier("providerInferenceURL")
-                TextField("模型目录 URL（可选），如 https://…/v1", text: $draft.modelsBaseURL)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    .accessibilityIdentifier("providerCatalogURL")
-            } header: { Text("地址") } footer: {
-                Text("推理 URL 填完整地址，原样请求；可用 {model} 代替模型 ID。仅支持 HTTPS，不能在 URL 中包含用户名、密码或密钥参数。")
-            }
-            Section {
-                SecureField(hasStoredKey ? "已保存；留空保持不变" : "API Key", text: $secret)
+                if preset == .custom {
+                    TextField(draft.format.urlHint, text: $draft.inferenceURL, axis: .vertical)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .accessibilityIdentifier("providerInferenceURL")
+                    TextField("模型目录 Base URL（可选），如 https://…/v1", text: $draft.modelsBaseURL, axis: .vertical)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .accessibilityIdentifier("providerCatalogURL")
+                }
+                SecureField(hasStoredKey ? "API Key（留空保留已保存的 Key）" : "API Key", text: $secret)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityIdentifier("providerSecret")
                 if hasStoredKey {
                     Toggle("保存时删除已保存的 Key", isOn: $removeKey).disabled(!secret.isEmpty)
                 }
-                if let problem = store.provider(draft.id).flatMap(store.keyProblem) {
+                if let record = try? preparedRecord(), let problem = store.keyProblem(record), secret.isEmpty, !removeKey {
                     Text(problem).font(.caption).foregroundStyle(.orange)
                 }
-            } header: { Text("API Key") } footer: { Text("只保存在本机钥匙串，不会同步、备份到其他设备或写入日志。") }
+                Button { fetchModels() } label: {
+                    Label(fetching ? "正在连接…" : "连接并加载模型", systemImage: "arrow.triangle.2.circlepath")
+                }.disabled(fetching || !canFetch)
+                    .accessibilityIdentifier("providerConnect")
+                if fetching { ProgressView("正在获取模型列表…") }
+                if !catalogMessage.isEmpty {
+                    Label(catalogMessage, systemImage: catalogFailed ? "exclamationmark.triangle" : "checkmark.circle")
+                        .font(.caption).foregroundStyle(catalogFailed ? Color.orange : Color.secondary)
+                        .accessibilityIdentifier("providerConnectionStatus")
+                }
+            } header: { Text("连接模型服务") } footer: {
+                Text(preset.detail + " Key 只保存在本机钥匙串。连接操作只读取模型目录，失败时可手动添加模型。")
+            }
             Section {
-                ForEach($draft.models) { $model in
-                    Toggle(isOn: $model.supportsImages) {
-                        VStack(alignment: .leading) {
-                            Text(model.id)
-                            Text(model.supportsImages ? "接收照片、截图和界面结构" : "仅接收文字和界面结构").font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("高级设置与地址预览") {
+                    TextField("名称（可选，默认使用主机名）", text: $draft.name)
+                        .accessibilityIdentifier("providerName")
+                    Toggle("启用", isOn: $draft.isEnabled)
+                    if preset == .custom {
+                        endpointPreview("推理地址", value: draft.inferenceURL)
+                        if !draft.modelsBaseURL.isEmpty {
+                            endpointPreview("模型目录", value: ModelProvider(name: "preview", baseURL: draft.modelsBaseURL).resolvedModelsURL ?? "")
                         }
+                        Text("完整推理地址原样请求，可使用 {model}。模型目录填 Base URL，请求时追加 /models。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let endpoints {
+                        endpointPreview("推理地址", value: endpoints.inferenceURL)
+                        endpointPreview("模型目录", value: endpoints.modelsURL)
+                        Button("改用自定义完整地址") { selectPreset(.custom) }
+                    } else {
+                        Text("填写有效的 HTTPS Base URL 后显示请求地址。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                }.onDelete { draft.models.remove(atOffsets: $0) }
+                    Text("仅支持 HTTPS。Base URL 不接受查询参数；非标准路由请使用自定义地址。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                if !draft.models.isEmpty {
+                    TextField("搜索模型", text: $modelSearch)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("providerModelSearch")
+                    ForEach(visibleModels) { model in
+                        Toggle(isOn: imageCapability(for: model.id)) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.id)
+                                Text(model.supportsImages ? "支持图像输入" : "仅文字输入")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }.onDelete { indexes in
+                        let ids = Set(indexes.map { visibleModels[$0].id })
+                        draft.models.removeAll { ids.contains($0.id) }
+                    }
+                    if visibleModels.isEmpty { Text("没有匹配的模型。可以手动添加模型 ID。").foregroundStyle(.secondary) }
+                } else {
+                    Text("连接后显示模型列表，也可以直接填写模型 ID。").foregroundStyle(.secondary)
+                }
                 HStack {
-                    TextField("添加模型 ID", text: $newModel).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("手动添加模型 ID", text: $newModel).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("providerNewModel")
-                    Toggle("图像", isOn: $newModelImages).labelsHidden()
-                    Button("添加") { addModel() }.disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Toggle("图像", isOn: $newModelImages).labelsHidden().accessibilityLabel("新模型支持图像输入")
+                    Button("添加") { addModel() }.disabled(newModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("providerAddModel")
                 }
-                Button(fetching ? "正在获取…" : "从模型目录获取") { fetchModels() }
-                    .disabled(fetching || draft.modelsBaseURL.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: { Text("模型") } footer: { Text("开关表示模型是否接受图像输入。获取模型列表是可选的，可直接手动填写模型 ID。") }
-            if !message.isEmpty { Section { Text(message).font(.caption) } }
-        }.navigationTitle(original == nil ? "添加服务商" : draft.name)
+            } header: { Text("模型 · \(draft.models.count)") } footer: {
+                Text("图像开关可手动调整。刷新保留已有模型和开关；模型目录连接成功并不代表每个模型都支持当前 API 协议。保存后在会话中选择模型。")
+            }
+            if !message.isEmpty { Section { Text(message).font(.caption).foregroundStyle(.orange) } }
+        }.navigationTitle(original == nil ? "添加模型服务" : (draft.name.isEmpty ? "编辑模型服务" : draft.name))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("保存") { save() }.accessibilityIdentifier("providerSave") }
             }
+            .onChange(of: catalogInput) { _, _ in invalidateCatalog() }
+            .onDisappear { invalidateCatalog(showMessage: false) }
+    }
+
+    private func endpointPreview(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            if let safe = try? EndpointValidation.validate(value, field: title) {
+                Text(safe).font(.caption.monospaced()).textSelection(.enabled)
+            } else {
+                Text("请填写有效的 HTTPS 地址，凭据请放在 Key 栏。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func preparedRecord() throws -> ProviderRecord {
+        try ProviderEndpoints.applying(baseURL: preset == .custom ? nil : baseURL, to: draft)
+    }
+
+    private func selectPreset(_ next: ProviderConnectionPreset) {
+        guard next != preset else { return }
+        if next == .custom {
+            if let endpoints {
+                draft.inferenceURL = endpoints.inferenceURL
+                draft.modelsBaseURL = endpoints.modelsBaseURL
+            }
+        } else {
+            // Selecting a preset explicitly opts into a shared catalog base.
+            // Recognize only an exactly reversible inference route; never
+            // retain an unrelated old base when the custom route is unknown.
+            if preset == .custom {
+                baseURL = ProviderEndpoints.standardInferenceInput(for: draft) ?? ""
+            }
+            draft.format = next.format
+        }
+        preset = next
+    }
+
+    private func imageCapability(for id: String) -> Binding<Bool> {
+        Binding(get: { draft.model(id)?.supportsImages ?? false }, set: { enabled in
+            if let index = draft.models.firstIndex(where: { $0.id == id }) { draft.models[index].supportsImages = enabled }
+        })
     }
 
     private func addModel() {
@@ -147,22 +282,44 @@ struct ProviderEditorView: View {
         newModel = ""
     }
 
+    private func invalidateCatalog(showMessage: Bool = true) {
+        let wasFetching = fetching
+        activeCatalogRequest = nil
+        catalogTask?.cancel(); catalogTask = nil
+        fetching = false
+        if showMessage, wasFetching {
+            catalogFailed = false
+            catalogMessage = "连接信息已修改，请重新连接加载模型。"
+        } else if showMessage { catalogMessage = "" }
+    }
+
     private func fetchModels() {
-        fetching = true; message = ""
-        Task {
-            defer { fetching = false }
-            do {
-                let fetched = try await store.fetchModels(for: draft, typedSecret: secret)
-                let known = Set(draft.models.map(\.id))
-                draft.models += fetched.filter { !known.contains($0.id) }
-                message = "获取到 \(fetched.count) 个对话模型。"
-            } catch { message = "获取失败：\(error.localizedDescription)" }
-        }
+        do {
+            let record = try preparedRecord(), snapshot = catalogInput, requestID = UUID()
+            activeCatalogRequest = requestID
+            fetching = true; catalogMessage = ""; message = ""; catalogFailed = false
+            catalogTask = Task {
+                do {
+                    let fetched = try await store.fetchModels(for: record, typedSecret: snapshot.secret, removeStoredKey: snapshot.removeKey)
+                    guard activeCatalogRequest == requestID, catalogInput == snapshot, !Task.isCancelled else { return }
+                    let count = draft.models.count
+                    draft.models = ProviderCatalogMerge.merge(fetched, into: draft.models)
+                    catalogMessage = fetched.isEmpty ? "连接成功，但目录没有返回对话模型。请手动添加模型 ID。"
+                        : "连接成功，获取 \(fetched.count) 个模型，新增 \(draft.models.count - count) 个。"
+                } catch {
+                    guard activeCatalogRequest == requestID, catalogInput == snapshot, !Task.isCancelled else { return }
+                    catalogFailed = true
+                    catalogMessage = "连接失败：\(error.localizedDescription) 可检查地址、Key 和协议，或手动添加模型。"
+                }
+                if activeCatalogRequest == requestID { activeCatalogRequest = nil; fetching = false; catalogTask = nil }
+            }
+        } catch { message = error.localizedDescription }
     }
 
     private func save() {
         do {
-            try store.save(draft, newSecret: secret, removeSecret: removeKey)
+            try store.save(preparedRecord(), newSecret: secret, removeSecret: removeKey)
+            invalidateCatalog(showMessage: false)
             secret = ""
             dismiss()
         } catch { message = error.localizedDescription }
@@ -178,6 +335,11 @@ struct ModelPickerSheet: View {
     let onSelect: (ModelSelection, Bool) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var makeDefault = false
+    @State private var search = ""
+    private func matches(_ model: ProviderModelEntry, provider: ProviderRecord) -> Bool {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return term.isEmpty || model.id.localizedCaseInsensitiveContains(term) || provider.name.localizedCaseInsensitiveContains(term)
+    }
     var body: some View {
         NavigationStack {
             List {
@@ -190,7 +352,7 @@ struct ModelPickerSheet: View {
                         if provider.models.isEmpty {
                             Text("\(provider.name) 尚未添加模型").font(.footnote).foregroundStyle(.secondary)
                         }
-                        ForEach(provider.models) { model in
+                        ForEach(provider.models.filter { matches($0, provider: provider) }) { model in
                             let selection = ModelSelection(providerID: provider.id, modelID: model.id)
                             Button { onSelect(selection, makeDefault) } label: {
                                 HStack {
@@ -212,6 +374,11 @@ struct ModelPickerSheet: View {
                         }
                     }
                 }
+                if !search.isEmpty, !providers.providers.filter(\.isEnabled).contains(where: { provider in
+                    provider.models.contains { matches($0, provider: provider) }
+                }) {
+                    Text("没有匹配的模型。").foregroundStyle(.secondary)
+                }
                 if providers.providers.allSatisfy({ !$0.isEnabled }) {
                     Text("没有已启用的服务商。").foregroundStyle(.secondary)
                 }
@@ -220,6 +387,7 @@ struct ModelPickerSheet: View {
                 }
                 Section { NavigationLink("管理模型服务") { ProviderListView(store: providers) } }
             }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $search, prompt: "搜索模型或服务")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
         }
     }

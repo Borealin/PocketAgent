@@ -146,12 +146,13 @@ final class ProviderStore: ObservableObject {
         persistReporting()
     }
 
-    func fetchModels(for record: ProviderRecord, typedSecret: String) async throws -> [ProviderModelEntry] {
+    func fetchModels(for record: ProviderRecord, typedSecret: String, removeStoredKey: Bool = false) async throws -> [ProviderModelEntry] {
         let valid = try record.validated()
+        guard !deletedProviders.contains(where: { $0.id == valid.id }) else { throw ProviderError.providerDeleted }
         guard !valid.modelsBaseURL.isEmpty else { throw failure("未填写模型目录 URL。") }
         let typed = typedSecret.trimmingCharacters(in: .whitespacesAndNewlines)
         var secret = typed
-        if typed.isEmpty, let stored = try ProviderKeychain.secret(for: valid.id), !stored.isEmpty {
+        if typed.isEmpty, !removeStoredKey, let stored = try ProviderKeychain.secret(for: valid.id), !stored.isEmpty {
             // A stored key only goes to the catalog origin it was entered for.
             guard let origin = EndpointValidation.origin(of: valid.modelsBaseURL),
                   boundOrigins(valid.id)?.contains(origin) == true else { throw ProviderError.keyOriginChanged(valid.name) }
@@ -160,6 +161,8 @@ final class ProviderStore: ObservableObject {
         let provider = ModelProvider(id: valid.id, name: valid.name, apiFormat: valid.format,
                                      inferenceURL: valid.inferenceURL, baseURL: valid.modelsBaseURL)
         let models = try await ModelCatalogClient().models(for: provider, secret: secret)
+        try Task.checkCancellation()
+        guard !deletedProviders.contains(where: { $0.id == valid.id }) else { throw ProviderError.providerDeleted }
         return models.filter { $0.kind == .chat }
             .map { ProviderModelEntry(id: $0.id, supportsImages: $0.isVision, fetched: true) }
     }

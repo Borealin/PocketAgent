@@ -68,9 +68,11 @@ enum FolderSync {
 
 @MainActor
 final class SyncCoordinator: ObservableObject {
+    nonisolated static let defaultFolderName = "PocketAgent"
     @Published private(set) var folderName: String?
-    @Published private(set) var status = "未选择同步文件夹。"
+    @Published private(set) var status = "首次启用时，在 iCloud Drive 选择位置；自动创建 PocketAgent 文件夹。"
     @Published private(set) var syncing = false
+    @Published private(set) var connecting = false
     private let chat: ChatController
     private let providers: ProviderStore
     private let bookmarkURL = applicationSupport.appendingPathComponent("sync-folder.bookmark")
@@ -86,23 +88,58 @@ final class SyncCoordinator: ObservableObject {
             var stale = false
             folderName = (try? URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale))?
                 .lastPathComponent
-            status = folderName == nil ? "同步文件夹不可用，请重新选择。" : "尚未同步。"
+            status = folderName == nil ? "同步文件夹不可用，请重新选择。" : "已恢复同步位置，自动同步已开启。"
         }
     }
 
     var isConfigured: Bool { FileManager.default.fileExists(atPath: bookmarkURL.path) }
 
-    func chooseFolder(_ url: URL) {
+    /// Default setup creates only our named child after the picker grants access.
+    /// Existing bookmarks and explicit replacement folders keep their exact path.
+    func chooseFolder(_ url: URL, initializeDefault: Bool = false) {
+        guard !connecting else { return }
         generation += 1
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-            try storeBookmark(bookmark)
-            folderName = url.lastPathComponent
-            status = "已选择文件夹。"
-        } catch { status = "无法保存文件夹访问权限：\(error.localizedDescription)"; return }
-        Task { await syncNow() }
+        let connection = generation
+        connecting = true
+        status = initializeDefault ? "正在创建默认同步文件夹…" : "正在连接同步文件夹…"
+        Task {
+            defer { connecting = false }
+            do {
+                let prepared = try await Task.detached(priority: .utility) {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let folder = initializeDefault && url.lastPathComponent != Self.defaultFolderName
+                        ? url.appendingPathComponent(Self.defaultFolderName, isDirectory: true) : url
+                    if initializeDefault {
+                        var coordinationError: NSError?
+                        var result: Result<Void, any Error> = .failure(failure("文件夹初始化未执行。"))
+                        NSFileCoordinator().coordinate(writingItemAt: folder, options: .forMerging,
+                                                       error: &coordinationError) { target in
+                            result = Result {
+                                if FileManager.default.fileExists(atPath: target.path) {
+                                    let values = try target.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                                    guard values.isDirectory == true, values.isSymbolicLink != true else {
+                                        throw failure("PocketAgent 已被同名文件占用，请选择其他位置。")
+                                    }
+                                } else { try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false) }
+                            }
+                        }
+                        if let coordinationError { throw coordinationError }
+                        try result.get()
+                    }
+                    let bookmark = try folder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+                    return (bookmark, folder.lastPathComponent)
+                }.value
+                guard connection == generation else { return }
+                try storeBookmark(prepared.0)
+                folderName = prepared.1
+                status = "位置已保存，自动同步已开启。"
+                await syncNow()
+            } catch {
+                guard connection == generation else { return }
+                status = "无法初始化同步位置：\(error.localizedDescription)"
+            }
+        }
     }
 
     func disconnect() {
@@ -114,7 +151,7 @@ final class SyncCoordinator: ObservableObject {
 
     /// Opportunistic sync when the app returns to the foreground.
     func foreground() {
-        guard isConfigured, !syncing, Date().timeIntervalSince(lastAttempt) > 60 else { return }
+        guard isConfigured, !syncing, !connecting, Date().timeIntervalSince(lastAttempt) > 60 else { return }
         Task { await syncNow() }
     }
 
@@ -177,11 +214,13 @@ final class SyncCoordinator: ObservableObject {
 }
 
 struct FolderPicker: UIViewControllerRepresentable {
+    var title = "选择文件夹"
     let onPick: (URL) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
         picker.allowsMultipleSelection = false
+        picker.title = title
         picker.delegate = context.coordinator
         return picker
     }

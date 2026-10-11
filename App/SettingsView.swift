@@ -31,7 +31,7 @@ struct SettingsView: View {
     @ObservedObject var workspaces: WorkspaceStore
     let close: () -> Void
     @State private var pickingFolder = false
-    @State private var importingPairing = false
+    @State private var initializeSyncFolder = false
     @State private var pickingDefault = false
     @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
 
@@ -54,37 +54,42 @@ struct SettingsView: View {
                     }.accessibilityIdentifier("defaultModel")
                 }
                 RulesSettingsSection(store: workspaces)
+                ScriptEnvironmentSection()
                 Section {
-                    LabeledContent("文件夹", value: sync.folderName ?? "未选择")
-                    Button(sync.folderName == nil ? "选择 iCloud Drive 文件夹…" : "更换文件夹…") { pickingFolder = true }
-                        .accessibilityIdentifier("chooseSyncFolder")
+                    LabeledContent(sync.isConfigured ? "同步位置" : "默认文件夹", value: sync.folderName ?? "iCloud Drive / PocketAgent")
+                    if !sync.isConfigured {
+                        Button {
+                            initializeSyncFolder = true; pickingFolder = true
+                        } label: { Label("启用 iCloud 同步", systemImage: "icloud") }
+                            .accessibilityIdentifier("initializeSyncFolder")
+                            .disabled(sync.connecting)
+                        Text("在 iCloud Drive 选择一次位置，自动创建 PocketAgent 文件夹。以后打开 App 自动同步。选择“我的 iPhone”等本地目录不会跨设备同步。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button(sync.isConfigured ? "更改同步位置…" : "使用已有同步文件夹…") {
+                        initializeSyncFolder = false; pickingFolder = true
+                    }.accessibilityIdentifier("chooseSyncFolder").disabled(sync.connecting)
                     Button(sync.syncing ? "正在同步…" : "立即同步") { Task { await sync.syncNow() } }
-                        .disabled(sync.syncing || sync.folderName == nil).accessibilityIdentifier("syncNow")
+                        .disabled(sync.syncing || sync.connecting || !sync.isConfigured).accessibilityIdentifier("syncNow")
                     Text(sync.status).font(.caption).accessibilityIdentifier("syncStatus")
                     if sync.folderName != nil { Button("停止同步", role: .destructive) { sync.disconnect() } }
                 } header: { Text("iCloud Drive 同步") } footer: {
-                    Text("只同步会话文字、工具调用结果、服务商的非机密配置和图片的存在信息。API Key、配对文件、草稿、运行状态、日志、截图和图片内容不会同步，其他设备上的图片显示为不可用；同步来的会话不会自动执行。")
+                    Text("跨设备同步请选择 iCloud Drive，并在其他设备选同一个 PocketAgent 文件夹。本地目录不会跨设备同步。只同步会话文字、工具调用结果、服务商的非机密配置和图片的存在信息。API Key、配对文件、草稿、运行状态、日志、截图和图片内容不会同步，其他设备上的图片显示为不可用；同步来的会话不会自动执行。")
                 }
                 Section {
-                    LabeledContent("配对文件", value: device.hasPairing ? "已导入" : "未导入")
-                    Button("导入配对文件…") { importingPairing = true }.accessibilityIdentifier("importPairing")
-                } header: { Text("设备配对") } footer: { Text("RP 配对文件只保存在本机，受文件保护且不进入备份。") }
-                Section {
-                    TextField("WDA Runner（默认 \(DeviceSettings.runnerBundleID)）", text: $device.runner)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("VPN 隧道（默认 \(DeviceSettings.tunnelEndpointText)）", text: $device.tunnel)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.numbersAndPunctuation)
-                    Toggle("保存诊断日志", isOn: $device.saveLogs).accessibilityIdentifier("diagnosticLogs")
-                    Toggle("保存诊断截图", isOn: $device.saveScreenshots).accessibilityIdentifier("diagnosticScreenshots")
-                    Button("保存设备设置") { device.save() }.accessibilityIdentifier("saveDeviceSettings")
-                    if !device.status.isEmpty { Text(device.status).font(.caption) }
-                } header: { Text("手机自动化") } footer: {
-                    Text("留空使用默认值。诊断日志和截图默认关闭，开启后仅保存在本机；日志只含事件、计数和 ID，不含消息、工具参数、结果或 Key。原生连接日志在下次启动后生效。")
-                }
+                    NavigationLink {
+                        PhoneSetupView(device: device)
+                    } label: {
+                        LabeledContent("手机操作配置", value: device.connectionVerified ? "连接已验证" : device.hasPairing ? "待检查连接" : "待导入配对文件")
+                    }.accessibilityIdentifier("phoneSetup")
+                } header: { Text("手机操作") }
             }.navigationTitle("设置")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成", action: close).accessibilityIdentifier("closeSettings") } }
                 .sheet(isPresented: $pickingFolder) {
-                    FolderPicker { url in pickingFolder = false; sync.chooseFolder(url) }
+                    FolderPicker(title: initializeSyncFolder ? "在 iCloud Drive 选择位置" : "选择已有同步文件夹") { url in
+                        pickingFolder = false
+                        sync.chooseFolder(url, initializeDefault: initializeSyncFolder)
+                    }
                 }
                 .sheet(isPresented: $pickingDefault) {
                     ModelPickerSheet(providers: providers, current: providers.defaultSelection, title: "新会话默认模型",
@@ -92,9 +97,129 @@ struct SettingsView: View {
                         providers.setDefault(selection); pickingDefault = false
                     }
                 }
-                .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.propertyList, .xml]) { result in
-                    device.importPairing(result)
-                }
         }
+    }
+}
+
+struct ScriptEnvironmentSection: View {
+    @State private var readiness = ScriptRuntime.shared.readiness
+    var body: some View {
+        Section {
+            HStack {
+                if readiness.busy { ProgressView().controlSize(.small) }
+                else {
+                    Image(systemName: readiness == .ready ? "checkmark.circle.fill" : "terminal")
+                        .foregroundStyle(readiness == .ready ? .green : .secondary)
+                }
+                Text(readiness.title).accessibilityIdentifier("runtimeStatus")
+            }
+            Text("Bash · Python 3 · Node.js").font(.caption).foregroundStyle(.secondary)
+            if readiness == .idle || readiness == .started {
+                Button("准备并检查环境") { Task { try? await ScriptRuntime.shared.checkTools() } }
+                    .accessibilityIdentifier("prepareRuntime")
+            }
+            if case .failed(let reason) = readiness {
+                Text(reason).font(.caption).foregroundStyle(.orange)
+                Text("关闭 App 后重新打开会自动检查；聊天记录不会删除。").font(.caption)
+            }
+        } header: { Text("脚本环境") } footer: {
+            Text("随 App 提供，在本机自动初始化，无需下载或开启 JIT。选定会话项目后，脚本可读写项目文件并通过手机工具执行操作。")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scriptReadinessChanged).receive(on: DispatchQueue.main)) { _ in
+            readiness = ScriptRuntime.shared.readiness
+        }
+        .task {
+            readiness = ScriptRuntime.shared.readiness
+            try? await ScriptRuntime.shared.checkTools()
+            readiness = ScriptRuntime.shared.readiness
+        }
+    }
+}
+
+struct PhoneSetupView: View {
+    @ObservedObject var device: DeviceSettingsModel
+    @State private var importingPairing = false
+    @State private var showAdvanced = false
+    var body: some View {
+        Form {
+            Section {
+                Label("安装 PocketAgent Automation", systemImage: "1.circle")
+                Text("在 SideStore / AltStore 中同时安装主 App 和 Automation，保持版本一致。开启 iOS 设置 → 隐私与安全性 → 开发者模式。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Link("打开安装说明", destination: URL(string: "https://github.com/Borealin/PocketAgent#installation")!)
+            } header: { Text("首次配置") }
+            Section {
+                Label("连接 LocalDevVPN", systemImage: "2.circle")
+                Text("打开 LocalDevVPN，点 Connect 并允许添加 VPN。运行手机操作期间保持连接，手机保持解锁。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Label(device.hasPairing ? "RP 配对文件已导入" : "导入这台 iPhone 的 RP 配对文件",
+                      systemImage: device.hasPairing ? "checkmark.circle.fill" : "3.circle")
+                Button(device.importing ? "正在校验…" : device.hasPairing ? "更换配对文件…" : "从“文件”导入配对文件…") {
+                    importingPairing = true
+                }.disabled(device.importing || device.checking).accessibilityIdentifier("importPairing")
+                NavigationLink("配对文件从哪里获取？") { PairingGuideView() }
+            } footer: {
+                Text("请选择 rp_pairing_file.plist。SideStore 的 USB 配对文件不是同一种文件。只保存在本机，不进入 iCloud 或备份。")
+            }
+            Section {
+                Button { device.checkConnection() } label: {
+                    HStack {
+                        if device.checking { ProgressView().controlSize(.small) }
+                        Label(device.checking ? "正在检查…" : "检查连接", systemImage: "network")
+                    }
+                }.disabled(device.checking || device.importing || !device.hasPairing)
+                    .accessibilityIdentifier("checkDeviceConnection")
+                Label(device.connectionStatus, systemImage: device.connectionVerified ? "checkmark.circle.fill" : "info.circle")
+                    .font(.caption).accessibilityIdentifier("deviceConnectionStatus")
+                if !device.status.isEmpty { Text(device.status).font(.caption).accessibilityIdentifier("deviceSetupStatus") }
+            } footer: {
+                Text("检查已保存设置下的配对与 VPN，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
+            }
+            Section {
+                DisclosureGroup("高级设备设置", isExpanded: $showAdvanced) {
+                    TextField("Automation Bundle ID", text: $device.runner)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("runnerBundleID")
+                    Text("留空使用 \(DeviceSettings.runnerBundleID)").font(.caption).foregroundStyle(.secondary)
+                    TextField("VPN 地址:端口", text: $device.tunnel)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.numbersAndPunctuation)
+                        .accessibilityIdentifier("tunnelEndpoint")
+                    Text("留空使用 \(DeviceSettings.tunnelEndpointText)").font(.caption).foregroundStyle(.secondary)
+                    Toggle("保存诊断日志", isOn: $device.saveLogs).accessibilityIdentifier("diagnosticLogs")
+                    Toggle("保存诊断截图", isOn: $device.saveScreenshots).accessibilityIdentifier("diagnosticScreenshots")
+                    Button("保存设备设置") { device.save() }.disabled(device.checking || device.importing)
+                        .accessibilityIdentifier("saveDeviceSettings")
+                }
+            } footer: {
+                Text("侧载工具可能改写 Automation 的 Bundle ID，仅在必要时修改。诊断默认关闭，只保存在本机；原生日志开关在下次启动后生效。")
+            }
+        }.navigationTitle("手机操作配置").navigationBarTitleDisplayMode(.inline)
+            .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.data]) { device.importPairing($0) }
+    }
+}
+
+struct PairingGuideView: View {
+    private let command = "idevice-tools remotepairing_lockdown pair PocketAgent rp_pairing_file.plist"
+    var body: some View {
+        List {
+            Section {
+                Text("已有 RP 文件") .font(.headline)
+                Text("把这台 iPhone 对应的 rp_pairing_file.plist 用 AirDrop 或其他方式存到“文件”App，再回到上一页点“从文件导入”。文件名可以不同，导入时会校验内容。")
+            }
+            Section {
+                Text("首次生成") .font(.headline)
+                Text("首次需要电脑通过 USB 与这台 iPhone 建立 RP 配对。解锁手机、信任电脑，并使用包含 remotepairing_lockdown 的 idevice-tools 版本运行：")
+                Text(command).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                Button("复制电脑命令") { UIPasteboard.general.string = command }
+                Link("idevice-tools 项目与安装说明", destination: URL(string: "https://github.com/jkcoxson/idevice")!)
+                Text("生成后传到手机并导入。之后的聊天、脚本和手机操作可在手机上运行；配对文件不要分享给他人。")
+            }
+            Section {
+                Text("SideStore / Jitterbug 导出的 .mobiledevicepairing 或包含 HostCertificate 的 USB 配对文件不能直接代替 RP 文件。导入成功只表示格式有效，是否属于这台手机由“检查连接”验证。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }.navigationTitle("导入配对文件").navigationBarTitleDisplayMode(.inline)
     }
 }

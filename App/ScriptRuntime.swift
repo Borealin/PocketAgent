@@ -3,6 +3,26 @@ import Darwin
 import Foundation
 import PocketAgentNative
 
+enum ScriptReadiness: Equatable {
+    case missing, idle, preparing, started, checking, ready, failed(String)
+    var title: String {
+        switch self {
+        case .missing: "此版本未包含脚本环境"
+        case .idle: "等待自动准备"
+        case .preparing: "正在初始化 Linux…"
+        case .started: "Linux 已启动，待检查工具"
+        case .checking: "正在检查 Bash、Python、Node.js…"
+        case .ready: "脚本环境可用"
+        case .failed: "需要重启 App"
+        }
+    }
+    var busy: Bool { self == .preparing || self == .checking }
+}
+
+extension Notification.Name {
+    static let scriptReadinessChanged = Notification.Name("PocketAgent.scriptReadinessChanged")
+}
+
 /// Embedded iSH Linux runtime. One script runs at a time. The guest sees the
 /// Alpine rootfs (app-private fakefs, excluded from backup) and, during a run,
 /// exactly the turn's project root at /workspace. Scripts run as uid 501
@@ -24,31 +44,105 @@ final class ScriptRuntime: @unchecked Sendable {
     private let gate = RunGate()
     private let state = NSLock()
     private var ready = false
+    private var preparing = 0
+    private var checkingTools = false
+    private var toolsChecked = false
+    private var toolCheck: Task<Void, any Error>?
     private var unusable: String?
     private var tunnelAddress: UInt32?
+
+    var readiness: ScriptReadiness {
+        state.withLock {
+            if let unusable { return .failed(unusable) }
+            if archive == nil { return .missing }
+            if checkingTools { return .checking }
+            if preparing > 0 { return .preparing }
+            if toolsChecked { return .ready }
+            return ready ? .started : .idle
+        }
+    }
+
+    private func readinessChanged() {
+        NotificationCenter.default.post(name: .scriptReadinessChanged, object: nil)
+    }
 
     /// Imports the rootfs on first use and boots the kernel off the main thread.
     func prepare() async throws {
         if let unusable = state.withLock({ unusable }) { throw failure(unusable) }
         if state.withLock({ ready }) { return }
         guard let archive else { throw failure("此版本未包含脚本运行环境。") }
+        state.withLock { preparing += 1 }
+        readinessChanged()
+        defer { state.withLock { preparing -= 1 }; readinessChanged() }
         let tunnel = await MainActor.run { try? DeviceSettings.tunnelEndpoint().host }
         let directory = directory
-        try await runOnFFIThread {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            var url = directory
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try url.setResourceValues(values)
-            var error: NSString?
-            guard PocketISHBoot(archive.path, directory.path, &error) else {
-                throw failure("脚本运行环境启动失败：\(error ?? "unknown")")
+        do {
+            try await runOnFFIThread {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                var url = directory
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                try url.setResourceValues(values)
+                var error: NSString?
+                guard PocketISHBoot(archive.path, directory.path, &error) else {
+                    throw failure("脚本运行环境启动失败：\(error ?? "unknown")")
+                }
             }
+        } catch {
+            markUnusable(error.localizedDescription)
+            throw error
         }
         var address = in_addr()
         let tunnelAddress = tunnel.flatMap { inet_pton(AF_INET, $0, &address) == 1 ? address.s_addr : nil }
         state.withLock { self.tunnelAddress = tunnelAddress; ready = true }
         refreshBlockedHosts()
+    }
+
+    /// A read-only startup check. It shares the script gate, owns every uid-501
+    /// process it starts and mounts no workspace or phone bridge.
+    func checkTools() async throws {
+        if readiness == .ready { return }
+        // Shared work outlives a dismissed SwiftUI .task. In particular, its
+        // sleeps stay live after caller cancellation and checks never overlap.
+        let work = state.withLock {
+            if let toolCheck { return toolCheck }
+            let task = Task.detached(priority: .utility) { [self] in try await verifyTools() }
+            toolCheck = task
+            return task
+        }
+        try await work.value
+    }
+
+    private func verifyTools() async throws {
+        await gate.acquire()
+        do {
+            try await prepare()
+            if !state.withLock({ toolsChecked }) {
+                state.withLock { checkingTools = true }; readinessChanged()
+                let exit = ExitBox()
+                let command = "/bin/bash --version >/dev/null && /usr/bin/python3 --version >/dev/null && /usr/bin/node --version >/dev/null"
+                PocketISHRun(["/bin/sh", "-c", command], ["PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/home/pocketagent"], Self.uid) {
+                    status, _ in exit.finish(status)
+                }
+                let started = Date()
+                while !exit.done, Date().timeIntervalSince(started) < 20 {
+                    if let reason = PocketISHFailure() { throw failure("脚本环境已停止：\(reason)") }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                if !exit.done { _ = await stop(until: exit) }
+                let remaining = await blocking { PocketISHUserTasks(Self.uid, 0) }
+                guard remaining == 0 else { throw failure("无法确认脚本环境检查已结束，请重启 App。") }
+                let result = ScriptExit.resolve(kernel: exit.status, wrapper: nil)
+                guard result.exitCode == 0 else { throw failure("Bash、Python 或 Node.js 检查未通过，请重启 App 后重试。") }
+                state.withLock { toolsChecked = true; checkingTools = false }; readinessChanged()
+            }
+            await gate.release()
+        } catch {
+            state.withLock { checkingTools = false }
+            markUnusable(error.localizedDescription)
+            await gate.release()
+            throw error
+        }
     }
 
     /// The phone's own IPv4 addresses (WebDriverAgent listens on every
@@ -240,7 +334,10 @@ final class ScriptRuntime: @unchecked Sendable {
     }
 
     /// The first reason is kept; later ones are usually its consequence.
-    private func markUnusable(_ message: String) { state.withLock { if unusable == nil { unusable = message } } }
+    private func markUnusable(_ message: String) {
+        state.withLock { if unusable == nil { unusable = message } }
+        readinessChanged()
+    }
 
     /// SIGINT, a two-second grace period, then SIGKILL; returns how many
     /// threads were found. Completion is the kernel's own count of live

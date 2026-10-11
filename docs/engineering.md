@@ -9,6 +9,13 @@ public following the user's authorization on 2026-10-11. Existing installed conv
 settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
 remain outside this iteration.
 
+Setup must use one Base URL for standard model services, with Sub2API and protocol
+presets, clear model-loading outcomes and manual fallback. iCloud setup proposes
+a default PocketAgent folder, creates it after the first system folder grant,
+restores the saved location automatically and allows an explicit replacement.
+Pairing has a dedicated guide and format checks; script availability reflects
+actual initialization and interpreter startup instead of archive presence.
+
 The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
 for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
@@ -87,7 +94,11 @@ Retain pinned AgentKit 8108c9bb87c546860cfc1769571e115af919fe8a and the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
-Use a folder selected via the system document picker for iCloud Drive. Avoid an
+Use a folder selected via the system document picker for iCloud Drive. On first
+setup, create a PocketAgent child in the granted location; explicit replacement
+and existing bookmarks continue to use their exact folder. An arbitrary iCloud
+Drive folder cannot be silently accessed before the picker grants permission.
+Avoid an
 app-owned ubiquity container because personal/free sideload signing cannot
 reliably provision that capability. Sync only sessions and nonsecret provider
 configuration; no keys, pairing records, screenshots, logs, selected UI state,
@@ -149,6 +160,53 @@ Legacy endpoint/model and Keychain settings migrate once; production defaults
 contain no private gateway or company identity. Local build overrides preserve
 the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
+
+## Setup and readiness
+
+Status: implemented and archived; settings workflow validation on the device
+is awaiting XCTest system authorization. Provider records
+retain their current schema, IDs, exact inference/catalog addresses, Keychain
+bindings and conversation selections. Standard presets derive inference and
+model-list paths from one Base URL; custom routes keep full addresses. Catalog
+loads are explicit, show progress and failure/manual fallback, and discard
+responses after connection edits. Refresh preserves manually configured models
+and image support. Explicitly changing a custom connection to a preset can
+reuse its precisely reversible inference address, including when its catalog
+was disabled; simply opening it does not alter either stored address.
+Sub2API protocol must match the API-key group; its ordinary
+routes use /v1 and specialized Antigravity routes retain their explicit prefix.
+The route reference is [Sub2API gateway.go at 3a6fd1c](https://github.com/Wei-Shaw/sub2api/blob/3a6fd1c9db07203ca308aaba69e502bc1f35b307/backend/internal/server/routes/gateway.go).
+
+The default sync flow creates only the named child after folder authorization,
+using coordinated access and a protected, backup-excluded bookmark. Existing
+folder grants and sync files are retained. The picker remains necessary on a
+new installation; no entitlement or hardcoded iCloud filesystem path is added.
+Phone setup distinguishes RP pairing records from SideStore/USB Lockdown files,
+limits import size and retains the native parser validation. A temporary tunnel
+handshake checks pairing and VPN without starting an automation runner. That
+result does not establish Automation installation or XCTest authorization.
+
+The app automatically imports/boots the bundled Linux environment and runs
+Bash, Python and Node startup checks. These read-only checks share the existing
+script queue, mount no project and expose no phone bridge. Readiness changes
+publish from real preparation/check outcomes; kernel or process-cleanup failures
+show a relaunch requirement instead of a ready state. Workspace/rules controls
+remain separate from the dedicated script environment status.
+
+The startup check is one shared owned task. Closing a SwiftUI settings task
+must not cancel its polling sleeps: swallowing cancellation previously caused
+a busy loop. The detached check retains ownership of preparation, polling and
+cleanup, and callers only await its result; reopening settings cannot start a
+second check.
+
+During the connected update, an installation request stalled while the
+assistant was running. Stopping only the assistant process and retrying the
+same-identity IPA completed the installation without deleting its container.
+The cause of the service stall is not established; avoid treating a timeout as
+a completed install, and verify the installed version before retrying. The
+Automation process separately exited when its system passcode authorization
+timed out. Its log established an authorization timeout; later bundle loading
+and UI automation still need validation.
 
 ## On-device workspace and scripting
 
