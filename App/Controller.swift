@@ -152,7 +152,7 @@ final class DeviceConnection {
         try check(remote_server_connect_rsd(adapter, handshake, &server))
         guard server != nil else { throw failure("Missing DVT server") }
     }
-    func installedApplicationBundleIDs() throws -> Set<String> {
+    func installedApplications() throws -> [InstalledApp] {
         guard let server, process == nil else { throw failure("Missing available DVT server") }
         var listing: OpaquePointer?
         defer { if let listing { application_listing_free(listing) } }
@@ -163,7 +163,7 @@ final class DeviceConnection {
         defer { if let apps { application_listing_free_apps(apps, count) } }
         try check(application_listing_get_apps(listing, &apps, &count))
         guard count == 0 || apps != nil else { throw failure("Missing installed application records") }
-        var identifiers = Set<String>()
+        var records: [String: InstalledApp] = [:]
         for index in 0..<count {
             guard let app = apps?[Int(index)], plist_get_node_type(app) == PLIST_DICT,
                   let node = plist_dict_get_item(app, "CFBundleIdentifier"),
@@ -171,10 +171,27 @@ final class DeviceConnection {
                   let value = plist_get_string_ptr(node, nil) else { continue }
             // The string and node are borrowed from apps; copy before freeing it.
             let identifier = String(cString: value)
-            if !identifier.isEmpty { identifiers.insert(identifier) }
+            guard !identifier.isEmpty else { continue }
+            func field(_ key: String) -> String? {
+                guard let node = plist_dict_get_item(app, key), plist_get_node_type(node) == PLIST_STRING,
+                      let value = plist_get_string_ptr(node, nil) else { return nil }
+                return String(cString: value)
+            }
+            guard InstalledApps.isLaunchable(packageType: field("CFBundlePackageType"),
+                                            path: field("Path") ?? field("BundlePath"),
+                                            hasExtensionDefinition: plist_dict_get_item(app, "NSExtension") != nil) else { continue }
+            var names: [String] = []
+            for key in ["CFBundleDisplayName", "CFBundleName", "DisplayName", "displayName", "name"] {
+                guard let node = plist_dict_get_item(app, key), plist_get_node_type(node) == PLIST_STRING,
+                      let value = plist_get_string_ptr(node, nil) else { continue }
+                let name = String(cString: value).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && !names.contains(name) { names.append(name) }
+            }
+            let previous = records[identifier]?.names ?? []
+            records[identifier] = InstalledApp(bundleID: identifier, names: previous + names.filter { !previous.contains($0) })
         }
         // Free this borrowing client before ProcessControl borrows the server.
-        return identifiers
+        return records.values.sorted { $0.bundleID < $1.bundleID }
     }
     func launchRunner(bundleID runnerID: String) throws -> UInt64 {
         guard !ownsRunner else { throw failure("This turn already owns a runner") }
@@ -253,6 +270,7 @@ final class Model: ObservableObject {
     var runID = ""
     var logURL: URL?
     var connection: DeviceConnection?
+    var installedApps: [InstalledApp] = []
     var wdaSessionBase: String?
     @Published private(set) var networkPath = PhoneNetworkPath()
     @Published private(set) var deviceConnectionBusy = false
@@ -570,9 +588,11 @@ final class Model: ObservableObject {
                 try await self.ffi { try device.connectRunnerDVT() }
             }
             try Task.checkCancellation()
-            let installedIDs = try await runnerStage("runner_apps_listing", description: "Automation 安装检查失败") {
-                try await self.ffi { try device.installedApplicationBundleIDs() }
+            let apps = try await runnerStage("runner_apps_listing", description: "App 安装列表读取失败") {
+                try await self.ffi { try device.installedApplications() }
             }
+            installedApps = apps
+            let installedIDs = Set(apps.map(\.bundleID))
             try Task.checkCancellation()
             let runnerID = try await runnerStage("runner_bundle_resolve", description: "Automation 配置检查失败") {
                 try RunnerBundleID.resolve(override: override, embeddedDefaultID: defaultID,
@@ -603,8 +623,10 @@ final class Model: ObservableObject {
             wdaSessionBase = "/session/\(session)"
         }
         let base = wdaSessionBase!
+        let bounds = UIScreen.main.bounds
         _ = try await request("POST", "\(base)/appium/settings",
-            ["settings": ["waitForIdleTimeout": 0, "animationCoolOffTimeout": 0]])
+            ["settings": ["waitForIdleTimeout": 0, "animationCoolOffTimeout": 0,
+                          "activeAppDetectionPoint": "\(bounds.midX),\(bounds.midY)"]])
         return base
     }
     /// Called in an uncancelled task after the agent has stopped using tools.
@@ -613,7 +635,7 @@ final class Model: ObservableObject {
         await acquireDeviceConnection()
         defer { releaseDeviceConnection() }
         defer {
-            wdaSessionBase = nil; connection = nil
+            wdaSessionBase = nil; connection = nil; installedApps = []
             if preparedConnectionInUse {
                 preparedConnectionInUse = false
                 phonePreparationStatus = "本轮已结束，使用的准备连接已释放"

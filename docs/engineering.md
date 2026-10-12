@@ -16,6 +16,19 @@ restores the saved location automatically and allows an explicit replacement.
 Pairing has a dedicated guide and format checks; script availability reflects
 actual initialization and interpreter startup instead of archive presence.
 
+The approved 0.3.6 work exposes native installed-app discovery, exact-name
+opening and explicit Spotlight search fallback. Bundle-based opening must
+validate the real list instead of trying remembered identifiers. Ambiguous
+names return candidates; missing names direct the agent to system search.
+Spotlight is optional following the user's clarification; ordinary page search,
+observed buttons and swipes are the primary workflow. An additive logical-point
+swipe tool supports nested scrolling and iOS edge-back gestures. Foreground/node
+changes return a fresh observation when possible without replaying clicks or
+input. Existing sessions, credentials and per-device
+configuration remain untouched. Release acceptance includes iPhone 15 Pro
+Xianyu search, the stable default-endpoint hint, clean IPA inspection and
+verification of the public AltStore source against the released assets.
+
 The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
 for independent review and iPhone 12 mini validation. Its header has
 only a list icon, a tappable title for renaming and a new-conversation icon.
@@ -335,6 +348,19 @@ endpoint-specific loopback trace was not captured independently. The WLAN-only
 permission test above did not recover startup either. No tested configuration
 has recovered initial cellular-only connections.
 
+The whole-path follow-up with Claude Opus 5 examined public PocketAgent and
+LocalDevVPN source. The integrator independently checked its claims: the
+refused configured RP socket is distinct from the later negotiated TCP socket
+and TLS/CDTunnel handshake. `NWPath.isExpensive` can describe an expensive path
+but cannot prove private `if_delegated` or effective listener/NECP state. The
+combined 10.7.0.2/30 probe was already negative; 10.7.0.2/24 was not isolated.
+Changing similar addresses again is not an evidence-based fix. A self-owned
+wildcard listener plus exact packet-path capture is the next narrow
+discriminator: success would prove that tested app-owned flow reaches its
+listener, not prove daemon policy or that the problem is unfixable. That probe
+has not yet been executed. Existing retention evidence supports a transport
+lifecycle workaround; it does not establish a VPN-only configuration fix.
+
 The advanced endpoint field previously described its saved effective value as
 the empty-field default. Saving a loopback override therefore changed the
 "leave empty" hint to that override, although clearing it still selected the
@@ -552,20 +578,42 @@ phone actions timed out or detected a changed foreground app. The terminal log
 records the continued-processing task's expiration/cancellation handler; it
 does not distinguish a system stop from cancellation in the task UI. This
 session therefore does not establish that initial cellular RP refusal caused
-the HTTP error or the final task stop. Installed-app discovery and the later
-phone-action latency remain separate follow-up work.
+the HTTP error or the final task stop. The 0.3.6 work below addresses installed-app discovery and fresh foreground
+recovery; the earlier session itself is not a successful shopping acceptance.
 
-The 2026-10-12 follow-up inventory confirms 19 registered tool types: 11 phone
-actions, 5 workspace file tools, HTTP, scripts and skill reading. The router
-filters files/scripts out of turns without a workspace and skills out when no
-catalog exists. Installed-app listing currently serves companion resolution
-only; it is not a model tool. There is no app-name discovery tool or dedicated
-Spotlight command/fallback in the model instructions. The latest saved Xianyu
-conversation opened the correct `com.taobao.fleamarket`, but contained five
-foreground-change tool errors and had no selected workspace. Its status was
-completed; that status alone does not verify that the requested information
-was located correctly. App discovery and recovery from changed foreground
-state remain unimplemented improvements rather than properties of this build.
+The pre-0.3.6 inventory had 19 tool types. Its saved Xianyu conversation
+opened the real app but contained five foreground-change errors; a completed
+model status did not prove that the requested information was found.
+
+0.3.6 registers 23 tool types: 15 phone tools, 5 workspace file tools, HTTP,
+scripts and skill reading. Files/scripts require a workspace and skills require
+a catalog. Installed-app records now expose names and IDs to the model. Native
+metadata excludes app extensions and non-application packages: a real device
+initially returned both Xianyu and its NotificationService under the name
+"闲鱼", so name matching alone was insufficient. The parser uses package,
+NSExtension and path metadata rather than suffix guesses. Names must match an
+actual reported name for opening; absent or ambiguous names return structured
+candidates/errors. Legacy bundle-based opening rejects IDs absent from the
+same list. The listing is copied while borrowed, stays only in memory, and is
+released before ProcessControl is created.
+
+Phone instructions guide observed search-entry/input/result transitions,
+ordinary scrolling, nested-area swipes, visible back buttons and optional edge
+back gestures. Spotlight remains optional and is not a release acceptance
+requirement. Every navigation returns an actual screen; a gesture does not
+establish that the expected page was reached. Typed stale-snapshot/node/geometry
+and foreground errors invalidate old references and can attach a fresh read-only
+screen. Recovery bypasses system-surface compaction, performs no gesture and
+never repeats the interrupted action. A read retry is bounded to two attempts;
+mutation retries remain forbidden. Scripts use the same registry and executor.
+
+The independent 15 Pro acceptance host uses the exact product PhoneExecutor
+with the installed SideStore Automation companion, preserving the original app
+identity and history. Actual app-name lookup/opening and rejection of the uninstalled guessed ID
+have passed. Full search/navigation, foreground recovery and endpoint-hint UI
+acceptance are pending a user-provided uninterrupted device window. Core tests,
+the final iOS archive and clean IPA inspection passed; the public release and
+AltStore feed remain at 0.3.5 until that acceptance is completed.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which

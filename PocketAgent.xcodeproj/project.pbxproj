@@ -45,6 +45,7 @@
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
 		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
+		EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */; };
 		F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */; };
 		F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6EC72EE2D00391C3C55564C /* NativeTools.swift */; };
 		F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */ = {isa = PBXBuildFile; fileRef = 383A79C611AE1573F3276AA9 /* ish-root.tar.gz */; };
@@ -57,6 +58,7 @@
 		0A45359ABA3EE41F69474549 /* ChatComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComposer.swift; sourceTree = "<group>"; };
 		130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImageLoader.swift; sourceTree = "<group>"; };
 		19938EABD2390F0D02B28600 /* ChatPolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPolicies.swift; sourceTree = "<group>"; };
+		1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApps.swift; sourceTree = "<group>"; };
 		1F266439E5ACA1E35405D10A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		1F9EC154A7B819D774BFB985 /* ProviderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderViews.swift; sourceTree = "<group>"; };
 		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
@@ -156,6 +158,7 @@
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
+				1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */,
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
 				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
@@ -324,6 +327,7 @@
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
+				EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */,
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
@@ -403,7 +407,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -423,7 +427,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.3.5;
+				MARKETING_VERSION = 0.3.6;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -475,7 +479,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -489,7 +493,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.3.5;
+				MARKETING_VERSION = 0.3.6;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";

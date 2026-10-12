@@ -254,7 +254,7 @@ struct ToolRegistryTests {
     }
 
     @Test func existingPhoneToolsKeepTheirNamesAndSchemas() {
-        #expect(ToolCatalog.phoneTools.map(\.name) == ["observe_screen", "open_app", "tap", "tap_point", "long_press", "swipe",
+        #expect(Array(ToolCatalog.phoneTools.prefix(11)).map(\.name) == ["observe_screen", "open_app", "tap", "tap_point", "long_press", "swipe",
                                                        "type_text", "press_key", "dismiss_keyboard", "press_home", "wait"])
         let tap = ToolCatalog.phoneTools[2].schema.objectValue
         #expect(tap?["required"] == .array([.string("node"), .string("snapshot_id")]))
