@@ -8,24 +8,26 @@ provider you configure.
 ## Installation
 
 The source offers both apps from the
-[v0.3.5 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.5).
-This update fixes HTTP GET calls containing structured null placeholders, which
-previously failed with `resource exceeds maximum size`. It retains guided
-cellular recovery and connection-stage diagnostics from 0.3.4.
+[v0.3.6 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.6).
+This update adds installed-app lookup and opening by the exact name reported
+by the device, with explicit ambiguity handling and no guessed bundle IDs.
+Phone tools support observed search fields, ordinary scrolling and coordinate
+swipes for nested lists or edge-back gestures. Changed foreground apps and stale
+nodes return a fresh observation when possible; interrupted actions are never
+replayed. Spotlight is an optional search entry. The advanced endpoint hint
+always shows the embedded default even when an override is saved.
+
 On the tested iPhone 15 Pro, initial developer TCP connections are refused when
-cellular is the only network. Temporarily disabling cellular, preparing a real
-RP tunnel, then restoring cellular allows phone operations to use that retained
-connection. This is a guided bootstrap workaround; it does not remove the
-initial connection refusal while cellular is enabled. It also includes the earlier chat keyboard,
-confirmed deletion, signed Automation matching and compact task-title changes.
-Full automatic matching and visual Dynamic Island mitigation still need device
-acceptance. It remains a prerelease.
+cellular is the only network. A tunnel established with cellular off supported
+phone operations after restoring data in a wired diagnostic test; survival of
+a live prepared tunnel after USB removal remains unverified. No tested VPN
+configuration has fixed direct cellular-only startup. This remains a prerelease.
 
 The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
 0.3.1 and later package the complete test module as a nested framework.
 Update both apps when leaving 0.3.0; do not mix the old companion with the new app.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.5)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.6)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
@@ -34,7 +36,7 @@ phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the v0.3.5 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.5)
+2. Open [the v0.3.6 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.6)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
@@ -56,7 +58,7 @@ changed, so mixing these versions does not support phone automation.
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.3.5 candidate (build 8)** for both apps. Stable releases update
+offering the **0.3.6 candidate (build 9)** for both apps. Stable releases update
 the feed automatically; this candidate is included explicitly for device validation.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its

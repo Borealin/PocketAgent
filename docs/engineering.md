@@ -614,8 +614,9 @@ The accepted scope is the native tool chain and actual UI, not a complete
 model-generated shopping conversation or a SideStore upgrade of the original
 app. Spotlight itself and direct cellular-only startup remain unverified/unfixed.
 Core tests, distribution tests, the final iOS archive and clean IPA inspection
-passed. Publish the 0.3.6 candidate IPAs and inspected metadata together, then
-verify the anonymous public source and release assets.
+passed. The 0.3.6 candidate publishes both IPAs, complete corresponding source,
+checksums and inspected source metadata. Verify anonymous public source/asset
+access and metadata equality after the feed commit.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which
