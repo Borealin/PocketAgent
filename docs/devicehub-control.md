@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: local native feasibility experiment completed on one device; the production backend is not implemented. Last checked: 2026-10-12.
+> Status: native feasibility completed; production integration in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `032b5ab` (15 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -29,15 +29,16 @@ integration work.
 
 - Scope: feasibility, a backend design behind the existing phone tool names, the
   completed native feasibility experiment and the remaining production FFI/AX work.
-- Non-goals: removing WDA, which stays the default and the fallback; the cellular RP
+- Non-goals: removing WDA, which stays selectable; the cellular RP
   connection problem in engineering.md, which sits below this layer and is unaffected;
   answering system dialogs or paste permission prompts automatically; Mac-side tooling
   such as devicectl.
 
 ## 2. Research conclusions
 
-- Recommendation: proceed with a local opt-in DDI backend, keeping WDA as the default
-  and fallback. A separately signed native probe reused PocketAgent's pinned idevice
+- Decision: implement DDI as the default and retain an explicit WDA selector. Never
+  switch backends or replay an action automatically after an uncertain result.
+  A separately signed native probe reused PocketAgent's pinned idevice
   and tunnel patch on an iPhone 12 mini. Screenshot, ordinary touch, app launch and
   Home worked through its on-phone RP tunnel without starting XCTest or WDA.
 - The stream requirement is disproved for ordinary touch on this tested combination:
@@ -123,7 +124,8 @@ integration work.
 
 Add a backend boundary inside the existing phone executor. Tool names, parameters,
 snapshot IDs, approvals, the single serial action queue and the no-replay rule stay as
-they are; WDA becomes the first backend and remains the default. A DDI backend reuses
+they are. DDI is the default; WDA is selected explicitly. Backend selection is frozen
+when a turn is queued and never changes during that turn. A DDI backend reuses
 the turn's RP tunnel and DDI preparation, skips runner launch and opens service clients
 through new idevice FFI exports. It observes with a screenshot plus the AX graph and
 acts through dtuhidd, dtappserviced and dtpasteboardd. The tested matrix does not require
@@ -134,6 +136,25 @@ retry an action after discovering that its outcome is unknown.
 
 <details>
 <summary>Detailed design</summary>
+
+### Implementation contract
+
+- Align with main `032b5ab`: all 15 phone tools, installed-app names and IDs,
+  Spotlight, bounded coordinate swipe and fresh-observation recovery. Model and
+  script callers continue through the existing PhoneExecutor action queue.
+- Swift owns one native DDI session per turn. Native requests have deadlines;
+  cancellation releases contacts/keys and removes only the owned keyboard before
+  releasing services. No display stream is started on the proven device matrix.
+- AX archives are decoded as bounded data, never instantiated Apple classes.
+  One semantic request at a time; abort the AX connection on timeout so a late
+  response cannot be assigned to another element. Traverse AXChildren, validate
+  foreground PID and display geometry before/after, then map observed roles to
+  tool types without inventing missing attributes.
+- Unicode input replaces the device clipboard and uses a virtual keyboard paste
+  chord. Clear and paste are separate effects with stop checks. Permission prompts
+  and unconfirmed input/dismissal are reported with the actual fresh screen.
+- Scope excludes a floating overlay and embedded VPN. RP pairing, LocalDevVPN
+  routing and cellular startup constraints remain prerequisites.
 
 ### Impact and compatibility
 
