@@ -8,20 +8,22 @@ provider you configure.
 ## Installation
 
 The source offers both apps from the
-[v0.3.3 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3).
-This update adds tap-to-dismiss keyboard behavior and keeps session rows in
-place until deletion is confirmed. The chat interactions were exercised on
-iPhone 12 mini, retaining its installed conversations and settings. It also
-includes automatic signed Automation matching and compact system task titles.
+[v0.3.4 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.4).
+This update adds guided cellular recovery and connection-stage diagnostics.
+On the tested iPhone 15 Pro, initial developer TCP connections are refused when
+cellular is the only network. Temporarily disabling cellular, preparing a real
+RP tunnel, then restoring cellular allows phone operations to use that retained
+connection. This is a guided bootstrap workaround; it does not change iOS's
+initial cellular connection policy. It also includes the earlier chat keyboard,
+confirmed deletion, signed Automation matching and compact task-title changes.
 Full automatic matching and visual Dynamic Island mitigation still need device
-acceptance; cellular-only tunnel startup remains under investigation. It remains
-a prerelease.
+acceptance. It remains a prerelease.
 
 The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
 0.3.1 and later package the complete test module as a nested framework.
 Update both apps when leaving 0.3.0; do not mix the old companion with the new app.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.4)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
@@ -30,7 +32,7 @@ phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the v0.3.3 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3)
+2. Open [the v0.3.4 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.4)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
@@ -52,7 +54,7 @@ changed, so mixing these versions does not support phone automation.
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.3.3 candidate (build 6)** for both apps. Stable releases update
+offering the **0.3.4 candidate (build 7)** for both apps. Stable releases update
 the feed automatically; this candidate is included explicitly for device validation.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its
@@ -87,6 +89,18 @@ The first pairing, installation and system authorization require setup. After
 setup, a conversation can invoke phone tools without a connected computer.
 Keep the local VPN connected. iOS can require the device passcode when enabling
 UI automation; enter it only in the system page on the phone.
+
+If connection checks fail only on cellular, open Settings → 手机操作配置 →
+蜂窝连接恢复. Temporarily disable cellular and disconnect Wi-Fi while leaving
+LocalDevVPN connected, then tap **准备蜂窝模式连接**. After **连接已保留** appears,
+restore cellular and send a new message. The real RP tunnel is retained for at
+most 120 seconds (iOS may end the background allowance sooner) and is consumed
+by the next phone operation. Ordinary **检查连接** releases its temporary tunnel;
+it does not prepare a later turn. Pure chat/file/network turns do not consume
+the prepared connection. Expiry, Stop, explicit release and device-setting
+changes discard it. An expired phone operation is never replayed automatically.
+The default path label can show unavailable while the local VPN still works.
+
 
 ## Conversations and providers
 

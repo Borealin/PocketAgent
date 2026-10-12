@@ -45,6 +45,7 @@
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
 		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
+		F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */; };
 		F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6EC72EE2D00391C3C55564C /* NativeTools.swift */; };
 		F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */ = {isa = PBXBuildFile; fileRef = 383A79C611AE1573F3276AA9 /* ish-root.tar.gz */; };
 		F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */; };
@@ -81,6 +82,7 @@
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
 		B6EC72EE2D00391C3C55564C /* NativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTools.swift; sourceTree = "<group>"; };
+		BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneConnectionStatus.swift; sourceTree = "<group>"; };
 		BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
 		BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspaces.swift; sourceTree = "<group>"; };
 		C08CD702C33D2019607205D8 /* DeviceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSettings.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				7B1523AE79BCB523972CA3A5 /* Controller.swift */,
 				C08CD702C33D2019607205D8 /* DeviceSettings.swift */,
 				977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */,
+				BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */,
 				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
 				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
 				55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */,
@@ -325,6 +328,7 @@
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
 				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
+				F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */,
 				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
@@ -399,7 +403,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -419,7 +423,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.3.2;
+				MARKETING_VERSION = 0.3.4;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -471,7 +475,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -485,7 +489,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Native";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.3.2;
+				MARKETING_VERSION = 0.3.4;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";

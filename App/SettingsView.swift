@@ -25,6 +25,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
+    @ObservedObject var engine: Model
     @ObservedObject var providers: ProviderStore
     @ObservedObject var sync: SyncCoordinator
     @ObservedObject var device: DeviceSettingsModel
@@ -78,9 +79,9 @@ struct SettingsView: View {
                 }
                 Section {
                     NavigationLink {
-                        PhoneSetupView(device: device)
+                        PhoneSetupView(engine: engine, device: device)
                     } label: {
-                        LabeledContent("手机操作配置", value: device.connectionVerified ? "连接已验证" : device.hasPairing ? "待检查连接" : "待导入配对文件")
+                        LabeledContent("手机操作配置", value: engine.hasPreparedPhoneConnection ? "连接已保留" : device.connectionVerified ? "连接已验证" : device.hasPairing ? "待检查连接" : "待导入配对文件")
                     }.accessibilityIdentifier("phoneSetup")
                 } header: { Text("手机操作") }
             }.navigationTitle("设置")
@@ -137,6 +138,7 @@ struct ScriptEnvironmentSection: View {
 }
 
 struct PhoneSetupView: View {
+    @ObservedObject var engine: Model
     @ObservedObject var device: DeviceSettingsModel
     @State private var importingPairing = false
     @State private var showAdvanced = false
@@ -158,7 +160,7 @@ struct PhoneSetupView: View {
                       systemImage: device.hasPairing ? "checkmark.circle.fill" : "3.circle")
                 Button(device.importing ? "正在校验…" : device.hasPairing ? "更换配对文件…" : "从“文件”导入配对文件…") {
                     importingPairing = true
-                }.disabled(device.importing || device.checking).accessibilityIdentifier("importPairing")
+                }.disabled(settingsBusy).accessibilityIdentifier("importPairing")
                 NavigationLink("配对文件从哪里获取？") { PairingGuideView() }
             } footer: {
                 Text("请选择 rp_pairing_file.plist。SideStore 的 USB 配对文件不是同一种文件。只保存在本机，不进入 iCloud 或备份。")
@@ -169,13 +171,38 @@ struct PhoneSetupView: View {
                         if device.checking { ProgressView().controlSize(.small) }
                         Label(device.checking ? "正在检查…" : "检查连接", systemImage: "network")
                     }
-                }.disabled(device.checking || device.importing || !device.hasPairing)
+                }.disabled(settingsBusy || engine.hasPreparedPhoneConnection || !device.hasPairing)
                     .accessibilityIdentifier("checkDeviceConnection")
                 Label(device.connectionStatus, systemImage: device.connectionVerified ? "checkmark.circle.fill" : "info.circle")
                     .font(.caption).accessibilityIdentifier("deviceConnectionStatus")
                 if !device.status.isEmpty { Text(device.status).font(.caption).accessibilityIdentifier("deviceSetupStatus") }
             } footer: {
-                Text("检查已保存设置下的配对与 VPN，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
+                Text("检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
+            }
+            Section {
+                Text("1. 临时关闭蜂窝数据，并断开 Wi-Fi；保持 LocalDevVPN 连接和手机解锁。\n2. 点下面的准备按钮，等待连接已保留。\n3. 开回蜂窝数据，回到聊天发送新消息。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { engine.prepareCellularConnection() } label: {
+                    HStack {
+                        if engine.preparingPhoneConnection { ProgressView().controlSize(.small) }
+                        Label(engine.preparingPhoneConnection ? "正在准备…" : "准备蜂窝模式连接", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }.disabled(settingsBusy || !device.hasPairing)
+                    .accessibilityIdentifier("prepareCellularConnection")
+                Text(engine.phonePreparationStatus).font(.caption)
+                    .accessibilityIdentifier("phonePreparationStatus")
+                if let expiry = engine.preparedConnectionExpiresAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text("剩余 \(max(0, Int(expiry.timeIntervalSince(context.date)))) 秒；系统可能提前结束保留。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button("释放已准备连接") { engine.releasePreparedPhoneConnection() }
+                        .accessibilityIdentifier("releasePreparedConnection")
+                }
+                Text(engine.networkPath.description).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("phoneNetworkPath")
+            } header: { Text("蜂窝连接恢复") } footer: {
+                Text("用于蜂窝开启时无法建立初始连接的情况。只建立并短暂保留 RP 隧道，下一次手机操作才会启动 Automation 并验证连接；不会自动执行或重试手机操作。默认网络路径状态不代表 VPN 是否可用。")
             }
             Section {
                 DisclosureGroup("高级设备设置", isExpanded: $showAdvanced) {
@@ -189,7 +216,7 @@ struct PhoneSetupView: View {
                     Text("留空使用 \(DeviceSettings.tunnelEndpointText)").font(.caption).foregroundStyle(.secondary)
                     Toggle("保存诊断日志", isOn: $device.saveLogs).accessibilityIdentifier("diagnosticLogs")
                     Toggle("保存诊断截图", isOn: $device.saveScreenshots).accessibilityIdentifier("diagnosticScreenshots")
-                    Button("保存设备设置") { device.save() }.disabled(device.checking || device.importing)
+                    Button("保存设备设置") { device.save() }.disabled(settingsBusy)
                         .accessibilityIdentifier("saveDeviceSettings")
                 }
             } footer: {
@@ -197,6 +224,9 @@ struct PhoneSetupView: View {
             }
         }.navigationTitle("手机操作配置").navigationBarTitleDisplayMode(.inline)
             .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.data]) { device.importPairing($0) }
+    }
+    private var settingsBusy: Bool {
+        device.checking || device.importing || engine.busy || engine.deviceConnectionBusy
     }
 }
 

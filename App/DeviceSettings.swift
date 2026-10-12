@@ -139,8 +139,16 @@ final class DeviceSettingsModel: ObservableObject {
     @Published private(set) var connectionVerified = false
     @Published var status = ""
     private var generation = 0
+    private let engine: Model
+
+    init(engine: Model) { self.engine = engine }
 
     func save() {
+        guard !importing, !checking, engine.beginDeviceConfigurationChange() else {
+            status = "请等待当前连接检查、准备或手机任务结束后再保存。"
+            return
+        }
+        defer { engine.endDeviceConfigurationChange() }
         do {
             try DeviceSettings.save(runner: runner, tunnel: tunnel, screenshots: saveScreenshots, logs: saveLogs)
             generation += 1
@@ -151,10 +159,13 @@ final class DeviceSettingsModel: ObservableObject {
     }
 
     func importPairing(_ result: Result<URL, any Error>) {
-        guard !importing, !checking else { return }
+        guard !importing, !checking, engine.beginDeviceConfigurationChange() else {
+            status = "请等待当前连接检查、准备或手机任务结束后再导入。"
+            return
+        }
         importing = true
         Task {
-            defer { importing = false }
+            defer { importing = false; engine.endDeviceConfigurationChange() }
             do {
                 try await DeviceSettings.importPairing(from: result.get())
                 generation += 1
@@ -167,17 +178,14 @@ final class DeviceSettingsModel: ObservableObject {
 
     /// Verifies the pairing and VPN tunnel without starting WDA or phone actions.
     func checkConnection() {
-        guard !checking, !importing, hasPairing else { return }
+        guard !checking, !importing, hasPairing, !engine.busy, !engine.deviceConnectionBusy,
+              !engine.hasPreparedPhoneConnection else { return }
         checking = true; connectionVerified = false; connectionStatus = "正在验证配对与 VPN…"
         let connection = generation
         Task {
             defer { checking = false }
             do {
-                try await runOnFFIThread {
-                    let device = DeviceConnection()
-                    try device.connect()
-                    // The local connection is released when this scope ends.
-                }
+                try await engine.checkPhoneConnection()
                 guard generation == connection else { return }
                 connectionVerified = true
                 connectionStatus = "配对与 VPN 连接正常"
@@ -185,7 +193,7 @@ final class DeviceSettingsModel: ObservableObject {
             } catch {
                 guard generation == connection else { return }
                 connectionStatus = "连接未通过"
-                status = "请确认手机已解锁、LocalDevVPN 已连接、配对文件属于这台手机。\n\(error.localizedDescription)"
+                status = error.localizedDescription
             }
         }
     }

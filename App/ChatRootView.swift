@@ -59,7 +59,7 @@ struct ChatRootView: View {
         }
         .alert(item: $chat.imageWarning) { warning in imageAlert(warning) }
         .sheet(isPresented: $showSettings) {
-            SettingsView(providers: providers, sync: sync, device: device, workspaces: workspaces) { showSettings = false }
+            SettingsView(engine: engine, providers: providers, sync: sync, device: device, workspaces: workspaces) { showSettings = false }
         }
         .sheet(isPresented: $showWorkspaces) {
             if let selected = chat.selected {

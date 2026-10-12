@@ -78,6 +78,17 @@ private final class LocalNetworkPermission {
 }
 
 final class DeviceConnection {
+    struct TunnelFailure: Error { let cause: any Error }
+    struct Configuration {
+        let pairingPath: String
+        let host: String
+        let port: UInt16
+        static func current() throws -> Configuration {
+            let endpoint = try DeviceSettings.tunnelEndpoint()
+            return Configuration(pairingPath: DeviceSettings.pairingURL.path,
+                                 host: endpoint.host, port: endpoint.port)
+        }
+    }
     var adapter: OpaquePointer?
     var handshake: OpaquePointer?
     private var server: OpaquePointer?
@@ -94,27 +105,28 @@ final class DeviceConnection {
         if let server { remote_server_free(server) }
         process = nil; server = nil
     }
-    func connect() throws {
+    func connect(configuration: Configuration) throws {
         var pairing: OpaquePointer?
-        let path = DeviceSettings.pairingURL.path
+        let path = configuration.pairingPath
         guard FileManager.default.fileExists(atPath: path) else { throw failure("尚未导入配对文件，请在设置中导入。") }
         try path.withCString { try check(rp_pairing_file_read($0, &pairing)) }
         guard let pairing else { throw failure("Pairing file did not open") }
         defer { rp_pairing_file_free(pairing) }
-        let endpoint = try DeviceSettings.tunnelEndpoint()
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = endpoint.port.bigEndian
-        guard inet_pton(AF_INET, endpoint.host, &address.sin_addr) == 1 else { throw failure("Invalid IP") }
-        try "PocketAgent".withCString { hostname in
-            try withUnsafePointer(to: &address) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    try check(tunnel_create_rppairing($0, socklen_t(MemoryLayout<sockaddr_in>.size),
-                        hostname, pairing, nil, nil, &adapter, &handshake))
+        address.sin_port = configuration.port.bigEndian
+        guard inet_pton(AF_INET, configuration.host, &address.sin_addr) == 1 else { throw failure("Invalid IP") }
+        do {
+            try "PocketAgent".withCString { hostname in
+                try withUnsafePointer(to: &address) { pointer in
+                    try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        try check(tunnel_create_rppairing($0, socklen_t(MemoryLayout<sockaddr_in>.size),
+                            hostname, pairing, nil, nil, &adapter, &handshake))
+                    }
                 }
             }
-        }
+        } catch { throw TunnelFailure(cause: error) }
         guard adapter != nil, handshake != nil else { throw failure("Incomplete tunnel handles") }
     }
     func hasDDI() -> Bool {
@@ -242,8 +254,29 @@ final class Model: ObservableObject {
     var logURL: URL?
     var connection: DeviceConnection?
     var wdaSessionBase: String?
+    @Published private(set) var networkPath = PhoneNetworkPath()
+    @Published private(set) var deviceConnectionBusy = false
+    @Published private(set) var preparingPhoneConnection = false
+    @Published private(set) var preparedConnectionExpiresAt: Date?
+    @Published private(set) var phonePreparationStatus = "尚未准备保留连接"
+    private let pathMonitor = NWPathMonitor()
+    private var connectionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var preparedConnection: DeviceConnection?
+    private var preparedConnectionDeadline: TimeInterval?
+    private var preparedConnectionExpired = false
+    private var preparedExpiryRejectedRunID: String?
+    private var preparedConnectionInUse = false
+    private var preparationGeneration = 0
+    private var preparationJob: Task<Void, Never>?
+    private var preparedExpiryJob: Task<Void, Never>?
+    private var preparationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    var hasPreparedPhoneConnection: Bool { preparedConnection != nil }
     init() {
         DeviceSettings.migrateLegacyPairing()
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            MainActor.assumeIsolated { self?.networkPath = PhoneNetworkPath(path) }
+        }
+        pathMonitor.start(queue: .main)
         // Native file logging only when the user opted in (read at launch).
         if DeviceSettings.saveDiagnosticLogs {
             let path = documents.appendingPathComponent("idevice-stages.log").path
@@ -261,6 +294,191 @@ final class Model: ObservableObject {
 
     private func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
         try await runOnFFIThread(action)
+    }
+    /// Settings handshakes and turn startup share this gate. A turn may begin
+    /// model work while preparation finishes, but cannot touch the phone yet.
+    private func acquireDeviceConnection() async {
+        guard deviceConnectionBusy else { deviceConnectionBusy = true; return }
+        await withCheckedContinuation { connectionWaiters.append($0) }
+    }
+    private func releaseDeviceConnection() {
+        if connectionWaiters.isEmpty { deviceConnectionBusy = false }
+        else { connectionWaiters.removeFirst().resume() }
+    }
+    func beginDeviceConfigurationChange() -> Bool {
+        guard !busy, !deviceConnectionBusy else { return false }
+        deviceConnectionBusy = true
+        releasePreparedPhoneConnection(message: "设备设置已更改，请重新准备连接")
+        return true
+    }
+    func endDeviceConfigurationChange() { releaseDeviceConnection() }
+
+    /// Setup has its own protected diagnostic file; it never borrows a previous
+    /// turn's runID/logURL. Callers supply only the non-sensitive fields below.
+    private func logPhoneConnection(_ event: String, context: PhoneConnectionDiagnosticContext,
+                                    fields: [String: Any] = [:]) {
+        guard DeviceSettings.saveDiagnosticLogs else { return }
+        let allowed = Set(["networkPath", "usesWiFi", "usesCellular", "usesOtherInterface",
+                           "isExpensive", "isConstrained", "connectionStage", "connectionError",
+                           "nativeErrorCode", "errorDomain", "errorCode"])
+        var record = fields.filter { allowed.contains($0.key) }
+        record["event"] = event
+        record["context"] = context.rawValue
+        record["time"] = ISO8601DateFormatter().string(from: Date())
+        record["appState"] = UIApplication.shared.applicationState.rawValue
+        guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
+        var directory = applicationSupport.appendingPathComponent("Diagnostics", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try directory.setResourceValues(values)
+            let file = directory.appendingPathComponent("phone-connection.jsonl")
+            if !FileManager.default.fileExists(atPath: file.path) {
+                guard FileManager.default.createFile(atPath: file.path, contents: nil,
+                    attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]) else { return }
+            }
+            let handle = try FileHandle(forWritingTo: file)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data + Data([10]))
+            try handle.synchronize()
+        } catch { /* Optional diagnostics never change connection behavior. */ }
+    }
+
+    private func connectPhone(_ device: DeviceConnection, configuration: DeviceConnection.Configuration,
+                              context: PhoneConnectionDiagnosticContext) async throws {
+        let path = networkPath
+        logPhoneConnection("rp_tunnel_connect_started", context: context, fields: path.diagnosticFields)
+        do { try await ffi { try device.connect(configuration: configuration) } }
+        catch {
+            guard let tunnelError = error as? DeviceConnection.TunnelFailure else {
+                logPhoneConnection("rp_pairing_configuration_failed", context: context, fields: Model.errorFields(error))
+                throw error
+            }
+            let diagnostic = PhoneConnectionFailure(tunnelError.cause, path: path)
+            logPhoneConnection("rp_tunnel_connect_failed", context: context, fields: diagnostic.diagnosticFields)
+            throw diagnostic
+        }
+        logPhoneConnection("rp_tunnel_connect_succeeded", context: context, fields: networkPath.diagnosticFields)
+    }
+
+    /// An ordinary check owns only a temporary tunnel and never preserves it.
+    func checkPhoneConnection() async throws {
+        guard !busy, !deviceConnectionBusy, !hasPreparedPhoneConnection else {
+            throw failure("请等待当前手机任务结束；如已准备连接，请先释放它再检查。")
+        }
+        let configuration = try DeviceConnection.Configuration.current()
+        deviceConnectionBusy = true
+        defer { releaseDeviceConnection() }
+        let device = DeviceConnection()
+        try await connectPhone(device, configuration: configuration, context: .deviceSetup)
+        // A fresh explicit check supersedes an earlier expired preparation,
+        // without reviving or retaining that preparation's old handles.
+        preparedConnectionExpired = false
+        preparedExpiryRejectedRunID = nil
+    }
+
+    /// The manual recovery establishes RP only. WDA still starts under the
+    /// next turn's existing phone executor, after the user restores data.
+    func prepareCellularConnection() {
+        guard !busy, !deviceConnectionBusy else { return }
+        releasePreparedPhoneConnection(message: "正在准备连接…")
+        let configuration: DeviceConnection.Configuration
+        do { configuration = try .current() }
+        catch { phonePreparationStatus = error.localizedDescription; return }
+        deviceConnectionBusy = true
+        preparingPhoneConnection = true
+        let generation = preparationGeneration
+        phonePreparationStatus = "正在建立 RP 隧道；请暂时保持蜂窝数据关闭"
+        preparationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PreparePhoneConnection") { [weak self] in
+            guard let self, self.preparationGeneration == generation else { return }
+            self.releasePreparedPhoneConnection(message: "系统后台保留时间已结束，请重新准备连接", expired: true)
+        }
+        guard preparationBackgroundTask != .invalid else {
+            phonePreparationStatus = "系统未提供后台保留时间，请回到 App 后重新准备连接"
+            preparingPhoneConnection = false
+            releaseDeviceConnection()
+            return
+        }
+        preparationJob = Task {
+            defer {
+                preparingPhoneConnection = false
+                preparationJob = nil
+                releaseDeviceConnection()
+            }
+            let device = DeviceConnection()
+            do {
+                try await connectPhone(device, configuration: configuration, context: .deviceSetup)
+                guard generation == preparationGeneration, !Task.isCancelled else { return }
+                preparedConnection = device
+                preparedConnectionDeadline = ProcessInfo.processInfo.systemUptime + 120
+                preparedConnectionExpiresAt = Date().addingTimeInterval(120)
+                phonePreparationStatus = "连接已保留。现在开回蜂窝数据，再发送新消息；下一次手机操作会使用它。"
+                logPhoneConnection("rp_tunnel_prepared", context: .deviceSetup, fields: networkPath.diagnosticFields)
+                preparedExpiryJob = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(120)) } catch { return }
+                    guard let self, self.preparationGeneration == generation else { return }
+                    self.releasePreparedPhoneConnection(message: "准备连接已过期，请重新准备", expired: true)
+                }
+            } catch {
+                guard generation == preparationGeneration else { return }
+                phonePreparationStatus = error.localizedDescription
+                endPreparationBackgroundTask()
+            }
+        }
+    }
+
+    func releasePreparedPhoneConnection(message: String = "已释放准备连接", expired: Bool = false) {
+        if preparedConnection != nil || preparingPhoneConnection {
+            logPhoneConnection(expired ? "rp_tunnel_prepared_expired" : "rp_tunnel_prepared_released",
+                               context: .deviceSetup, fields: networkPath.diagnosticFields)
+        }
+        preparationGeneration += 1
+        preparationJob?.cancel()
+        preparedExpiryJob?.cancel(); preparedExpiryJob = nil
+        preparedConnection = nil
+        preparedConnectionDeadline = nil
+        preparedConnectionExpired = expired
+        preparedConnectionExpiresAt = nil
+        phonePreparationStatus = message
+        endPreparationBackgroundTask()
+    }
+    private func endPreparationBackgroundTask() {
+        guard preparationBackgroundTask != .invalid else { return }
+        let identifier = preparationBackgroundTask
+        preparationBackgroundTask = .invalid
+        UIApplication.shared.endBackgroundTask(identifier)
+    }
+    private func consumePreparedPhoneConnection() throws -> DeviceConnection? {
+        func rejectExpiredConnection() throws -> Never {
+            // This turn cannot reconnect behind an expired preparation or retry
+            // phone effects, but a later explicit user turn may connect normally.
+            preparedConnectionExpired = false
+            preparedExpiryRejectedRunID = runID
+            logPhoneConnection("rp_tunnel_prepared_rejected", context: .activeTurn,
+                               fields: networkPath.diagnosticFields)
+            throw failure("准备连接已过期。请重新准备连接，或在可连接的网络下发送新消息；本轮手机操作未执行，不会自动重试。")
+        }
+        if preparedConnectionExpired || preparedExpiryRejectedRunID == runID { try rejectExpiredConnection() }
+        guard let device = preparedConnection else { return nil }
+        guard let deadline = preparedConnectionDeadline,
+              ProcessInfo.processInfo.systemUptime < deadline,
+              preparationBackgroundTask != .invalid else {
+            releasePreparedPhoneConnection(message: "准备连接已过期，请重新准备", expired: true)
+            try rejectExpiredConnection()
+        }
+        preparedConnection = nil
+        preparationGeneration += 1
+        preparedConnectionDeadline = nil
+        preparedConnectionExpiresAt = nil
+        preparedExpiryJob?.cancel(); preparedExpiryJob = nil
+        endPreparationBackgroundTask()
+        preparedConnectionInUse = true
+        phonePreparationStatus = "本轮正在使用准备连接，结束后会释放"
+        logPhoneConnection("rp_tunnel_prepared_consumed", context: .activeTurn, fields: networkPath.diagnosticFields)
+        return device
     }
     private func runnerStage<T>(_ event: String, description: String,
                                 operation: () async throws -> T) async throws -> T {
@@ -292,6 +510,7 @@ final class Model: ObservableObject {
         }
     }
     func cancel() {
+        releasePreparedPhoneConnection(message: "已停止并释放准备连接")
         pendingAgentCancellation = true
         if let runtime = activeAgentRuntime {
             // Drain AgentKit's terminal events before releasing phone resources.
@@ -300,12 +519,20 @@ final class Model: ObservableObject {
         } else { job?.cancel() }
     }
     func prepareWDA() async throws -> String {
+        await acquireDeviceConnection()
+        defer { releaseDeviceConnection() }
+        try Task.checkCancellation()
+        guard !pendingAgentCancellation else { throw CancellationError() }
         let device: DeviceConnection
         if let existing = connection {
             // A failed HTTP/session setup may already own a running process.
             // Resume setup without replacing the object that owns its PID.
             device = existing
+        } else if let prepared = try consumePreparedPhoneConnection() {
+            device = prepared
+            connection = prepared
         } else {
+            let configuration = try DeviceConnection.Configuration.current()
             log("network_authorization_requested")
             guard await LocalNetworkPermission().request() else {
                 throw failure("Allow Local Network access for PocketAgent in Settings")
@@ -313,7 +540,7 @@ final class Model: ObservableObject {
             try Task.checkCancellation()
             log("network_authorized")
             device = DeviceConnection()
-            try await ffi { try device.connect() }
+            try await connectPhone(device, configuration: configuration, context: .activeTurn)
             connection = device
             log("rp_tunnel_connected")
         }
@@ -383,7 +610,15 @@ final class Model: ObservableObject {
     /// Called in an uncancelled task after the agent has stopped using tools.
     /// Keep the serial queue occupied until activation and runner teardown finish.
     func finishPhoneAutomation() async -> String {
-        defer { wdaSessionBase = nil; connection = nil }
+        await acquireDeviceConnection()
+        defer { releaseDeviceConnection() }
+        defer {
+            wdaSessionBase = nil; connection = nil
+            if preparedConnectionInUse {
+                preparedConnectionInUse = false
+                phonePreparationStatus = "本轮已结束，使用的准备连接已释放"
+            }
+        }
         guard let device = connection, device.ownsRunner else { return "" }
         var warnings: [String] = []
         if let base = wdaSessionBase {
@@ -430,12 +665,13 @@ struct ControllerApp: App {
     @StateObject private var providers: ProviderStore
     @StateObject private var chat: ChatController
     @StateObject private var sync: SyncCoordinator
-    @StateObject private var device = DeviceSettingsModel()
+    @StateObject private var device: DeviceSettingsModel
     @StateObject private var workspaces: WorkspaceStore
     init() {
         let model = Model(), providers = ProviderStore(), workspaces = WorkspaceStore()
         let chat = ChatController(engine: model, providers: providers, workspaces: workspaces)
         _model = StateObject(wrappedValue: model)
+        _device = StateObject(wrappedValue: DeviceSettingsModel(engine: model))
         _workspaces = StateObject(wrappedValue: workspaces)
         _providers = StateObject(wrappedValue: providers)
         _chat = StateObject(wrappedValue: chat)
