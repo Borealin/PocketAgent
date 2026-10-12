@@ -287,11 +287,25 @@ separate. In the attempted physical disconnection test, the preparation lease
 had expired before USB was removed; the first attempt rejected that expired
 lease, and later attempts opened new cellular TCP connections and were refused.
 That result does not test survival of a live retained tunnel after USB removal.
-The 120-second window is too short for unattended device acceptance and is
-being independently reviewed with foreground retention and Shortcuts-assisted
-bootstrap alternatives. The successful wired sequence remains a recovery
+The 120-second window is too short for unattended device acceptance. Independent
+Claude Opus 5 review, checked against the source by the integrator, recommends
+foreground retention across turns with a read-only liveness check before reuse,
+stopping each turn's owned runner, and explicit re-preparation after transport
+failure. A Shortcuts-assisted bootstrap must finish both initial RP control and
+dynamic TLS/CDTunnel connections while cellular is off, restore data on failure,
+and start model requests/DDI downloads only after data is restored. These are
+follow-up design recommendations; the 0.3.5 candidate retains the implemented
+120-second preparation behavior. No background lifetime is guaranteed.
+The successful wired sequence remains a recovery
 proof, not direct cellular-only bootstrap or a proven change to Apple's
 listener policy.
+
+Review boundary: the public XNU interface definitions include delegated
+cellular/expensive properties, but no actual iOS 27 listener flags or NECP state
+were read. NWPath metadata cannot establish those private fields. The review's
+claim that `LOCAL_RUNTIME.block_on` stops networking between calls is not
+supported: the pinned FFI uses a multi-thread Tokio runtime. Direct loopback RP
+access and VPN-specific cellular settings remain untested alternatives.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
