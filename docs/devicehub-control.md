@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation completed; device acceptance in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
+> Status: native DDI implementation completed; final device acceptance blocked by development signing. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -48,7 +48,7 @@ document records the implemented backend, confirmed integration failures and the
 - Confirmed from sources: the transport is the same; the DDI that PocketAgent downloads
   contains every needed daemon; the pinned idevice has clients for all of them, but its
   FFI exports only app_service among them.
-- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Device acceptance is still in progress.
+- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Final device acceptance is blocked by development signing.
 - Remaining boundary: long background lifetime, physically unplugged operation, system-dialog input and PocketAgent's downloaded DDI are not established by the initial probe.
 - Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and briefly returns to PocketAgent to prepare Unicode input; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
 
@@ -268,8 +268,8 @@ screen-sharing indicator appears and its power cost.
 |---|---|---|---|---|
 | Backend selection and frozen job configuration | PocketAgent app | Codex | devicehub-control | Implemented: DDI default, manual WDA |
 | Native screenshot, bounded AX reader and role mapping | PocketAgent app/native | Codex | devicehub-control | Implemented |
-| Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise in progress |
-| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Acceptance in progress; no public feed update |
+| Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise pending |
+| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Core/native/build/IPA checks completed; latest exact-device exercise and same-identity update blocked by signing |
 
 The user authorized implementation and exact-device validation on the iPhone 12 mini.
 The current work does not embed a VPN or add a floating overlay. RP pairing and local
@@ -278,3 +278,19 @@ control and physically unplugged operation are follow-up validation, not implied
 Confirmed integration fixes and their remaining root-cause boundaries are condensed
 in [engineering.md](engineering.md#ddi-phone-backend-2026-10-12). Success-only evidence
 and private signing/pairing stay outside version control.
+
+### Current acceptance blocker
+
+Development codesign returns `errSecInternalComponent`, including when the existing
+login keychain is selected explicitly. Its root cause is unresolved; local keychain
+unlock/identity access needs the user before the current candidate can be installed.
+The original PocketAgent has not been updated or uninstalled. The temporary test
+apps were removed and LocalDevVPN was observed disconnected at cleanup.
+
+Earlier executor candidates confirmed ordinary touch/gesture callbacks and Chinese
+plus Emoji input in the assistant's UIKit field. Cross-app replacement did not
+complete: one candidate hit a service timeout, another encountered the input
+fixture's first wireless-data permission surface. These are unconfirmed outcomes,
+not a passed current backend. The complete cross-app input, in-flight script Stop,
+resource teardown and production chat/UI exercise remain required after signing is
+restored. Do not infer acceptance from the successful generic IPA build.

@@ -261,7 +261,7 @@ remove sideload signing, the separate automation companion or device setup.
 ## Architecture and compatibility
 
 App: SwiftUI sessions/provider/sync views. AgentKit: model protocols and agent
-loop. Native: Rust FFI tunnel/DDI/runner startup, then localhost WDA tools.
+loop. Native: Rust FFI RP/DDI preparation, then owned DDI service primitives or selectable WDA runner/HTTP tools.
 Run configuration is captured before enqueue; changing a session selection does
 not alter work already accepted. Existing transcript event order and tool result
 IDs are preserved. Restart interrupts active work, never replays it.
@@ -517,8 +517,8 @@ file confinement is unchanged.
 
 ## DDI phone backend (2026-10-12)
 
-Status: implemented on the devicehub-control branch; production device gates
-are in progress. The user selected DDI as the default with a manual WDA selector.
+Status: implemented on the devicehub-control branch; final production device gates
+are blocked by development signing. The user selected DDI as the default with a manual WDA selector.
 The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
 The backend is captured in ChatJob at enqueue, alongside the model configuration.
@@ -563,7 +563,8 @@ even while the assistant stayed active; the source of those changes is unresolve
 A fresh read-only CoreDevice connection instead checks actual text before clearing
 and again before paste, resolving only the primary representation. Initial keyboard commands left partial
 old text until a keyboard-settle interval and individual key-up reports were added.
-Clear now verifies the actual field before paste, and replacement input returns
+Clear now requires an observed field value before paste; missing values are not
+assumed empty. Replacement input returns
 an unconfirmed result if its fresh AX value does not match. Secure text subrole 5
 is normalized and its value is excluded from tool results.
 The full executor check also exposed fragmented DTX replies: fragment zero is a
@@ -574,11 +575,23 @@ input cleanup closes AX and disables further input while preserving owned releas
 state for finalization. AppService activation uses terminateExisting=false; returning to a running
 assistant must preserve the process that owns the turn and its finalization.
 
-Independent native checks on the selected iPhone 12 mini have read the full test
-AX graph and confirmed replacement text with Chinese and Emoji through the actual
-UIKit field callback. These checks do not yet substitute for the pending complete
-production-executor and installed-app gates. Evidence, signing and pairing remain
-local outside Git. No Looktech app/firmware or schema/rpc change is involved.
+Earlier native and executor candidates on the selected iPhone 12 mini read the
+full test AX graph and confirmed Chinese plus Emoji replacement through an actual
+UIKit field callback. A later candidate encountered a service timeout; another
+cross-app input attempt encountered the fixture's delayed first wireless-data
+permission surface. Both stopped with an unconfirmed outcome rather than replaying.
+The exact timeout operation was not captured in that candidate; its root cause
+remains open. These checks do not establish the complete latest executor, Stop
+cleanup, production chat/UI or same-identity update gates.
+
+The final candidate builds and passes core/native and clean IPA checks. Development
+codesign subsequently failed with errSecInternalComponent, including an explicit
+login-keychain attempt. Root cause is unresolved; the user must restore local
+signing access before final device acceptance. The original App was not updated
+or uninstalled, and its messages, IDs, providers, workspaces and rules were checked
+against the local pre-test backup. Temporary test apps were removed and the VPN
+was observed disconnected. Evidence, signing and pairing remain local outside
+Git. No Looktech app/firmware or schema/rpc change is involved.
 
 ## On-device workspace and scripting
 

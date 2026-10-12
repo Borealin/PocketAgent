@@ -586,10 +586,10 @@ final class Model: ObservableObject {
             for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
                 let destination = directory.appendingPathComponent(name)
                 if !FileManager.default.fileExists(atPath: destination.path) {
-                let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
-                let (temporary, response) = try await URLSession.shared.download(from: url)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
-                try FileManager.default.moveItem(at: temporary, to: destination)
+                    let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
+                    let (temporary, response) = try await URLSession.shared.download(from: url)
+                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
+                    try FileManager.default.moveItem(at: temporary, to: destination)
                 }
             }
             try await ffi { try device.mountDDI(directory) }
