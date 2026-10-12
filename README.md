@@ -141,6 +141,9 @@ Settings → 手机操作配置 walks through installing Automation, connecting
 LocalDevVPN and importing this phone's **RP pairing file** from Files. The
 easiest first setup uses the upstream **idevice_pair** GUI: choose the USB phone,
 select **Remote pairing**, then **Create → Validate → Save to file…**.
+After Create, the phone may show another Trust prompt for the new
+`idevice_pair` identity even when USB trust is already established; complete
+that prompt and any passcode entry on the phone before Validate.
 Another compatible Mac can create the record; this does not depend on your
 Apple ID or IPA signing account.
 
@@ -153,8 +156,8 @@ Intel without Rust, Python or Xcode. The optional
 [download script](Scripts/download_pairing_tool.command) downloads that fixed
 release, verifies SHA-256 and opens its DMG; it does not install software or
 generate a record. The GUI prepares developer services and enables wireless
-debugging on the selected phone. Its full pairing workflow still awaits a Mac
-UI check; package/source inspection does not establish real-device success.
+debugging on the selected phone. Validate checks the RP record against that
+phone; Automation installation and XCTest system authorization are separate.
 
 For existing CLI users, the guide also includes the trusted-USB command with
 explicit device selection, a unique host name and a fresh output directory.

@@ -43,8 +43,11 @@ bash Scripts/download_pairing_tool.command
 2. 如果出现“信任此电脑”，在手机上点“信任”，并在手机上输入解锁密码。
 3. 在 `idevice_pair` 的设备下拉列表中选中这台手机，确认选择 USB 连接。
    多台手机连接时要核对目标；初次操作可只连接这一台。
-4. 选择 **Remote pairing**，点 **Create**。
-5. 等待成功，再点 **Validate** 验证这个记录能连接本机。
+4. 选择 **Remote pairing**，点 **Create**。手机可能再次显示
+   **Trust This Computer?**，请求方类似 `idevice_pair-xxxxxx`。这是新的 RP
+   配对身份，即使刚才已经信任 USB 连接，也可能需要在手机上再次点 **Trust**，
+   并按系统要求输入解锁密码；密码只在手机上输入。
+5. 完成手机上的信任步骤，等待成功，再点 **Validate** 验证这个记录能连接本机。
 6. 点 **Save to file…**，另存到一个新文件，例如 `pairingFile.plist`。
    也可以命名为 `rp_pairing_file.plist`；导入时校验内容，不限制文件名。
 
@@ -85,6 +88,7 @@ GUI 的“Save to file”可能覆盖所选文件，务必选新文件；重新�
 |---|---|
 | Mac 不显示手机 | 换数据线或 USB 口，解锁手机，在 Finder 中确认能识别，并完成“信任此电脑”。 |
 | Create 失败或开发者镜像未准备好 | 检查手机开发者模式，保持解锁和网络连接，等待自带镜像个性化挂载完成；重新连接再试。 |
+| Create 一直显示 Trust this computer on your device | 查看手机上的第二个 RP 信任弹窗，核对请求方为本次 idevice_pair，点 Trust 并完成系统密码步骤。USB 信任和 RP 信任是两个阶段。 |
 | 导入提示 SideStore / Lockdown 格式 | 回到工具选择 Remote pairing，重新 Create、Validate、Save；不是更改扩展名。 |
 | 导入成功但连接失败 | 核对文件属于这台手机，LocalDevVPN 显示 Connected，手机未锁屏。0.3.1 需在运行手机工具时检查；0.3.2 有独立检查按钮。 |
 | 配对/VPN 检查成功，但手机操作失败 | 检查 Automation 是否同版本且未过签名有效期，安装后的 Bundle ID 是否与设置一致，以及 XCTest 系统授权。 |
@@ -114,6 +118,6 @@ RUST_LOG=warn idevice-tools --udid '<目标 iPhone 的 UDID>' remotepairing_lock
 [Remote 导出逻辑](https://github.com/jkcoxson/idevice_pair/blob/v1.1.0/src/backend/pairing.rs)
 使用 RP plist，字段与 PocketAgent 原生导入匹配。
 [设备准备逻辑](https://github.com/jkcoxson/idevice_pair/blob/v1.1.0/src/backend/worker.rs)
-描述了开发者镜像和无线调试的准备步骤。本教程目前依据发布包与源码，GUI
-完整配对流程尚未在 PocketAgent 测试设备上验证；请以目标手机上的 Validate
-和导入后实际连接结果为准。
+描述了开发者镜像和无线调试的准备步骤。本教程使用 USB 流程；Validate 检查
+配对记录与选中手机的连接，不代表 Automation 或 XCTest 已获授权。将文件
+导入 PocketAgent 后，仍需核对本机连接和 Automation 设置。

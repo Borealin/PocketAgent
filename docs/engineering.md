@@ -192,10 +192,30 @@ download helper pins its official DMG URL and SHA-256, uses an independently
 created private Downloads directory, verifies before opening and never reads or
 writes a pairing record. It does not install the GUI or change the phone. The
 tagged GUI prepares DDI and enables wireless debugging on USB selection; this
-is stated in the guide. RP export is structurally compatible, but GUI pairing
-still needs a live Mac check. The command-line alternative uses a unique host
+is stated in the guide. RP export is structurally compatible; RP validation is
+independent of Automation/XCTest authorization. The command-line alternative uses a unique host
 name because idevice derives the RP peer identifier from that name; regenerating
 with a reused name can replace the key behind an existing peer identity.
+
+The GUI's Create step triggered a separate RP Trust prompt on a phone whose
+USB connection was already trusted. Its status remained "Trust this computer
+on your device" until that phone-side step was completed. The guide now
+distinguishes initial USB trust from the new RP identity's trust/passcode
+prompt; entering the passcode stays a physical user action. Keep that stage
+pending until the device's system prompt actually completes.
+
+A sideloaded 0.3.1 installation returned the same `idevice 13/0:
+UnexpectedResponse` for every phone tool in a completed model run. Phone tool
+errors are transcript results; AgentKit run completion alone does not establish
+that a phone action succeeded. No native or run-stage log was saved for that
+run, so the specific `prepareWDA` substage remains unresolved. Its imported RP
+record was recognized by an independent USB verification; that does not prove
+the on-phone VPN tunnel worked. The installed Automation identifier differs
+from the main app's embedded default after sideload signing, but the active
+device override is unverified. Do not label that mismatch or the pairing record
+as the cause without stage evidence. Enable the existing diagnostic log option,
+save settings and relaunch before a bounded reproduction; native file logging
+is initialized at app launch and stays at Info level, without debug key dumps.
 
 The app automatically imports/boots the bundled Linux environment and runs
 Bash, Python and Node startup checks. These read-only checks share the existing
