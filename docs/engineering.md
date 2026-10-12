@@ -314,9 +314,27 @@ Review boundary: the public XNU interface definitions include delegated
 cellular/expensive properties, but no actual iOS 27 listener flags or NECP state
 were read. NWPath metadata cannot establish those private fields. The review's
 claim that `LOCAL_RUNTIME.block_on` stops networking between calls is not
-supported: the pinned FFI uses a multi-thread Tokio runtime. Direct loopback RP
-access and network classification after a VPN restart remain untested
-alternatives; the WLAN-only permission test above did not recover startup.
+supported: the pinned FFI uses a multi-thread Tokio runtime. The user subsequently
+reported that restarting LocalDevVPN with cellular off and then restoring
+cellular, in multiple orders, did not recover access, and that direct loopback
+RP access also failed. These are user-reported negative results; an
+endpoint-specific loopback trace was not captured independently. The WLAN-only
+permission test above did not recover startup either. No tested configuration
+has recovered initial cellular-only connections.
+
+The advanced endpoint field previously described its saved effective value as
+the empty-field default. Saving a loopback override therefore changed the
+"leave empty" hint to that override, although clearing it still selected the
+embedded/default VPN address. The hint now reads the embedded fallback directly;
+the effective address still uses the saved override first. This changes no
+stored settings, pairing records or conversation data.
+The fix passed the Core/distribution checks, iOS archive and clean IPA inspection.
+Device UI acceptance is pending: the 12 mini installation channel failed to
+allocate its RSD device, while the independent UI test installation on the
+15 Pro succeeded but its first explicit-PID accessibility read was refused
+with error 17. The original SideStore app was not replaced, and its original
+device preferences were read back unchanged. No updated release/feed was
+published for this fix.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
@@ -523,6 +541,18 @@ does not distinguish a system stop from cancellation in the task UI. This
 session therefore does not establish that initial cellular RP refusal caused
 the HTTP error or the final task stop. Installed-app discovery and the later
 phone-action latency remain separate follow-up work.
+
+The 2026-10-12 follow-up inventory confirms 19 registered tool types: 11 phone
+actions, 5 workspace file tools, HTTP, scripts and skill reading. The router
+filters files/scripts out of turns without a workspace and skills out when no
+catalog exists. Installed-app listing currently serves companion resolution
+only; it is not a model tool. There is no app-name discovery tool or dedicated
+Spotlight command/fallback in the model instructions. The latest saved Xianyu
+conversation opened the correct `com.taobao.fleamarket`, but contained five
+foreground-change tool errors and had no selected workspace. Its status was
+completed; that status alone does not verify that the requested information
+was located correctly. App discovery and recovery from changed foreground
+state remain unimplemented improvements rather than properties of this build.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which

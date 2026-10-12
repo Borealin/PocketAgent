@@ -23,10 +23,13 @@ enum DeviceSettings {
     static var embeddedRunnerBundleID: String {
         nonEmpty(Bundle.main.object(forInfoDictionaryKey: "PocketAgentRunnerBundleID") as? String) ?? defaultRunnerBundleID
     }
-    static var tunnelEndpointText: String {
-        nonEmpty(UserDefaults.standard.string(forKey: tunnelKey))
-            ?? nonEmpty(Bundle.main.object(forInfoDictionaryKey: "PocketAgentTunnelEndpoint") as? String)
+    /// The endpoint used when the local override is empty; independent of saved settings.
+    static var embeddedTunnelEndpoint: String {
+        nonEmpty(Bundle.main.object(forInfoDictionaryKey: "PocketAgentTunnelEndpoint") as? String)
             ?? defaultTunnelEndpoint
+    }
+    static var tunnelEndpointText: String {
+        nonEmpty(UserDefaults.standard.string(forKey: tunnelKey)) ?? embeddedTunnelEndpoint
     }
     static var assistantBundleID: String { Bundle.main.bundleIdentifier ?? "" }
     /// Off by default; screenshots may contain personal screen content.
