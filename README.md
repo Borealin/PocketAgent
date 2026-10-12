@@ -13,8 +13,8 @@ This update adds guided cellular recovery and connection-stage diagnostics.
 On the tested iPhone 15 Pro, initial developer TCP connections are refused when
 cellular is the only network. Temporarily disabling cellular, preparing a real
 RP tunnel, then restoring cellular allows phone operations to use that retained
-connection. This is a guided bootstrap workaround; it does not change iOS's
-initial cellular connection policy. It also includes the earlier chat keyboard,
+connection. This is a guided bootstrap workaround; it does not remove the
+initial connection refusal while cellular is enabled. It also includes the earlier chat keyboard,
 confirmed deletion, signed Automation matching and compact task-title changes.
 Full automatic matching and visual Dynamic Island mitigation still need device
 acceptance. It remains a prerelease.
