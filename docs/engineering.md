@@ -276,6 +276,16 @@ produce a closed-port RST, but that is a hypothesis without effective listener
 policy evidence on this device. Do not replace a usable pairing record or
 change wireless flags speculatively.
 
+On the same iPhone, the user set LocalDevVPN's wireless-data permission to
+WLAN only while leaving global cellular enabled. The observed state was 5G,
+Wi-Fi unassociated and VPN enabled. Three fresh PocketAgent 0.3.5 connection
+checks at 14:37 on 2026-10-12 failed at initial TCP with `connection_refused`
+(idevice 16/0); the checks did not consume a prepared tunnel. This permission
+change did not recover startup in the existing VPN session. No additional
+permission-denial error was observed, so it does not prove a new permission
+block or the exact receive-policy cause. A VPN restart under this permission
+was not tested. Conversation records were retained.
+
 A separately built and installed diagnostic app established a real RP/CDTunnel
 with cellular off, retained its actual handles and process, then restored 5G.
 Over that retained tunnel it successfully queried DDI/DVT, started Automation,
@@ -305,7 +315,8 @@ cellular/expensive properties, but no actual iOS 27 listener flags or NECP state
 were read. NWPath metadata cannot establish those private fields. The review's
 claim that `LOCAL_RUNTIME.block_on` stops networking between calls is not
 supported: the pinned FFI uses a multi-thread Tokio runtime. Direct loopback RP
-access and VPN-specific cellular settings remain untested alternatives.
+access and network classification after a VPN restart remain untested
+alternatives; the WLAN-only permission test above did not recover startup.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
