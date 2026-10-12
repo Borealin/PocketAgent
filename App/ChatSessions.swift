@@ -30,6 +30,7 @@ private final class ChatJob {
     let priorAttachments: [String: [ChatAttachment]]
     /// Frozen at enqueue; later provider or selection edits do not reach it.
     let config: RunConfiguration
+    let phoneBackend = DeviceSettings.phoneBackend
     /// Project directory frozen at enqueue, like the model configuration.
     let workspace: WorkspaceSnapshot?
     /// Composer content this turn consumed; returned only if it never starts.
@@ -479,7 +480,7 @@ final class ChatController: ObservableObject {
         phoneSessionID = job.sessionID
         statuses[job.sessionID] = ExecutionStatus(modelLabel: job.config.label)
         edit(job.sessionID) { $0.state = .running; $0.detail = "" }; persist()
-        engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, workspace: job.workspace,
+        engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, workspace: job.workspace, backend: job.phoneBackend,
             conversationID: job.sessionID, promptID: job.prompt.id, priorMessages: prior,
             onEvent: { [weak self, weak job] event, status in
                 guard let self, let job else { return }; handle(event, status: status, job: job)

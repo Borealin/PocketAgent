@@ -47,6 +47,8 @@
  */
 #define IDEVICE_CRYPTEXD_DDI_NONCE_PERSISTENCE 1
 
+#define MAX_BYTES ((20 * 1024) * 1024)
+
 typedef enum AfcFopenMode {
   AfcRdOnly = 1,
   AfcRw = 2,
@@ -307,6 +309,10 @@ typedef struct PairableHostCancel PairableHostCancel;
 typedef struct PairableHostHandle PairableHostHandle;
 
 typedef struct PcapdClientHandle PcapdClientHandle;
+
+typedef struct PocketDDICancellation PocketDDICancellation;
+
+typedef struct PocketDDISession PocketDDISession;
 
 typedef struct PreboardServiceClientHandle PreboardServiceClientHandle;
 
@@ -9836,6 +9842,60 @@ void wda_bridge_endpoints_free(struct WdaBridgeEndpointsC *endpoints);
  * `handle` must be a pointer returned by this library or NULL.
  */
 void wda_bridge_free(struct WdaBridgeHandle *handle);
+
+/**
+ * # Safety
+ * Borrowed adapter/handshake and output pointers must be valid. The caller
+ * serializes all operations and frees the DDI session before tunnel handles.
+ */
+struct IdeviceFfiError *pocket_ddi_open(struct AdapterHandle *a,
+                                        struct RsdHandshakeHandle *h,
+                                        struct PocketDDISession **out,
+                                        struct PocketDDICancellation **cancel);
+
+/**
+ * # Safety
+ * Cancellation is independently allocated and may be signalled while a serial
+ * session call is running. Do not free it until that call has completed.
+ */
+void pocket_ddi_cancel(struct PocketDDICancellation *cancel);
+
+/**
+ * # Safety
+ * Reset only before dispatching a new call, with no call in flight.
+ */
+void pocket_ddi_reset_cancel(struct PocketDDICancellation *cancel);
+
+/**
+ * # Safety
+ * A single caller owns the session. Request is a bounded NUL-terminated JSON
+ * string; output is released with idevice_string_free. No request/result logs.
+ */
+struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
+                                        const char *request,
+                                        char **out);
+
+/**
+ * # Safety
+ * Session is valid, no other call in flight. Buffer is freed with
+ * pocket_ddi_bytes_free using its exact returned length.
+ */
+struct IdeviceFfiError *pocket_ddi_screenshot(struct PocketDDISession *handle,
+                                              uint8_t **out,
+                                              uintptr_t *len);
+
+/**
+ * # Safety
+ * Free only an unfreed screenshot allocation with its original length.
+ */
+void pocket_ddi_bytes_free(uint8_t *data, uintptr_t len);
+
+/**
+ * # Safety
+ * No call in flight. Consumes both handles even when cleanup is unconfirmed.
+ */
+struct IdeviceFfiError *pocket_ddi_close(struct PocketDDISession *handle,
+                                         struct PocketDDICancellation *cancel);
 
 #endif  /* IDEVICE_H */
 

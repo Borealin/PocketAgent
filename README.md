@@ -1,11 +1,24 @@
 # PocketAgent
 
 A native iPhone assistant with multiple conversations, configurable model
-providers and phone automation through AgentKit, idevice and WebDriverAgent.
+providers and phone automation through AgentKit and idevice. This branch defaults
+to DDI services; WebDriverAgent remains selectable in phone settings.
 The model loop and phone tools run on the iPhone. Model inference uses the API
 provider you configure.
 
 ## Installation
+
+This branch's DDI backend uses the main app, Developer Mode, an RP pairing record
+and a local VPN. It needs no Automation companion or XCTest authorization.
+Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
+selection is captured when a turn is queued. DDI currently accepts verified
+portrait display geometry; switch explicitly to WDA for other layouts. Text input
+replaces the device clipboard, briefly returns to PocketAgent to prepare it, then
+restores and revalidates the target app. The target app can request paste permission.
+Use `search_spotlight` for Spotlight search; direct input into other unlisted
+system processes is unavailable through DDI.
+The published candidate instructions below describe the earlier WDA release;
+the DDI change has not been published to that feed.
 
 The source offers both apps from the
 [v0.3.5 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.5).
@@ -79,8 +92,8 @@ guest execution are separate, unverified paths.
 ## Requirements
 
 - iOS 26 or later, Developer Mode enabled.
-- PocketAgent and its separate **PocketAgent Automation** companion installed
-  with a development-capable signature, such as AltStore Classic or SideStore.
+- PocketAgent installed with a development-capable signature, such as AltStore
+  Classic or SideStore. **PocketAgent Automation** is needed only for WDA.
 - An idevice RP pairing property list created during initial setup. An ordinary
   USB/Lockdown pairing record has a different format and cannot replace it.
 - A local VPN exposing the device's developer services, such as LocalDevVPN.
@@ -89,8 +102,9 @@ guest execution are separate, unverified paths.
 
 The first pairing, installation and system authorization require setup. After
 setup, a conversation can invoke phone tools without a connected computer.
-Keep the local VPN connected. iOS can require the device passcode when enabling
-UI automation; enter it only in the system page on the phone.
+Keep the local VPN connected and the phone unlocked. For WDA, iOS can require the
+device passcode when enabling UI automation; enter it only in the system page on
+the phone. DDI does not launch XCTest.
 
 If connection checks fail only on cellular, open Settings → 手机操作配置 →
 蜂窝连接恢复. Temporarily disable cellular and disconnect Wi-Fi while leaving
@@ -153,7 +167,7 @@ Later configuration changes apply to subsequent turns. Conversations preserve
 their own history and model attribution. Interrupted phone actions are never
 replayed after restarting the app.
 
-Settings → 手机操作配置 walks through installing Automation, connecting
+Settings → 手机操作配置 selects DDI or WDA, then walks through connecting
 LocalDevVPN and importing this phone's **RP pairing file** from Files. The
 easiest first setup uses the upstream **idevice_pair** GUI: choose the USB phone,
 select **Remote pairing**, then **Create → Validate → Save to file…**.

@@ -28,11 +28,14 @@
 		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
 		6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */; };
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
+		721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E07338DA36C6016FB8828 /* PhoneBackend.swift */; };
 		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
+		7BF504059BFF50CB719B57D3 /* ipb-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */; };
 		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
 		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
 		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
+		8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A30E3059701B9B77BA06A7D /* PhoneControl.swift */; };
 		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
 		9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38833AB31402CD8F11B2F334 /* Workspace.swift */; };
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
@@ -59,11 +62,13 @@
 		130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImageLoader.swift; sourceTree = "<group>"; };
 		19938EABD2390F0D02B28600 /* ChatPolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPolicies.swift; sourceTree = "<group>"; };
 		1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApps.swift; sourceTree = "<group>"; };
+		1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "ipb-LICENSE.txt"; sourceTree = "<group>"; };
 		1F266439E5ACA1E35405D10A /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		1F9EC154A7B819D774BFB985 /* ProviderViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderViews.swift; sourceTree = "<group>"; };
 		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
 		21B9777F694312D830BE8C77 /* HTTPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTool.swift; sourceTree = "<group>"; };
 		21C75A8C07B02E84366B00D3 /* PocketISH.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PocketISH.m; sourceTree = "<group>"; };
+		2A30E3059701B9B77BA06A7D /* PhoneControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneControl.swift; sourceTree = "<group>"; };
 		383A79C611AE1573F3276AA9 /* ish-root.tar.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; path = "ish-root.tar.gz"; sourceTree = "<group>"; };
 		38833AB31402CD8F11B2F334 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
@@ -92,6 +97,7 @@
 		CC78893A183661157A2CB031 /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
+		E39E07338DA36C6016FB8828 /* PhoneBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneBackend.swift; sourceTree = "<group>"; };
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -162,6 +168,7 @@
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
 				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
+				E39E07338DA36C6016FB8828 /* PhoneBackend.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
@@ -206,6 +213,7 @@
 				C08CD702C33D2019607205D8 /* DeviceSettings.swift */,
 				977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */,
 				BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */,
+				2A30E3059701B9B77BA06A7D /* PhoneControl.swift */,
 				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
 				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
 				55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */,
@@ -230,6 +238,7 @@
 			children = (
 				4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */,
 				0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */,
+				1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */,
 				E53F96B6F3F454BD229C1E52 /* iSHLicenses */,
 				49BF9B5D946340940F5C4C82 /* RustLicenses */,
 				1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */,
@@ -303,6 +312,7 @@
 				026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */,
 				095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */,
 				341233CF7A70637134AD1A8B /* iSHLicenses in Resources */,
+				7BF504059BFF50CB719B57D3 /* ipb-LICENSE.txt in Resources */,
 				F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -332,7 +342,9 @@
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
 				37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */,
+				721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */,
 				F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */,
+				8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */,
 				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,

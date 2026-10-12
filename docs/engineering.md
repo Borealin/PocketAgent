@@ -220,8 +220,10 @@ It disproved the mandatory-display-stream assumption for ordinary touch on iOS
 Calculator launch, visible `7 + 5 = 12`, Home return, ASCII key delivery and raw AX
 requests 6 → 1 → 5 were exercised without XCTest/WDA. This is feasibility evidence,
 not a delivered PocketAgent backend: full AX/tool mapping, native system dialogs,
-Unicode paste, interrupted/background lifecycle, unplugged operation and the other
-DDI/OS combinations remain open. Keep WDA as the shipped default and fallback.
+Unicode paste and interrupted/background lifecycle were not covered by that
+initial probe. Production integration is described below; unplugged operation and
+other DDI/OS combinations remain open. The public release still uses WDA, while
+this branch follows the user-selected DDI default with a manual WDA selector.
 
 ## Setup and readiness
 
@@ -444,6 +446,70 @@ the directory and outside symlink, keeping both entries present. It retains
 concurrent successful-read and no-escape assertions, adds actual-swap/error
 witnesses and checks the normal read before and after the attack. Production
 file confinement is unchanged.
+
+## DDI phone backend (2026-10-12)
+
+Status: implemented on the devicehub-control branch; production device gates
+are in progress. The user selected DDI as the default with a manual WDA selector.
+The baseline is main `032b5ab` and all 15 phone tools retain their schemas,
+snapshot validation, script lease checks, FIFO action queue and no-replay rule.
+The backend is captured in ChatJob at enqueue, alongside the model configuration.
+
+PhoneControl supplies observations and primitive effects to the existing executor.
+DDI reuses RP/DDI preparation, gets installed apps through the advertised streaming
+AppService inventory, reads bounded AXChildren graphs and takes native screenshots.
+Foreground identity comes from a bounded read-only hit scan and a unique
+process/app-path match. A blank centre point returned AX error 8 while the same
+app's visible input-field point returned its complete tree; the selected point is
+reused and checked again after graph traversal. Unknown process paths still fail.
+Only verified portrait primary-display geometry is accepted; unsupported or
+unidentified surfaces fail before coordinate input. WDA still owns its runner PID
+and HTTP session, and is never selected automatically after an uncertain action.
+
+Native source lives in Native/ddi and bootstrap copies it into the pinned idevice
+FFI checkout. AX keyed archives remain data, with size, depth, cycle, reference
+expansion and message limits. One semantic request is outstanding at a time; a
+failed AX socket is closed before fresh read-only recovery. Cancellation has a
+separate atomic handle. Touch/button releases and empty key reports precede queue
+release; the turn owns its virtual keyboard until cancellation or finalization,
+then confirms its removal. No media stream is opened. Finalization returns to the
+assistant and closes owned DDI services before releasing the tunnel.
+
+Confirmed integration fixes: decoding AX UID zero as an empty string changed the
+translation token's null fields and the device refused its attributes request.
+Null references now remain null and a regression covers that wire shape. The
+initial all-app inventory setup timed out; the streaming inventory completed
+initialization on the same device. The direct pasteboard service path failed to
+deliver text and later timed out; its precise protocol fault remains unresolved.
+Background UIKit writes also left the old clipboard value in Spotlight. The
+backend now prepares text in the assistant foreground before clearing the target,
+confirms the foreground write and restores/revalidates the target app before
+the HID paste chord. Spotlight prepares the query before Home/search, since
+launching its private app directly produced a blank surface with refused AX hits.
+Direct input into unlisted system processes is refused before clearing; the
+search_spotlight tool covers system search. Normal installed-app input may briefly
+switch to the assistant. The direct CoreDevice pasteboard fault remains unresolved
+and SET is not used in production. Clipboard counters changed during preparation
+even while the assistant stayed active; the source of those changes is unresolved.
+A fresh read-only CoreDevice connection instead checks actual text before clearing
+and again before paste, resolving only the primary representation. Initial keyboard commands left partial
+old text until a keyboard-settle interval and individual key-up reports were added.
+Clear now verifies the actual field before paste, and replacement input returns
+an unconfirmed result if its fresh AX value does not match. Secure text subrole 5
+is normalized and its value is excluded from tool results.
+The full executor check also exposed fragmented DTX replies: fragment zero is a
+header-only envelope whose nonzero length describes the message, not following
+bytes. The reader now follows that framing and a duplex-stream regression covers
+it. AX setup failure attempts unsubscribe before dropping the socket; failed
+input cleanup closes AX and disables further input while preserving owned release
+state for finalization. AppService activation uses terminateExisting=false; returning to a running
+assistant must preserve the process that owns the turn and its finalization.
+
+Independent native checks on the selected iPhone 12 mini have read the full test
+AX graph and confirmed replacement text with Chinese and Emoji through the actual
+UIKit field callback. These checks do not yet substitute for the pending complete
+production-executor and installed-app gates. Evidence, signing and pairing remain
+local outside Git. No Looktech app/firmware or schema/rpc change is involved.
 
 ## On-device workspace and scripting
 

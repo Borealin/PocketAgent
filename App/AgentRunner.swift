@@ -7,7 +7,7 @@ import Foundation
 extension Model {
     /// `config` was captured when the turn was enqueued and is used verbatim.
     /// `images` were hydrated from the turn's frozen attachment references.
-    func beginAgent(goal: String, images: [AgentImageAttachment], config: RunConfiguration, workspace: WorkspaceSnapshot?,
+    func beginAgent(goal: String, images: [AgentImageAttachment], config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind,
                     conversationID: UUID, promptID: UUID, priorMessages: [AgentTranscriptMessage],
                     onEvent: (@MainActor (AgentEvent, ExecutionStatus) -> Void)?,
                     onStatus: (@MainActor (ExecutionStatus) -> Void)?,
@@ -39,7 +39,7 @@ extension Model {
                     }
                 }
                 Task { @MainActor in
-                    self?.executePhoneAgent(config: config, workspace: workspace, goal: goal, images: images,
+                    self?.executePhoneAgent(config: config, workspace: workspace, backend: backend, goal: goal, images: images,
                         task: task, progress: progress, status: status,
                         conversationID: conversationID, promptID: promptID, priorMessages: priorMessages,
                         onEvent: onEvent, onStatus: onStatus, onFinished: onFinished)

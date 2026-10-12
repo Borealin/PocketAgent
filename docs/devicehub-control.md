@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native feasibility completed; production integration in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `032b5ab` (15 phone tools).
+> Status: native DDI implementation completed; device acceptance in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `032b5ab` (15 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -10,13 +10,13 @@
 | Type | Link | Notes |
 |---|---|---|
 | Requirement | None (user request, 2026-10-12) | No tracked requirement record |
-| Figma | Not applicable | No UI change is proposed yet |
+| Figma | Not applicable | Existing phone settings gain a backend selector |
 | Prerequisite design | [engineering.md](engineering.md) | RP tunnel, DDI preparation, runner lifecycle and phone tools |
 | Related research | [ipb at 1a3618e](https://github.com/ipbtools/ipb/tree/1a3618ebcb6117466accebb455bf4e2e445fa9d6) | MIT-licensed Mac client for the same services; device records in `docs/verification.md` |
 | Library | [idevice at 3854a5d](https://github.com/jkcoxson/idevice/tree/3854a5df4a5a6dee71ffce4d8befc2ea356a8065) | PocketAgent's pinned revision; service clients in `idevice/src/services/core_device/` |
 | DDI source | [DeveloperDiskImage](https://github.com/doronz88/DeveloperDiskImage) | PocketAgent downloads `PersonalizedImages/Xcode_iOS_DDI_Cryptex` from `main`, unpinned |
 
-PocketAgent performs phone actions by launching the WebDriverAgent runner (the Automation
+The earlier main implementation performs phone actions by launching the WebDriverAgent runner (the Automation
 companion) through DVT and calling its localhost HTTP API. That path needs a separately
 signed companion app, testmanagerd's Automation Mode authorization on the phone and a
 runner start and stop for every turn; a runner launch failure and an authorization
@@ -24,11 +24,9 @@ timeout are among the recorded integration problems. ipb shows that Device Hub d
 iPhone without XCTest: DDI daemons provide touch, keyboard and buttons, screenshots,
 clipboard and app launch, and the system accessibility audit service provides the UI
 element graph. PocketAgent's RP tunnel already reaches the same RSD service list. This
-document records what is confirmed, the device-specific stream result and the remaining
-integration work.
+document records the implemented backend, confirmed integration failures and the device-specific verification boundary.
 
-- Scope: feasibility, a backend design behind the existing phone tool names, the
-  completed native feasibility experiment and the remaining production FFI/AX work.
+- Scope: the native DDI backend behind main's existing 15 phone tools, with an explicit WDA selector and the same action safety contracts.
 - Non-goals: removing WDA, which stays selectable; the cellular RP
   connection problem in engineering.md, which sits below this layer and is unaffected;
   answering system dialogs or paste permission prompts automatically; Mac-side tooling
@@ -50,13 +48,9 @@ integration work.
 - Confirmed from sources: the transport is the same; the DDI that PocketAgent downloads
   contains every needed daemon; the pinned idevice has clients for all of them, but its
   FFI exports only app_service among them.
-- Remaining boundary: the current probe is local experimental code, not the shipped
-  PocketAgent backend. It does not establish complete tool parity, long background
-  lifetime, unplugged operation, or operation with PocketAgent's downloaded DDI.
-- Main tradeoff: the DDI path removes the companion app, XCTest and the Automation Mode
-  authorization and reads UI elements faster. It loses element hierarchy and types, has
-  no dismiss_keyboard equivalent, could not tap system dialogs in ipb's tests, can raise a
-  paste permission prompt for arbitrary text and depends entirely on private interfaces.
+- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Device acceptance is still in progress.
+- Remaining boundary: long background lifetime, physically unplugged operation, system-dialog input and PocketAgent's downloaded DDI are not established by the initial probe.
+- Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and briefly returns to PocketAgent to prepare Unicode input; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
 
 <details>
 <summary>Research details and sources</summary>
@@ -65,22 +59,26 @@ integration work.
 
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
-| WDA only (current) | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep as default and fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Flat graph; private interfaces; gaps below; target-specific stream behavior | Native feasibility established on one device; production integration pending |
+| WDA compatibility backend | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep selectable; no automatic action fallback |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; text preparation can switch apps | Production backend implemented; complete device acceptance in progress |
 | DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
 ### Tool mapping
 
-| Tool | DDI path | Notes |
+| Main tools | DDI implementation | Boundary |
 |---|---|---|
-| observe_screen | AX graph from `com.apple.accessibility.axAuditDaemon.remoteAXService`; dtscreencaptured screenshot; foreground PID from an AX system hit test, bundle ID from the dtappserviced process list | Flat graph; ipb found the AX frontmost query can name an unrelated process, and its hit test is a tested strategy, not universal overlay coverage |
-| open_app | dtappserviced launch | The FFI already exports app_service |
-| tap, tap_point, long_press, swipe | dtuhidd touchscreen reports | Ordinary no-stream tap verified; long press, swipe and system dialogs remain separate checks |
-| press_home | dtuhidd button event | Native no-stream Home returned Calculator to SpringBoard on the tested combination |
-| type_text, press_key | dtuhidd keyboard; arbitrary Unicode through dtpasteboardd and a paste shortcut | iOS can ask the focused app to allow paste from dtpasteboardd |
-| dismiss_keyboard | No equivalent found | Gap |
-| wait | Local | Unchanged |
+| observe_screen | Bounded AXChildren graph, native screenshot, read-only foreground hit scan and unique process-path match | Unknown foreground and unverified geometry fail |
+| find_apps | Streamed AppService inventory and shared name matching | Installed apps only |
+| open_app, open_app_by_name | AppService activation without terminating the existing process | Shared ambiguity and installed-app checks |
+| tap, tap_point, long_press | Owned touchscreen contacts | Snapshot, foreground and geometry checks precede effects |
+| swipe, swipe_from_to | Bounded touchscreen path | Shared coordinate/duration limits |
+| type_text | Foreground UIKit clipboard preparation, actual-content readback, target restoration, clear verification and HID paste | Brief App switch; paste permission may require the user |
+| press_key | Owned mainKeyboard Return/Delete | Explicit key-up reports and empty held-key state |
+| dismiss_keyboard | Escape and shared fresh observation | Unconfirmed dismissal is reported |
+| press_home | Owned Indigo Home down/up | Releases before returning |
+| search_spotlight | Prepare query, Home, bounded search gesture, then HID paste | Avoids direct launch of private Spotlight process |
+| wait | Existing local wait | Unchanged |
 
 ### Sources
 
@@ -115,8 +113,7 @@ integration work.
   links iSH (engineering.md, License). idevice already provides the RSD and DTX layers.
 - Driving the phone from a Mac through devicectl, Device Hub or ipb: phone actions must
   keep working without a Mac attached.
-- Removing WDA in the same change: tool parity (hierarchy, element types,
-  dismiss_keyboard) is unproven, and WDA remains the only verified path.
+- Removing WDA in the same change: the user explicitly selected a manual WDA option; other geometries and private-interface version changes need a compatibility path.
 
 </details>
 
@@ -128,7 +125,7 @@ they are. DDI is the default; WDA is selected explicitly. Backend selection is f
 when a turn is queued and never changes during that turn. A DDI backend reuses
 the turn's RP tunnel and DDI preparation, skips runner launch and opens service clients
 through new idevice FFI exports. It observes with a screenshot plus the AX graph and
-acts through dtuhidd, dtappserviced and dtpasteboardd. The tested matrix does not require
+acts through dtuhidd and dtappserviced; the phone app prepares UIPasteboard in its foreground before input, restores and validates the target, and checks actual clipboard text with a fresh read-only service connection. The tested matrix does not require
 an always-on display stream for ordinary touch, Home or ASCII keys. If another supported
 matrix establishes that requirement, the turn must explicitly own and tear down its
 stream, as it owns the runner PID today; do not silently introduce screen sharing or
@@ -150,7 +147,7 @@ retry an action after discovering that its outcome is unknown.
   response cannot be assigned to another element. Traverse AXChildren, validate
   foreground PID and display geometry before/after, then map observed roles to
   tool types without inventing missing attributes.
-- Unicode input replaces the device clipboard and uses a virtual keyboard paste
+- Unicode input uses UIKit to replace the device clipboard and a virtual keyboard paste
   chord. Clear and paste are separate effects with stop checks. Permission prompts
   and unconfirmed input/dismissal are reported with the actual fresh screen.
 - Scope excludes a floating overlay and embedded VPN. RP pairing, LocalDevVPN
@@ -160,8 +157,8 @@ retry an action after discovering that its outcome is unknown.
 
 | Area | Affected | Reason | Module | Compatibility |
 |---|---|---|---|---|
-| PocketAgent app | Yes, if adopted | New backend behind the phone tools | `App/PhoneAgent.swift`, `App/Controller.swift`, `App/Core/ToolCatalog.swift` | WDA backend unchanged and default |
-| PocketAgent native | Yes, if adopted | New FFI exports and the `display_stream` feature | `Native/idevice.h`, `Native/idevice.patch`, `Scripts/bootstrap.py` | Same pinned idevice revision |
+| PocketAgent app | Yes | New backend behind the phone tools | `App/PhoneAgent.swift`, `App/Controller.swift`, `App/Core/ToolCatalog.swift` | Explicit WDA selector; same tool schemas |
+| PocketAgent native | Yes | New FFI exports and the `display_stream` feature | `Native/idevice.h`, `Native/idevice.patch`, `Scripts/bootstrap.py` | Same pinned idevice revision |
 | Automation companion | No change in this phase | Remains the fallback | WDA runner | Removal only after parity |
 | Looktech Android and iOS apps, Bluetooth and ISP firmware, schema, rpc, lt-vad | No | No glasses-device contract, protocol or audio algorithm change | None | None |
 
@@ -169,10 +166,10 @@ retry an action after discovering that its outcome is unknown.
 
 | Current module | Current responsibility | Relation | Change |
 |---|---|---|---|
-| `App/Controller.swift` device connection | RP tunnel, RSD handshake, DDI check and install, DVT runner launch and stop | Extend | Keep tunnel and DDI; own DDI service sessions and, if required, the stream; launch the runner only for the WDA backend |
+| `App/Controller.swift` device connection | RP tunnel, RSD handshake, DDI check and install, DVT runner launch and stop | Extend | Keep tunnel and DDI; own DDI service sessions without a stream on the tested matrix; launch the runner only for the WDA backend |
 | `App/PhoneAgent.swift` | WDA HTTP calls, snapshot and node mapping, effects | Extend | Move WDA calls unchanged behind a backend protocol; add the DDI backend |
 | `App/Core/ToolCatalog.swift` | Phone tool specs | Keep | Same names and parameters; backend-specific capability text where semantics differ |
-| `Native/idevice.h`, `Native/idevice.patch`, `Scripts/bootstrap.py` | FFI surface, local idevice patch, build features | Extend | Export HID, screen capture, pasteboard and display stream with long-lived handles; enable `display_stream` |
+| `Native/idevice.h`, `Native/idevice.patch`, `Scripts/bootstrap.py` | FFI surface, local idevice patch, build features | Extend | Export owned HID, screen capture and AX sessions; compile `display_stream` for the HID client, without starting media |
 | None | None | New | AX reader: port ipb's MIT-licensed AX request dialect onto idevice's DTX support; copy nothing from pymobiledevice3 |
 
 ### State and main flow
@@ -185,13 +182,15 @@ retry an action after discovering that its outcome is unknown.
 - An action whose outcome is unknown, such as a closed handle or a timeout, is never
   replayed; the next step observes first. A closed HID connection does not prove that
   the event did not land.
+- Foreground clipboard preparation may briefly switch apps. Direct input into unlisted
+  system processes is refused; Spotlight prepares text before entering search.
 - System dialogs and paste permission prompts are reported as needing the user's action
   on the phone. Gap 2's root cause is open, and this design does not depend on it.
 - If the hit test cannot name the foreground app, the observation says so instead of
   guessing.
 - No new entitlement, stored secret or synchronized data. Pairing data stays local.
 
-### Integration order
+### Implementation and acceptance order
 
 1. Retain the completed experiment's material outside the repository. Recheck other
    iOS/DDI combinations before assigning them the same stream policy.
@@ -199,8 +198,8 @@ retry an action after discovering that its outcome is unknown.
    stream question.
 3. Introduce the backend protocol in the phone executor with WDA moved behind it
    unchanged.
-4. Add the input exports (HID, pasteboard and, if required, the stream) and the DDI
-   backend behind a local developer setting; compare it with WDA on the same pages.
+4. Add the input exports (HID and phone-local clipboard preparation) and the DDI
+   backend behind the local DDI/WDA selector.
    Keep stream ownership optional for the tested matrix; do not add a permanent
    screen-sharing session solely on the basis of the idevice module comment.
 5. Make DDI the default only after core tests, the iOS build, IPA inspection and the
@@ -220,7 +219,7 @@ release builds are 24A437 (iOS 27.0) and 24A446 (iOS 27.0.1), and PocketAgent's 
 download is 27A5228h. If the stream is required, also measure its setup time, whether a
 screen-sharing indicator appears and its power cost.
 
-### Verification boundary
+### Initial feasibility boundary (before production integration)
 
 - The local probe was built for iOS, development-signed, installed on the selected
   iPhone 12 mini and exercised. Its development IPA was checked for signature validity
@@ -260,22 +259,23 @@ screen-sharing indicator appears and its power cost.
   cause is unestablished; this is a host-client observation, not a native RP failure
   or proof that a stream is universally necessary. Cleanup restored the original
   disconnected VPN state and a final display-service read showed no running stream.
-- Production FFI exports, the complete AX graph adapter, snapshot/tool contracts,
-  system-dialog behavior through the native probe, Unicode paste, long press/swipe,
-  cancellation/teardown under interruption, unplugged operation and iOS 27.0.1
-  remain unverified. The shipped PocketAgent core/build/IPA/runtime gates were not
-  rerun for this documentation-only repository change.
+- These initial probes preceded the production backend and cannot substitute for its core/build/IPA/runtime gates. Physically unplugged operation, system-dialog behavior and other iOS/DDI matrices remain outside the demonstrated scope.
 
 </details>
 
-## 4. Resources and delivery plan
+## 4. Implementation status and remaining acceptance
 
-| Module | Repository | Owner | Estimate | Branch | Release | Test date | Status / last checked | Depends on |
-|---|---|---|---:|---|---|---|---|---|
-| Discriminating experiment | PocketAgent, material kept local | Codex | Not tracked | devicehub-control (documentation only) | None | 2026-10-12 | Native probe completed on selected iPhone 12 mini; tested matrix only | Production integration and other matrices remain pending |
-| Screen capture export and AX reader | PocketAgent native | TBD | TBD | TBD | TBD | TBD | Production work not started; native screenshot / AX dialect feasibility checked locally | Backend lifecycle and complete graph mapping |
-| Backend boundary | PocketAgent app | TBD | TBD | TBD | TBD | TBD | Not started; 2026-10-12 | None |
-| Input exports and DDI backend | PocketAgent app and native | TBD | TBD | TBD | TBD | TBD | Not started; 2026-10-12 | Experiment and the rows above |
+| Module | Repository | Owner | Branch | Status |
+|---|---|---|---|---|
+| Backend selection and frozen job configuration | PocketAgent app | Codex | devicehub-control | Implemented: DDI default, manual WDA |
+| Native screenshot, bounded AX reader and role mapping | PocketAgent app/native | Codex | devicehub-control | Implemented |
+| Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise in progress |
+| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Acceptance in progress; no public feed update |
 
-The user authorized the experiment on the iPhone 12 mini on 2026-10-12. The remaining
-rows are production implementation work; assignment and schedule are not set.
+The user authorized implementation and exact-device validation on the iPhone 12 mini.
+The current work does not embed a VPN or add a floating overlay. RP pairing and local
+VPN routing remain prerequisites. Other iOS/DDI matrices, system permission-dialog
+control and physically unplugged operation are follow-up validation, not implied parity.
+Confirmed integration fixes and their remaining root-cause boundaries are condensed
+in [engineering.md](engineering.md#ddi-phone-backend-2026-10-12). Success-only evidence
+and private signing/pairing stay outside version control.

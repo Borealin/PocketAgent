@@ -91,11 +91,14 @@ final class DeviceConnection {
     }
     var adapter: OpaquePointer?
     var handshake: OpaquePointer?
+    var ddi: OpaquePointer?
+    var ddiCancellation: OpaquePointer?
     private var server: OpaquePointer?
     private var process: OpaquePointer?
     private var runnerPID: UInt64?
     var ownsRunner: Bool { runnerPID != nil }
     deinit {
+        if let ddi { if let error = pocket_ddi_close(ddi, ddiCancellation) { idevice_error_free(error) } }
         closeDVT()
         if let handshake { rsd_handshake_free(handshake) }
         if let adapter { adapter_free(adapter) }
@@ -128,6 +131,26 @@ final class DeviceConnection {
             }
         } catch { throw TunnelFailure(cause: error) }
         guard adapter != nil, handshake != nil else { throw failure("Incomplete tunnel handles") }
+    }
+    func openDDI() throws {
+        guard ddi == nil else { return }
+        try check(pocket_ddi_open(adapter, handshake, &ddi, &ddiCancellation))
+    }
+    func ddiRequest(_ object: [String: Any]) throws -> [String: Any] {
+        guard let ddi else { throw failure("DDI 服务尚未连接。") }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let request = String(decoding: data, as: UTF8.self)
+        var output: UnsafeMutablePointer<CChar>?
+        try request.withCString { try check(pocket_ddi_call(ddi, $0, &output)) }
+        guard let output else { throw failure("DDI 返回为空。") }
+        defer { idevice_string_free(output) }
+        guard let result = try JSONSerialization.jsonObject(with: Data(String(cString: output).utf8)) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
+        return result
+    }
+    func closeDDI() throws {
+        let session = ddi, cancel = ddiCancellation
+        ddi = nil; ddiCancellation = nil
+        try check(pocket_ddi_close(session, cancel))
     }
     func hasDDI() -> Bool {
         var installed: UnsafeMutablePointer<InstalledCryptexC>?
@@ -310,7 +333,7 @@ final class Model: ObservableObject {
         return URLSession(configuration: configuration)
     }()
 
-    private func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
+    func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
         try await runOnFFIThread(action)
     }
     /// Settings handshakes and turn startup share this gate. A turn may begin
@@ -536,11 +559,7 @@ final class Model: ObservableObject {
             Task { await runtime.cancel() }
         } else { job?.cancel() }
     }
-    func prepareWDA() async throws -> String {
-        await acquireDeviceConnection()
-        defer { releaseDeviceConnection() }
-        try Task.checkCancellation()
-        guard !pendingAgentCancellation else { throw CancellationError() }
+    private func preparePhoneTransport() async throws -> DeviceConnection {
         let device: DeviceConnection
         if let existing = connection {
             // A failed HTTP/session setup may already own a running process.
@@ -562,25 +581,53 @@ final class Model: ObservableObject {
             connection = device
             log("rp_tunnel_connected")
         }
+        if !(try await ffi { device.hasDDI() }) {
+            log("ddi_download")
+            let directory = documents.appendingPathComponent("DDI", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
+                let destination = directory.appendingPathComponent(name)
+                if !FileManager.default.fileExists(atPath: destination.path) {
+                let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
+                let (temporary, response) = try await URLSession.shared.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
+                try FileManager.default.moveItem(at: temporary, to: destination)
+                }
+            }
+            try await ffi { try device.mountDDI(directory) }
+        }
+        log("ddi_ready")
+        try Task.checkCancellation()
+        return device
+    }
+    func prepareDDI() async throws {
+        await acquireDeviceConnection()
+        defer { releaseDeviceConnection() }
+        try Task.checkCancellation()
+        guard !pendingAgentCancellation else { throw CancellationError() }
+        let device = try await preparePhoneTransport()
+        guard device.ddi == nil else { return }
+        try await runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
+            try await self.ffi { try device.openDDI() }
+        }
+        try Task.checkCancellation()
+        guard !pendingAgentCancellation else { throw CancellationError() }
+        let result = try await ffi { try device.ddiRequest(["op": "apps"]) }
+        installedApps = (result["apps"] as? [[String: Any]] ?? []).compactMap { app in
+            guard let id = app["bundle_id"] as? String, !id.isEmpty else { return nil }
+            let names = (app["name"] as? String).map { [$0] } ?? []
+            return InstalledApp(bundleID: id, names: names)
+        }
+        log("ddi_services_ready")
+    }
+    func prepareWDA() async throws -> String {
+        await acquireDeviceConnection()
+        defer { releaseDeviceConnection() }
+        try Task.checkCancellation()
+        guard !pendingAgentCancellation else { throw CancellationError() }
+        let device = try await preparePhoneTransport()
         if !device.ownsRunner {
             wdaSessionBase = nil
-            if !(try await ffi { device.hasDDI() }) {
-                log("ddi_download")
-                let directory = documents.appendingPathComponent("DDI", isDirectory: true)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
-                    let destination = directory.appendingPathComponent(name)
-                    if !FileManager.default.fileExists(atPath: destination.path) {
-                        let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
-                        let (temporary, response) = try await URLSession.shared.download(from: url)
-                        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
-                        try FileManager.default.moveItem(at: temporary, to: destination)
-                    }
-                }
-                try await ffi { try device.mountDDI(directory) }
-            }
-            log("ddi_ready")
-            try Task.checkCancellation()
             let override = DeviceSettings.runnerBundleIDOverride
             let defaultID = DeviceSettings.embeddedRunnerBundleID
             let assistantID = DeviceSettings.assistantBundleID
@@ -641,8 +688,20 @@ final class Model: ObservableObject {
                 phonePreparationStatus = "本轮已结束，使用的准备连接已释放"
             }
         }
-        guard let device = connection, device.ownsRunner else { return "" }
+        guard let device = connection else { return "" }
         var warnings: [String] = []
+        if device.ddi != nil {
+            do {
+                // Finalization runs uncancelled. Returning to our app is a
+                // cleanup effect, even after Stop or a failed AX observation.
+                _ = try await ffi { try device.ddiRequest(["op": "return", "bundle_id": DeviceSettings.assistantBundleID]) }
+                log("assistant_returned")
+            } catch { warnings.append("未能自动返回 App，请手动切回。"); log("assistant_return_failed", Model.errorFields(error)) }
+            do { try await ffi { try device.closeDDI() }; log("ddi_services_closed") }
+            catch { warnings.append("DDI 服务清理未完全确认，连接已释放。"); log("ddi_close_failed", Model.errorFields(error)) }
+            return warnings.joined(separator: " ")
+        }
+        guard device.ownsRunner else { return "" }
         if let base = wdaSessionBase {
             do {
                 _ = try await request("POST", "\(base)/wda/apps/activate",

@@ -41,6 +41,12 @@ def main():
     if check.returncode:
         run(['git', '-C', src, 'apply', '--check', patch])
         run(['git', '-C', src, 'apply', patch])
+    # Reviewable native implementation lives in this repository, not an
+    # untracked edit to the pinned dependency checkout.
+    ddi = src / 'ffi/src/pocket_ddi'
+    if ddi.exists():
+        shutil.rmtree(ddi)
+    shutil.copytree(ROOT / 'Native/ddi', ddi)
     sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
     env = os.environ.copy()
     env['SDKROOT'] = sdk
@@ -50,7 +56,7 @@ def main():
     run(['rustup', 'target', 'add', 'aarch64-apple-ios'])
     run(['cargo', 'build', '--manifest-path', src / 'Cargo.toml', '--locked',
          '--release', '--target', 'aarch64-apple-ios', '-p', 'idevice-ffi',
-         '--no-default-features', '--features', 'full,ring'], env=env)
+         '--no-default-features', '--features', 'full,ring,display_stream'], env=env)
     out = ROOT / '.build/native'
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / '.build/rust/aarch64-apple-ios/release/libidevice_ffi.a', out / 'libidevice_ffi.a')
