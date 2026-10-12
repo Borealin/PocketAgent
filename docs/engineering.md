@@ -517,9 +517,11 @@ file confinement is unchanged.
 
 ## DDI phone backend (2026-10-12)
 
-Status: implemented on the devicehub-control branch; the shared executor has passed
-the selected-device exercise, including cross-app Unicode input. Original-app update
-and production chat/UI acceptance are still pending. The user selected DDI as the default with a manual
+Status: implemented on the devicehub-control branch; selected-device acceptance
+includes the shared executor and production chat path for cross-app Unicode input.
+The same-identity original-app update preserved existing data, and the settings
+selector was exercised in both directions before restoring DDI.
+The user selected DDI as the default with a manual
 WDA selector, and requires text input in other apps without XCTest.
 The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
@@ -593,7 +595,10 @@ Stale snapshots refused input, in-flight long-press cancellation released the ow
 contact, and finalization removed the keyboard without cleanup warnings.
 New test-app network permission
 prompts interrupted initial runs before target input; those runs are unconfirmed,
-not passed. Original-app update and production chat/UI checks remain required before delivery.
+not passed. The production chat path also confirmed exact ordinary-field replacement
+in the independent receiver and returned to the existing assistant process.
+The original App's first host-prepared prompt paste requested iOS paste permission;
+the bench setup allowed that known prompt before starting the production turn.
 This is global paste-based input, not proof of acceptance by every custom control.
 The inspected HID API carries keyboard usages, and the inspected AX dialect reads
 attributes; no independent Unicode/set-value injection path has been established

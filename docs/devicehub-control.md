@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation and shared-executor device exercise completed, including cross-app Unicode input. Original-app update and production chat/UI acceptance pending. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
+> Status: native DDI implementation, original-app update and selected-device acceptance completed, including cross-app Unicode input through the production chat path. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -60,7 +60,7 @@ document records the implemented backend, confirmed integration failures and the
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
 | WDA compatibility backend | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep selectable; no automatic action fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend and shared-executor device exercise completed; original-app acceptance pending |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend and selected-device acceptance completed |
 | DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
@@ -268,7 +268,7 @@ screen-sharing indicator appears and its power cost.
 | Backend selection and frozen job configuration | PocketAgent app | Codex | devicehub-control | Implemented: DDI default, manual WDA |
 | Native screenshot, bounded AX reader and role mapping | PocketAgent app/native | Codex | devicehub-control | Implemented |
 | Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise passed on the selected phone |
-| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Core/native/build/IPA checks completed; same-identity update and production UI/chat pending |
+| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Core/native/build/IPA checks and same-identity update passed; old data preserved; DDI/WDA selector and production DDI chat exercised |
 
 The user authorized implementation and exact-device validation on the iPhone 12 mini.
 The current work does not embed a VPN or add a floating overlay. RP pairing and local
