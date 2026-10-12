@@ -7,21 +7,20 @@ provider you configure.
 
 ## Installation
 
-> [!IMPORTANT]
-> The v0.3.0 Automation companion has a confirmed AltStore re-signing issue:
-> its embedded XCTest bundle causes "Could not find matching provisioning
-> profile." The v0.3.1 packaging moves the complete test module into a nested
-> framework and explicitly selects it at launch. Actual sideload re-sign/install
-> verification is pending. Public downloads and feed checks do not establish successful
-> installation through AltStore or SideStore.
+The source offers both apps from the
+[v0.3.2 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2).
+The updated app passed a read-only phone turn on iPhone 12 mini with default
+Automation resolution, and retained its installed conversations and settings.
+An earlier SideStore installation ran on iPhone 15 Pro after correcting its
+signed Automation ID. This version automates that matching and simplifies the
+system task display; its automatic Dynamic Island preparation still needs a
+full retest after upgrading the SideStore-signed app. It remains a prerelease.
 
-The source now offers both apps from the
-[v0.3.1 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1).
-Its builds, privacy checks and signature inspection pass; phone automation
-runtime still awaits system authorization. It remains a prerelease while
-actual sideload installation and phone automation are validated.
+The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
+0.3.1 and later package the complete test module as a nested framework.
+Update both apps when leaving 0.3.0; do not mix the old companion with the new app.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
@@ -30,7 +29,7 @@ phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the v0.3.1 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.1)
+2. Open [the v0.3.2 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
@@ -38,8 +37,8 @@ phone tools. To install manually:
    and refresh their signatures using the sideloading app.
 4. Enable Developer Mode, configure the local VPN and import this phone's
    **idevice RP pairing record** using the [Mac setup guide (中文)](docs/pairing-zh.md).
-   In PocketAgent's device settings, enter the
-   installed Automation companion's bundle ID; signing can change it.
+   Leave the advanced Automation Bundle ID empty for automatic matching.
+   A manual override is available if your signing layout differs.
 5. Add your API provider and model in Settings, then start a conversation.
 
 For an existing installation, update using the same signing account and bundle
@@ -52,8 +51,8 @@ changed, so mixing these versions does not support phone automation.
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.3.1 candidate (build 4)** for both apps. Stable releases update
-the feed automatically; this candidate was added explicitly for signing validation.
+offering the **0.3.2 candidate (build 5)** for both apps. Stable releases update
+the feed automatically; this candidate is included explicitly for device validation.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its
 Sources screen. No GitHub sign-in is required.
