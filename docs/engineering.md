@@ -517,8 +517,9 @@ file confinement is unchanged.
 
 ## DDI phone backend (2026-10-12)
 
-Status: implemented on the devicehub-control branch; final production device gates
-are blocked by development signing. The user selected DDI as the default with a manual WDA selector.
+Status: implemented on the devicehub-control branch; direct clipboard input is
+under renewed device acceptance. The user selected DDI as the default with a manual
+WDA selector, and requires text input in other apps without XCTest.
 The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
 The backend is captured in ChatJob at enqueue, alongside the model configuration.
@@ -547,21 +548,22 @@ Confirmed integration fixes: decoding AX UID zero as an empty string changed the
 translation token's null fields and the device refused its attributes request.
 Null references now remain null and a regression covers that wire shape. The
 initial all-app inventory setup timed out; the streaming inventory completed
-initialization on the same device. The direct pasteboard service path failed to
-deliver text and later timed out; its precise protocol fault remains unresolved.
-Background UIKit writes also left the old clipboard value in Spotlight. The
-backend now prepares text in the assistant foreground before clearing the target,
-confirms the foreground write and restores/revalidates the target app before
-the HID paste chord. Launching private Spotlight directly produced a blank
-surface with refused AX hits. Direct input into unlisted system processes,
-including Spotlight, is refused before clearing; use the manual WDA option for
-that input. Main removed the standalone Spotlight tool, so this branch exposes
-the same 14 phone tools. Normal installed-app input may briefly
-switch to the assistant. The direct CoreDevice pasteboard fault remains unresolved
-and SET is not used in production. Clipboard counters changed during preparation
-even while the assistant stayed active; the source of those changes is unresolved.
-A fresh read-only CoreDevice connection instead checks actual text before clearing
-and again before paste, resolving only the primary representation. Initial keyboard commands left partial
+initialization on the same device. Background UIKit writes left the old clipboard
+value in Spotlight; foreground preparation was a temporary workaround. That
+workaround has been removed because it required target restoration and excluded
+system processes. The native backend now sends CoreDevice SET to general with
+UTF-8 text UTIs, reads exact bytes back before clearing, and uses a fresh read-only
+connection to confirm them immediately before HID paste. It does not activate the
+assistant. Existing foreground/node/geometry checks still govern every input.
+
+The earlier raw probe logged plist Data as JSON null and recorded timeouts
+alongside SET/PULL replies. These observations did not establish failed storage;
+reading UIPasteboard in the app was also not an independent cross-app insertion
+witness. Apple-client request tracing confirmed the general/item/text-UTI shape;
+the current idevice SET and Apple client both read test UTF-8 back on the selected
+phone through the Mac transport. Phone RP insertion is a separate gate in progress.
+The prior receive-timeout root cause remains open. No success claim follows from
+an ACK alone. Initial keyboard commands left partial
 old text until a keyboard-settle interval and individual key-up reports were added.
 Clear now requires an observed field value before paste; missing values are not
 assumed empty. Replacement input returns
@@ -575,23 +577,18 @@ input cleanup closes AX and disables further input while preserving owned releas
 state for finalization. AppService activation uses terminateExisting=false; returning to a running
 assistant must preserve the process that owns the turn and its finalization.
 
-Earlier native and executor candidates on the selected iPhone 12 mini read the
-full test AX graph and confirmed Chinese plus Emoji replacement through an actual
-UIKit field callback. A later candidate encountered a service timeout; another
-cross-app input attempt encountered the fixture's delayed first wireless-data
-permission surface. Both stopped with an unconfirmed outcome rather than replaying.
-The exact timeout operation was not captured in that candidate; its root cause
-remains open. These checks do not establish the complete latest executor, Stop
-cleanup, production chat/UI or same-identity update gates.
+Device acceptance currently exercises the shared executor against independent
+UIKit fields and ordinary system search, with actual editing callbacks and no
+assistant activation during background typing. New test-app network permission
+prompts interrupted initial runs before target input; those runs are unconfirmed,
+not passed. In-flight cancellation, clean keyboard removal, original-app update
+and production chat/UI checks remain required before delivery.
 
-The final candidate builds and passes core/native and clean IPA checks. Development
-codesign subsequently failed with errSecInternalComponent, including an explicit
-login-keychain attempt. Root cause is unresolved; the user must restore local
-signing access before final device acceptance. The original App was not updated
-or uninstalled, and its messages, IDs, providers, workspaces and rules were checked
-against the local pre-test backup. Temporary test apps were removed and the VPN
-was observed disconnected. Evidence, signing and pairing remain local outside
-Git. No Looktech app/firmware or schema/rpc change is involved.
+The previous errSecInternalComponent development-signing failure no longer
+reproduces on a disposable test binary; its cause remains unresolved. Current
+candidates can be signed and installed. Private logs, pairing, signing and
+success-only records remain local outside Git. No Looktech app/firmware or
+schema/rpc change is involved.
 
 ## On-device workspace and scripting
 

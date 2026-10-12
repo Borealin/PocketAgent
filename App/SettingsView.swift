@@ -184,7 +184,7 @@ struct PhoneSetupView: View {
                 if !device.status.isEmpty { Text(device.status).font(.caption).accessibilityIdentifier("deviceSetupStatus") }
             } footer: {
                 Text(device.backend == .ddi
-                    ? "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。DDI 无需 XCTest 授权；输入文字会短暂返回本 App 准备剪贴板，再恢复目标页面。目标 App 可能提示粘贴许可。"
+                    ? "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。DDI 无需 XCTest 授权；输入文字会替换系统剪贴板并模拟粘贴，不会切回本 App。目标 App 可能提示粘贴许可。"
                     : "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
             }
             Section {

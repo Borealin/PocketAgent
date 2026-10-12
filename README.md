@@ -13,10 +13,10 @@ and a local VPN. It needs no Automation companion or XCTest authorization.
 Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
 selection is captured when a turn is queued. DDI currently accepts verified
 portrait display geometry; switch explicitly to WDA for other layouts. Text input
-replaces the device clipboard, briefly returns to PocketAgent to prepare it, then
-restores and revalidates the target app. The target app can request paste permission.
-Direct input into unlisted system processes, including Spotlight, is unavailable
-through DDI; select WDA explicitly when that input is needed.
+writes the device clipboard through CoreDevice, checks its actual UTF-8 contents,
+then pastes through the owned HID keyboard without activating PocketAgent. The
+target app can request paste permission; rejected or unconfirmed insertion is
+reported rather than replayed.
 The published candidate instructions below describe the earlier WDA release;
 the DDI change has not been published to that feed.
 

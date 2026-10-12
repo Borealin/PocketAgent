@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation completed; final device acceptance blocked by development signing. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
+> Status: native DDI implementation completed; direct clipboard input candidate under device acceptance. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -48,9 +48,9 @@ document records the implemented backend, confirmed integration failures and the
 - Confirmed from sources: the transport is the same; the DDI that PocketAgent downloads
   contains every needed daemon; the pinned idevice has clients for all of them, but its
   FFI exports only app_service among them.
-- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Final device acceptance is blocked by development signing.
+- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Development signing is available again; direct clipboard input is under device acceptance.
 - Remaining boundary: long background lifetime, physically unplugged operation, system-dialog input and PocketAgent's downloaded DDI are not established by the initial probe.
-- Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and briefly returns to PocketAgent to prepare Unicode input; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
+- Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and writes Unicode through the device pasteboard service without activating PocketAgent; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
 
 <details>
 <summary>Research details and sources</summary>
@@ -60,7 +60,7 @@ document records the implemented backend, confirmed integration failures and the
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
 | WDA compatibility backend | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep selectable; no automatic action fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; text preparation can switch apps | Production backend implemented; complete device acceptance in progress |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend implemented; complete device acceptance in progress |
 | DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
@@ -73,7 +73,7 @@ document records the implemented backend, confirmed integration failures and the
 | open_app, open_app_by_name | AppService activation without terminating the existing process | Shared ambiguity and installed-app checks |
 | tap, tap_point, long_press | Owned touchscreen contacts | Snapshot, foreground and geometry checks precede effects |
 | swipe, swipe_from_to | Bounded touchscreen path | Shared coordinate/duration limits |
-| type_text | Foreground UIKit clipboard preparation, actual-content readback, target restoration, clear verification and HID paste | Brief App switch; paste permission may require the user |
+| type_text | CoreDevice SET and exact UTF-8 readback, clear verification and HID paste | No assistant activation; paste permission may require the user |
 | press_key | Owned mainKeyboard Return/Delete | Explicit key-up reports and empty held-key state |
 | dismiss_keyboard | Escape and shared fresh observation | Unconfirmed dismissal is reported |
 | press_home | Owned Indigo Home down/up | Releases before returning |
@@ -124,7 +124,7 @@ they are. DDI is the default; WDA is selected explicitly. Backend selection is f
 when a turn is queued and never changes during that turn. A DDI backend reuses
 the turn's RP tunnel and DDI preparation, skips runner launch and opens service clients
 through new idevice FFI exports. It observes with a screenshot plus the AX graph and
-acts through dtuhidd and dtappserviced; the phone app prepares UIPasteboard in its foreground before input, restores and validates the target, and checks actual clipboard text with a fresh read-only service connection. The tested matrix does not require
+acts through dtuhidd and dtappserviced; the native backend writes the device general pasteboard and reads actual UTF-8 back before clearing input. A fresh read-only connection verifies it again immediately before paste. The tested matrix does not require
 an always-on display stream for ordinary touch, Home or ASCII keys. If another supported
 matrix establishes that requirement, the turn must explicitly own and tear down its
 stream, as it owns the runner PID today; do not silently introduce screen sharing or
@@ -146,7 +146,7 @@ retry an action after discovering that its outcome is unknown.
   response cannot be assigned to another element. Traverse AXChildren, validate
   foreground PID and display geometry before/after, then map observed roles to
   tool types without inventing missing attributes.
-- Unicode input uses UIKit to replace the device clipboard and a virtual keyboard paste
+- Unicode input uses the device CoreDevice service to replace the clipboard and a virtual keyboard paste
   chord. Clear and paste are separate effects with stop checks. Permission prompts
   and unconfirmed input/dismissal are reported with the actual fresh screen.
 - Scope excludes a floating overlay and embedded VPN. RP pairing, LocalDevVPN
@@ -181,8 +181,7 @@ retry an action after discovering that its outcome is unknown.
 - An action whose outcome is unknown, such as a closed handle or a timeout, is never
   replayed; the next step observes first. A closed HID connection does not prove that
   the event did not land.
-- Foreground clipboard preparation may briefly switch apps. Direct input into unlisted
-  system processes, including Spotlight, is refused; select WDA when that input is needed.
+- Clipboard preparation does not activate the assistant. Input uses the same verified foreground, geometry and node checks in installed apps and observed system search. Unknown foreground identities still fail.
 - System dialogs and paste permission prompts are reported as needing the user's action
   on the phone. Gap 2's root cause is open, and this design does not depend on it.
 - If the hit test cannot name the foreground app, the observation says so instead of
@@ -279,18 +278,20 @@ Confirmed integration fixes and their remaining root-cause boundaries are conden
 in [engineering.md](engineering.md#ddi-phone-backend-2026-10-12). Success-only evidence
 and private signing/pairing stay outside version control.
 
-### Current acceptance blocker
+### Current clipboard investigation
 
-Development codesign returns `errSecInternalComponent`, including when the existing
-login keychain is selected explicitly. Its root cause is unresolved; local keychain
-unlock/identity access needs the user before the current candidate can be installed.
-The original PocketAgent has not been updated or uninstalled. The temporary test
-apps were removed and LocalDevVPN was observed disconnected at cleanup.
+The user requires text input in other apps without XCTest. Apple devicectl's
+observed SET carries general, one item and three UTF-8 text UTIs; the current
+idevice SET has the same payload plus sourceMetadata=null. On the selected phone,
+Apple and idevice both read the Mac client's UTF-8 text back exactly. This
+establishes the device protocol, not execution through the phone RP adapter.
 
-Earlier executor candidates confirmed ordinary touch/gesture callbacks and Chinese
-plus Emoji input in the assistant's UIKit field. Cross-app replacement did not
-complete: one candidate hit a service timeout, another encountered the input
-fixture's first wireless-data permission surface. These are unconfirmed outcomes,
-not a passed current backend. The complete cross-app input, in-flight script Stop,
-resource teardown and production chat/UI exercise remain required after signing is
-restored. Do not infer acceptance from the successful generic IPA build.
+The earlier raw phone probe logged plist Data as JSON null and recorded receive
+timeouts alongside SET/PULL replies. Those diagnostics do not prove that SET failed to store text;
+the later timeout root cause remains unresolved. The candidate now uses the
+normal library SET followed by exact parsed UTF-8 readback, before any field is
+cleared, and removes foreground UIKit preparation and system-process restoration.
+Phone RP execution, independent external UIKit callbacks, secure/multiline fields,
+Spotlight input and cancellation cleanup are being checked. Permission prompts
+and fields that reject paste remain explicit boundaries; no universal App claim
+is made from a service acknowledgement. No public feed update is authorized.

@@ -89,7 +89,7 @@ extension Model {
                     prompt: goal, promptImages: images, permissionMode: .fullAccess,
                     systemPrompt: AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
                         capabilities: capabilities, workspaceName: workspace?.name, rules: rules)
-                        + (backend == .ddi ? "\n本轮使用 DDI。type_text 会短暂返回 PocketAgent 准备并替换系统剪贴板，再恢复和校验目标页面。无法恢复的未列出系统进程不支持直接 type_text；系统搜索输入可手动切换 WDA。系统粘贴许可或授权提示可能需要用户在手机上处理。输入请求已发出不代表文本已进入；核对返回的页面和文字，不得盲目重放。" : ""),
+                        + (backend == .ddi ? "\n本轮使用 DDI。type_text 会通过设备开发服务替换系统剪贴板并模拟粘贴，不会切回 PocketAgent。系统粘贴许可或授权提示可能需要用户在手机上处理。输入请求已发出不代表文本已进入；核对返回的页面和文字，不得盲目重放。" : ""),
                     priorMessages: priorMessages))
                 await withTaskCancellationHandler {
                     for await event in events {
@@ -599,7 +599,7 @@ final class PhoneExecutor {
                 }
                 if backend == .ddi {
                     try await effect { try await control.prepareText(text) }
-                    // Revalidate the target after any clipboard-preparation app switch.
+                    // Revalidate the target after clipboard preparation; no effect is replayed.
                     a = try await node(args, base: base, proceed: proceed)
                 }
                 let id = try await inputElement(a, base: base, proceed: proceed)

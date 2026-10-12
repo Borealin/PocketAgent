@@ -187,37 +187,12 @@ final class DDIControl: PhoneControl {
         try cancellationCheck?()
         guard text.count <= 4000 else { throw failure("输入文字超过限制。") }
         preparedText = nil
-        let target = observedApp, frame = observedFrame
         if !text.isEmpty {
-            guard let target, model.installedApps.contains(where: { $0.bundleID == target }) else {
-                throw failure("当前系统界面无法确认恢复；请手动切换 WDA 完成系统搜索输入。未修改输入框。")
-            }
-        }
-        if !text.isEmpty {
-            // Background writes failed on the tested phone. Activate our existing
-            // process before writing; no target field has been cleared yet.
-            if UIApplication.shared.applicationState != .active {
-                try await activate(DeviceSettings.assistantBundleID)
-                for _ in 0..<60 {
-                    try cancellationCheck?()
-                    if UIApplication.shared.applicationState == .active { break }
-                    try await Task.sleep(for: .milliseconds(50))
-                }
-            }
-            guard UIApplication.shared.applicationState == .active else { throw failure("未能回到 App 前台准备剪贴板；未输入文字。") }
-            let before = UIPasteboard.general.changeCount
-            UIPasteboard.general.string = text
-            let count = UIPasteboard.general.changeCount
-            guard count != before else { throw failure("剪贴板写入未确认；未输入文字。") }
-            preparedText = text
-            _ = try await call(["op": "clipboard_verify", "text": text])
+            // Device-side clipboard service writes UTF-8 without foregrounding
+            // the assistant. Exact readback completes before any field is cleared.
+            _ = try await call(["op": "clipboard_set", "text": text])
             try cancellationCheck?()
-            if let target, target != DeviceSettings.assistantBundleID {
-                try await activate(target)
-                try await Task.sleep(for: .milliseconds(400))
-                let tree = try await readTree()
-                guard tree.bundleID == target, tree.frame == frame else { throw PhoneObservationIssue.foregroundChanged }
-            }
+            preparedText = text
         }
     }
     func type(_ text: String, into input: PhoneInput) async throws {

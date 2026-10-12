@@ -608,7 +608,7 @@ impl PocketDDISession {
             ),
             "foreground" => Ok(json!({"app":self.foreground().await?})),
             "snapshot" => self.snapshot().await,
-            "clipboard_verify" => {
+            "clipboard_set" | "clipboard_verify" => {
                 let expected = v["text"]
                     .as_str()
                     .ok_or_else(|| error("DDI clipboard text missing"))?;
@@ -621,6 +621,11 @@ impl PocketDDISession {
                 let mut client = bounded(RemoteXpcClient::new(stream)).await?;
                 bounded(client.do_handshake()).await?;
                 let mut client = PasteboardServiceClient::new(client);
+                if op == "clipboard_set" {
+                    self.proceed()?;
+                    bounded(client.set_text(expected, "general")).await?;
+                    self.proceed()?;
+                }
                 let current = bounded(
                     client.get_with_policy("general", DataInclusionPolicy::PromiseSecondary),
                 )
