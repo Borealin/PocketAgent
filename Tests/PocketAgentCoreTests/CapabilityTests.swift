@@ -340,6 +340,81 @@ struct ChatPreservationTests {
 }
 
 struct HTTPToolTests {
+    /// Structured model calls include all optional fields as null. Those
+    /// placeholders must not turn a bodyless GET/HEAD into a four-byte entity.
+    @Test(arguments: ["GET", "HEAD"])
+    func modelNullPlaceholdersReachServerWithoutBody(method: String) async throws {
+        let server = try await TestServer.start()
+        defer { server.stop() }
+        let tool = HTTPTool(policy: NetworkPolicy(allowLoopback: true))
+        let request = try tool.request(j(["method": method, "url": "http://127.0.0.1:\(server.port)/echo",
+                                          "headers": NSNull(), "body": NSNull(), "json": NSNull(),
+                                          "timeout_seconds": 30, "save_to": NSNull()]))
+        #expect(request.httpBody == nil)
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == nil)
+        let result = try await tool.perform(request)
+        #expect(result.status == 200)
+        let observed = try #require(server.recordedRequests.first)
+        #expect(observed.method == method && observed.body.isEmpty)
+        #expect(!observed.header.lowercased().contains("content-type:"))
+        #expect(server.requests == 1)
+        if method == "HEAD" { #expect(result.body.isEmpty) }
+    }
+
+    @Test func getAndHeadRejectActualPayloadsBeforeSending() async throws {
+        let server = try await TestServer.start()
+        defer { server.stop() }
+        let tool = HTTPTool(policy: NetworkPolicy(allowLoopback: true))
+        let payloads: [[String: Any]] = [["json": ["a": 1]], ["json": []], ["json": false],
+                                      ["json": ""], ["body": "payload"], ["body": " "],
+                                      ["json": NSNull(), "body": "payload"]]
+        for method in ["GET", "HEAD"] {
+            for payload in payloads {
+                let args = ["method": method, "url": "http://127.0.0.1:\(server.port)/echo"] as [String: Any]
+                do {
+                    _ = try tool.request(j(args.merging(payload) { _, payload in payload }))
+                    Issue.record("\(method) accepted a request body")
+                } catch let error as HTTPToolError {
+                    #expect(error.localizedDescription.contains(method))
+                    #expect(error.localizedDescription.contains("query"))
+                    #expect(error.localizedDescription.contains("POST"))
+                }
+            }
+        }
+        #expect(server.requests == 0)
+    }
+
+    @Test func absentAndEmptyTextBodiesStayAbsent() throws {
+        let tool = HTTPTool()
+        for method in ["GET", "HEAD", "POST", "PUT"] {
+            for body in [[:], ["body": NSNull()], ["body": ""]] as [[String: Any]] {
+                let args = ["method": method, "url": "https://api.example.com/items"] as [String: Any]
+                let request = try tool.request(j(args.merging(body) { _, body in body }))
+                #expect(request.httpBody == nil)
+                #expect(request.value(forHTTPHeaderField: "Content-Type") == nil)
+            }
+        }
+        let defaultGet = try tool.request(j(["url": "https://api.example.com/items", "json": NSNull(), "body": ""]))
+        #expect(defaultGet.httpMethod == "GET" && defaultGet.httpBody == nil)
+        let explicitHeader = try tool.request(j(["method": "HEAD", "url": "https://api.example.com/items",
+                                                 "headers": ["Content-Type": "application/custom"], "json": NSNull()]))
+        #expect(explicitHeader.httpBody == nil)
+        #expect(explicitHeader.value(forHTTPHeaderField: "Content-Type") == "application/custom")
+    }
+
+    @Test(arguments: ["POST", "PUT"])
+    func explicitJsonNullRemainsAnEntityForBodyMethods(method: String) async throws {
+        let server = try await TestServer.start()
+        defer { server.stop() }
+        let tool = HTTPTool(policy: NetworkPolicy(allowLoopback: true))
+        let result = try await tool.perform(try tool.request(j(["method": method,
+            "url": "http://127.0.0.1:\(server.port)/echo", "json": NSNull(), "body": "ignored"])))
+        #expect(result.status == 200 && result.body == Data("\(method) null".utf8))
+        let observed = try #require(server.recordedRequests.first)
+        #expect(observed.method == method && observed.body == Data("null".utf8))
+        #expect(observed.header.lowercased().contains("content-type: application/json"))
+    }
+
     @Test func destinationPolicy() async throws {
         let policy = NetworkPolicy()
         for url in ["http://127.0.0.1:8100/status", "http://localhost/x", "https://192.168.1.2", "http://10.7.0.1",
@@ -364,7 +439,8 @@ struct HTTPToolTests {
         #expect(throws: HTTPToolError.self) { try tool.request(j(["url": "https://a.example.com", "headers": ["Host": "x"]])) }
         #expect(throws: HTTPToolError.self) { try tool.request(j(["url": "https://a.example.com", "headers": ["X": "a\r\nB: c"]])) }
         #expect(throws: HTTPToolError.tooLarge(HTTPTool.requestLimit)) {
-            try tool.request(j(["url": "https://a.example.com", "body": String(repeating: "x", count: HTTPTool.requestLimit + 1)]))
+            try tool.request(j(["url": "https://a.example.com", "method": "POST",
+                                "body": String(repeating: "x", count: HTTPTool.requestLimit + 1)]))
         }
     }
 
@@ -443,9 +519,17 @@ struct HTTPToolTests {
 
 /// Minimal loopback HTTP/1.1 server for the HTTP tool tests.
 private final class TestServer: @unchecked Sendable {
+    struct RecordedRequest: Sendable {
+        var method: String
+        var header: String
+        var body: Data
+    }
     let listener: NWListener
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     private let received = Counter()
+    private let recordingLock = NSLock()
+    private var recording: [RecordedRequest] = []
+    var recordedRequests: [RecordedRequest] { recordingLock.withLock { recording } }
     /// Complete requests this server has received.
     var requests: Int { received.value }
     private init(listener: NWListener) { self.listener = listener }
@@ -456,7 +540,7 @@ private final class TestServer: @unchecked Sendable {
         let server = TestServer(listener: try NWListener(using: parameters))
         server.listener.newConnectionHandler = { connection in
             connection.start(queue: .global())
-            TestServer.receive(connection, buffer: Data(), received: server.received)
+            TestServer.receive(connection, buffer: Data(), server: server)
         }
         await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
             let once = Atomic()
@@ -470,24 +554,28 @@ private final class TestServer: @unchecked Sendable {
 
     func stop() { listener.cancel() }
 
-    private static func receive(_ connection: NWConnection, buffer: Data, received: Counter) {
+    private static func receive(_ connection: NWConnection, buffer: Data, server: TestServer) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, done, _ in
             var buffer = buffer
             if let data { buffer.append(data) }
             guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
-                if !done { receive(connection, buffer: buffer, received: received) }
+                if !done { receive(connection, buffer: buffer, server: server) }
                 return
             }
             let head = String(decoding: buffer[..<end.lowerBound], as: UTF8.self)
             let length = head.split(separator: "\r\n").first { $0.lowercased().hasPrefix("content-length:") }
                 .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
             let body = buffer[end.upperBound...]
-            if body.count < length { receive(connection, buffer: buffer, received: received); return }
-            received.increment()
+            if body.count < length { receive(connection, buffer: buffer, server: server); return }
+            server.received.increment()
             let parts = head.split(separator: " ")
             let method = String(parts[0]), path = String(parts[1])
+            server.recordingLock.withLock {
+                server.recording.append(RecordedRequest(method: method, header: head, body: Data(body.prefix(length))))
+            }
             func reply(_ status: String, _ headers: String, _ payload: Data) {
-                let response = Data("HTTP/1.1 \(status)\r\nContent-Length: \(payload.count)\r\n\(headers)Connection: close\r\n\r\n".utf8) + payload
+                let response = Data("HTTP/1.1 \(status)\r\nContent-Length: \(payload.count)\r\n\(headers)Connection: close\r\n\r\n".utf8)
+                    + (method == "HEAD" ? Data() : payload)
                 connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
             }
             switch path {

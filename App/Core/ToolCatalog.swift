@@ -88,7 +88,7 @@ nonisolated enum ToolCatalog {
         properties: ["name": string], required: ["name"])
 
     static let httpTool = ToolSpec(name: "http_request", kind: .network,
-        summary: "Send an HTTPS request to a public internet API: method, url (https only), optional headers object, body text or json value (sent instead of body, including null), timeout_seconds (≤120, whole request including name resolution). Hosts that are or resolve to local/private/reserved addresses, and ports 8100/62078, are refused before connecting and on every redirect. The response is capped at 2 MB and the body shown to you at 32 KB; save_to stores the received body in a project file.",
+        summary: "Send an HTTPS request to a public internet API: method, url (https only), optional headers object, timeout_seconds (≤120, whole request including name resolution). GET/HEAD have no request body: omit body/json or use null placeholders; put parameters in the URL query. Actual JSON values or nonempty body text are rejected for GET/HEAD. Other methods accept body text or json (json takes precedence, including explicit null sent as null). Empty body text is omitted. Hosts that are or resolve to local/private/reserved addresses, and ports 8100/62078, are refused before connecting and on every redirect. The response is capped at 2 MB and the body shown to you at 32 KB; save_to stores the received body in a project file.",
         properties: ["method": options(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]), "url": string,
                      "headers": .object(["type": .string("object"), "additionalProperties": string]),
                      "body": string, "json": .object([:]), "timeout_seconds": number, "save_to": string],

@@ -283,8 +283,15 @@ read WDA status and the Settings hierarchy, returned to the diagnostic app and
 stopped its owned runner. These operations used phone-side idevice and local
 HTTP without a computer port forward. USB remained connected for control and
 header-only evidence collection, so physical disconnection acceptance remains
-separate. This demonstrates a recovery sequence, not direct cellular-only
-bootstrap or a proven change to Apple's listener policy.
+separate. In the attempted physical disconnection test, the preparation lease
+had expired before USB was removed; the first attempt rejected that expired
+lease, and later attempts opened new cellular TCP connections and were refused.
+That result does not test survival of a live retained tunnel after USB removal.
+The 120-second window is too short for unattended device acceptance and is
+being independently reviewed with foreground retention and Shortcuts-assisted
+bootstrap alternatives. The successful wired sequence remains a recovery
+proof, not direct cellular-only bootstrap or a proven change to Apple's
+listener policy.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
@@ -442,7 +449,12 @@ tools need a frozen project, `run_script` a project and a bundled runtime,
 per-step confirmation; a script may request phone tools only.
 
 HTTP. `http_request` supports method, headers, text or JSON body (an explicit
-JSON null is sent as `null`), timeout and optional `save_to` into the project.
+JSON null is sent as `null` for body-capable methods), timeout and optional
+`save_to` into the project. GET and HEAD treat absent/null JSON and empty text
+as no body; actual JSON or nonempty text is rejected with instructions to use
+URL query parameters or a body-capable method. This avoids Foundation treating
+structured-call null placeholders as a GET entity. Caller-provided headers are
+preserved; these bodyless requests do not add a JSON Content-Type automatically.
 The enforced contract, for the first URL and every redirect: HTTPS only; no
 ports 8100 or 62078; no single-label or .local-style names; no loopback,
 private, link-local, CGNAT or multicast address, whether literal or among the
@@ -461,6 +473,31 @@ deadline or Stop ends the wait at once, the late answer is discarded and no
 request is sent afterwards. Ephemeral session without cookies, cache or
 credential storage; responses are capped at 2 MB with 32 KB returned to the
 model. Provider keys are never reachable from it.
+
+The 2026-10-12 iPhone 15 Pro investigation confirmed a request-construction bug:
+four HTTP GET calls to three unrelated public hosts all supplied `json: null`;
+the old tool encoded it into a four-byte `null` request body. The actual iOS
+27.0.1 tool reproduced `NSURLErrorDomain/-1103` before receiving a response,
+including for example.com. Apple's iOS 13 release notes document this error
+for URLSession GET tasks with a body. The response caps are unchanged; increasing
+them would not fix this trigger. Regression tests send the complete structured
+GET/HEAD arguments to a local server and check the received body and headers,
+while POST/PUT still send explicit JSON null.
+The fixed source in a separate native test host on that same iPhone returned
+HTTP 200 for example.com, DuckDuckGo and MusicBrainz with zero request-body
+bytes, while its explicit old-style GET still returned -1103. The original
+SideStore installation was not replaced; the complete shopping conversation
+has not been rerun successfully.
+
+The same session had separate phone failures: RP/DDI/Automation/WDA and its first
+screen observation succeeded, but an open-app call used the uninstalled
+`com.taobao.idlefish`; the installed iOS app was `com.taobao.fleamarket`. Later
+phone actions timed out or detected a changed foreground app. The terminal log
+records the continued-processing task's expiration/cancellation handler; it
+does not distinguish a system stop from cancellation in the task UI. This
+session therefore does not establish that initial cellular RP refusal caused
+the HTTP error or the final task stop. Installed-app discovery and the later
+phone-action latency remain separate follow-up work.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which

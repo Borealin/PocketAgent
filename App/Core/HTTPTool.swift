@@ -219,15 +219,23 @@ nonisolated final class HTTPTool: NSObject, URLSessionTaskDelegate, @unchecked S
                   !control(name), !control(value) else { throw HTTPToolError.invalid("不允许的请求头：\(name)") }
             request.setValue(value, forHTTPHeaderField: name)
         }
-        // An explicit JSON null is sent as the body `null`.
-        if let json = args["json"] {
+        if method == "GET" || method == "HEAD" {
+            // Structured calls often fill unused optional fields with null.
+            // GET/HEAD have no entity; never discard an actual payload silently.
+            let hasJSONBody = args["json"].map { $0 != .null } ?? false
+            let hasTextBody = !(args["body"]?.stringValue ?? "").isEmpty
+            guard !hasJSONBody, !hasTextBody else {
+                throw HTTPToolError.invalid("\(method) 不支持请求体；请把参数放在 URL 查询字符串（query）中，或改用 POST、PUT 等支持请求体的方法。")
+            }
+        } else if let json = args["json"] {
+            // Body methods retain explicit JSON null as the entity `null`.
             let data = try JSONEncoder().encode(json)
             guard data.count <= Self.requestLimit else { throw HTTPToolError.tooLarge(Self.requestLimit) }
             request.httpBody = data
             if request.value(forHTTPHeaderField: "Content-Type") == nil {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             }
-        } else if let body = args["body"]?.stringValue {
+        } else if let body = args["body"]?.stringValue, !body.isEmpty {
             let data = Data(body.utf8)
             guard data.count <= Self.requestLimit else { throw HTTPToolError.tooLarge(Self.requestLimit) }
             request.httpBody = data
