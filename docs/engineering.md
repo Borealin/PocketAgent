@@ -261,26 +261,57 @@ Socket(...ConnectionRefused...)")`. The native call emits this error at the
 initial TCP connection to the configured local VPN RemotePairing endpoint,
 before pairing verification, RSD, DDI or runner launch. These runs had no
 `rp_tunnel_connected` or `wda_ready` event, so they are not failures of WDA's
-HTTP listener or of the corrected runner ID. The user correlated the refusal
-with leaving Wi-Fi for cellular. In the requested network comparison, the user
-reported successful connection checks on Wi-Fi and with both Wi-Fi and cellular
-disconnected, but failure with Wi-Fi disconnected and cellular enabled. This
-narrows the trigger to the cellular state in that device configuration rather
-than requiring Wi-Fi association. Current logs do not record the network path,
-so the exact listener/routing condition remains unresolved; being on the
-computer's LAN is not a requirement in this code path.
-Do not replace a usable pairing record or change wireless flags speculatively.
-The settings check releases its temporary tunnel immediately; it is not a
-preparation step that preserves a session for a later turn. Establishing and
-retaining a real tunnel while restoring cellular, then exercising WDA, still
-needs device validation. No cellular recovery flow is shipped in 0.3.3. Upstream
+HTTP listener or of the corrected runner ID. A controlled iPhone 15 Pro test on iOS 27.0.1 with LocalDevVPN 1.3.0
+confirmed the trigger: cellular enabled with Wi-Fi unassociated refuses both
+initial RP and Lockdown TCP connections; disabling cellular makes both succeed.
+Header-only USB capture shows the SYN traversing the utun interface, the VPN
+swapping source/destination and reinjecting it, and the local TCP stack returning
+RST while cellular is enabled. It is not a connection sent directly to the
+carrier or a dependency on the computer's LAN. Binding the client to utun or its
+source address, changing the tunnel interface to a /30 subnet, and disabling
+TCP ECN did not recover startup. The original /32 VPN configuration is retained.
+The precise iOS listener/interface admission rule remains unresolved; current
+XNU source permits receive-interface restrictions to exclude a listener and
+produce a closed-port RST, but that is a hypothesis without effective listener
+policy evidence on this device. Do not replace a usable pairing record or
+change wireless flags speculatively.
+
+A separately built and installed diagnostic app established a real RP/CDTunnel
+with cellular off, retained its actual handles and process, then restored 5G.
+Over that retained tunnel it successfully queried DDI/DVT, started Automation,
+read WDA status and the Settings hierarchy, returned to the diagnostic app and
+stopped its owned runner. These operations used phone-side idevice and local
+HTTP without a computer port forward. USB remained connected for control and
+header-only evidence collection, so physical disconnection acceptance remains
+separate. This demonstrates a recovery sequence, not direct cellular-only
+bootstrap or a proven change to Apple's listener policy.
+
+The App recovery implementation is pending device acceptance. Model owns a
+short-lived prepared RP connection shared with its next phone action; ordinary
+connection checks still release their temporary tunnel. Settings instructs the
+user to disable cellular, disconnect Wi-Fi, keep LocalDevVPN connected, prepare
+the connection, restore cellular, then send a new request. Preparation starts
+no WDA or phone actions. A 120-second lease and the system's shorter background
+allowance limit retention. First phone use consumes the real handles and runs
+normal DDI/runner/WDA verification; completion releases that turn's resources.
+Pure chat/file/network turns retain an unconsumed connection until its deadline.
+Expiry, Stop, explicit release and device configuration changes invalidate it.
+An expired handle is never reused; tool attempts rejected for expiry stay
+rejected in the same turn, while an explicit new turn or successful ordinary
+connection check clears stale recovery state. No phone action is replayed.
+Settings handshakes, configuration changes, startup and cleanup share a serial
+connection gate. Diagnostics record default path flags and TCP/RP failure stage
+in a protected, backup-excluded connection log with setup/active-turn context;
+they omit device identifiers, addresses, credentials and message content. An
+unsatisfied default path is not treated as proof that the local VPN is down.
+
 [SideStore's cellular refresh manager](https://github.com/SideStore/SideStore/blob/0dd743f75afc358b0ba4a002feb5f19474492371/SideStore/Core/Shortcuts/CellularRefreshManager.swift)
-uses configured Shortcuts to temporarily disable data, wait for device
-readiness and restore data around device work.
-[Roam Control's guide](https://github.com/seanhowarthdev/Roam-Control/blob/456049eff7c9acb0b041db086e840915b283f4a8/Documentation/UserGuide.md)
-documents restoring data after a secure session is established. These are
-candidate recovery patterns, not a verified PocketAgent workaround or proof
-that the RP listener only binds on Wi-Fi.
+uses configured Shortcuts to temporarily disable data and restore it around
+device work. [Roam Control's guide](https://github.com/seanhowarthdev/Roam-Control/blob/456049eff7c9acb0b041db086e840915b283f4a8/Documentation/UserGuide.md)
+documents restoring data after a secure session is established. These inform
+the guided recovery, but automatic Shortcuts configuration is not implemented.
+Only PocketAgent's iOS connection lifecycle is affected; Android, glasses
+firmware, schema and RPC contracts are unchanged by this local developer tunnel.
 
 The default now resolves the exact installed companion using the current
 main app's single signing suffix in the known public bundle-ID family. A manual
