@@ -8,19 +8,20 @@ provider you configure.
 ## Installation
 
 The source offers both apps from the
-[v0.3.2 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2).
-The updated app passed a read-only phone turn on iPhone 12 mini with default
-Automation resolution, and retained its installed conversations and settings.
-An earlier SideStore installation ran on iPhone 15 Pro after correcting its
-signed Automation ID. This version automates that matching and simplifies the
-system task display; its automatic Dynamic Island preparation still needs a
-full retest after upgrading the SideStore-signed app. It remains a prerelease.
+[v0.3.3 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3).
+This update adds tap-to-dismiss keyboard behavior and keeps session rows in
+place until deletion is confirmed. The chat interactions were exercised on
+iPhone 12 mini, retaining its installed conversations and settings. It also
+includes automatic signed Automation matching and compact system task titles.
+Full automatic matching and visual Dynamic Island mitigation still need device
+acceptance; cellular-only tunnel startup remains under investigation. It remains
+a prerelease.
 
 The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
 0.3.1 and later package the complete test module as a nested framework.
 Update both apps when leaving 0.3.0; do not mix the old companion with the new app.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
@@ -29,7 +30,7 @@ phone tools. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the v0.3.2 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.2)
+2. Open [the v0.3.3 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.3)
    in Safari. Download both `PocketAgent-<version>.ipa`
    and `PocketAgent-WDA-<version>.ipa` to Files.
 3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
@@ -51,7 +52,7 @@ changed, so mixing these versions does not support phone automation.
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.3.2 candidate (build 5)** for both apps. Stable releases update
+offering the **0.3.3 candidate (build 6)** for both apps. Stable releases update
 the feed automatically; this candidate is included explicitly for device validation.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its

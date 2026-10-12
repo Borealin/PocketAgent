@@ -10,6 +10,15 @@
       "category": "developer",
       "versions": [
         {
+          "version": "0.3.3",
+          "buildVersion": "6",
+          "minOSVersion": "26.0",
+          "size": 58948556,
+          "sha256": "a98c0eecaed09204c4304cdff51ab0694643d46d9b0d1af343131117667578ef",
+          "date": "2026-10-12T03:50:46Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.3.3/PocketAgent-0.3.3.ipa"
+        },
+        {
           "version": "0.3.2",
           "buildVersion": "5",
           "minOSVersion": "26.0",
@@ -64,6 +73,15 @@
       "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png?v=0.3.2",
       "category": "developer",
       "versions": [
+        {
+          "version": "0.3.3",
+          "buildVersion": "6",
+          "minOSVersion": "26.0",
+          "size": 615197,
+          "sha256": "378a9a2eb0406785a6007de8f37ad013e49043921bf6cb6ac2569460c78d4bf7",
+          "date": "2026-10-12T03:50:46Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.3.3/PocketAgent-WDA-0.3.3.ipa"
+        },
         {
           "version": "0.3.2",
           "buildVersion": "5",

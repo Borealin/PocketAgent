@@ -600,6 +600,20 @@ actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
 
+The transcript dismissed the keyboard during interactive scrolling but had no
+tap-to-dismiss path. A transcript-only simultaneous tap now clears the root's
+existing `FocusState`, leaving the composer outside that gesture. Message
+controls receive their tap alongside dismissal; streaming responses do not
+change input focus. Interactive scroll dismissal remains enabled.
+
+Session swipe actions used a destructive button merely to request confirmation.
+That role lets List anticipate deletion before the user confirms, despite the
+store only deleting from the confirmation action. The request is now a normal
+red button with full-swipe execution disabled. Only the confirmation's
+destructive action removes the row and writes the existing deletion tombstone;
+cancel or dismissal keeps the session. Storage, sync and running-session guards
+are unchanged.
+
 With the phone in dark mode, choosing Light and then System in an open Settings
 sheet left that sheet light, although the chat underneath and a cold launch
 returned to dark. The chat root and the sheet each set SwiftUI's presentation

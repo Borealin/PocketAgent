@@ -104,7 +104,7 @@ struct ChatRootView: View {
             if providers.isConfigured {
                 // One transcript identity per conversation: switching recreates
                 // its scroll position and lazy layout state, starting at the bottom.
-                ChatTranscriptView(chat: chat)
+                ChatTranscriptView(chat: chat, dismissKeyboard: { inputFocused = false })
                     .id(chat.selectedID)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if let selected = chat.selected {
@@ -223,9 +223,12 @@ private struct SessionDrawer: View {
                     Button { chat.select(session.id); close() } label: { row(session) }
                         .listRowBackground(session.id == chat.selectedID ? Color.accentColor.opacity(0.14) : Color.clear)
                         .accessibilityIdentifier("session-\(session.id.uuidString)")
-                        .swipeActions {
+                        .swipeActions(allowsFullSwipe: false) {
                             if !chat.isRunning(session.id) {
-                                Button("删除", role: .destructive) { pendingDelete = session }
+                                // This only requests confirmation. A destructive
+                                // swipe role animates removal before confirmation.
+                                Button("删除", systemImage: "trash") { pendingDelete = session }
+                                    .tint(.red)
                             }
                             Button("重命名") { rename(session.id) }.tint(.indigo)
                         }
@@ -245,7 +248,10 @@ private struct SessionDrawer: View {
         .background(Color(.systemBackground).ignoresSafeArea())
         .confirmationDialog("删除会话？", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible, presenting: pendingDelete) { session in
-            Button("删除「\(session.title)」", role: .destructive) { chat.delete(session.id) }
+            Button("删除「\(session.title)」", role: .destructive) {
+                withAnimation { chat.delete(session.id) }
+            }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         } message: { _ in Text("会话及其本机图片将从这台设备删除；已开启同步时其他设备也会删除。") }
     }
 

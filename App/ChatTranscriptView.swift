@@ -7,6 +7,7 @@ import UIKit
 /// the bottom; otherwise keeps the reading position and offers a jump button.
 struct ChatTranscriptView: View {
     @ObservedObject var chat: ChatController
+    let dismissKeyboard: () -> Void
     @Environment(\.openURL) private var systemOpenURL
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var nearBottom = true
@@ -35,6 +36,11 @@ struct ChatTranscriptView: View {
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .scrollDismissesKeyboard(.interactively)
+        .contentShape(Rectangle())
+        // Observe taps alongside message controls: links, copy and disclosure
+        // actions must still receive the same tap. Keep this on the transcript,
+        // rather than the chat root, so the composer retains its focus.
+        .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.visibleRect.maxY >= geometry.contentSize.height - 72
         } action: { _, near in
