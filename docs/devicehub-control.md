@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation completed; direct clipboard input candidate under device acceptance. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
+> Status: native DDI implementation and shared-executor device exercise completed, including cross-app Unicode input. Original-app update and production chat/UI acceptance pending. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -48,7 +48,7 @@ document records the implemented backend, confirmed integration failures and the
 - Confirmed from sources: the transport is the same; the DDI that PocketAgent downloads
   contains every needed daemon; the pinned idevice has clients for all of them, but its
   FFI exports only app_service among them.
-- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Development signing is available again; direct clipboard input is under device acceptance.
+- Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Development signing is available again; on-phone clipboard preparation and Unicode paste passed independent receiver checks in another app and system search.
 - Remaining boundary: long background lifetime, physically unplugged operation, system-dialog input and PocketAgent's downloaded DDI are not established by the initial probe.
 - Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and writes Unicode through the device pasteboard service without activating PocketAgent; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
 
@@ -60,7 +60,7 @@ document records the implemented backend, confirmed integration failures and the
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
 | WDA compatibility backend | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep selectable; no automatic action fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend implemented; complete device acceptance in progress |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend and shared-executor device exercise completed; original-app acceptance pending |
 | DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
@@ -267,8 +267,8 @@ screen-sharing indicator appears and its power cost.
 |---|---|---|---|---|
 | Backend selection and frozen job configuration | PocketAgent app | Codex | devicehub-control | Implemented: DDI default, manual WDA |
 | Native screenshot, bounded AX reader and role mapping | PocketAgent app/native | Codex | devicehub-control | Implemented |
-| Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise pending |
-| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Core/native/build/IPA checks completed; latest exact-device exercise and same-identity update blocked by signing |
+| Touch, keyboard, Home, clipboard and cancellation ownership | PocketAgent app/native | Codex | devicehub-control | Implemented; complete executor exercise passed on the selected phone |
+| Build, clean IPA, exact-device update and history preservation | PocketAgent | Codex | devicehub-control | Core/native/build/IPA checks completed; same-identity update and production UI/chat pending |
 
 The user authorized implementation and exact-device validation on the iPhone 12 mini.
 The current work does not embed a VPN or add a floating overlay. RP pairing and local
@@ -284,7 +284,8 @@ The user requires text input in other apps without XCTest. Apple devicectl's
 observed SET carries general, one item and three UTF-8 text UTIs; the current
 idevice SET has the same payload plus sourceMetadata=null. On the selected phone,
 Apple and idevice both read the Mac client's UTF-8 text back exactly. This
-establishes the device protocol, not execution through the phone RP adapter.
+establishes the device protocol; independent receiver callbacks now also establish
+execution through the on-phone RP adapter.
 
 The earlier raw phone probe logged plist Data as JSON null and recorded receive
 timeouts alongside SET/PULL replies. Those diagnostics do not prove that SET failed to store text;
@@ -292,6 +293,11 @@ the later timeout root cause remains unresolved. The candidate now uses the
 normal library SET followed by exact parsed UTF-8 readback, before any field is
 cleared, and removes foreground UIKit preparation and system-process restoration.
 Phone RP execution, independent external UIKit callbacks, secure/multiline fields,
-Spotlight input and cancellation cleanup are being checked. Permission prompts
-and fields that reject paste remain explicit boundaries; no universal App claim
-is made from a service acknowledgement. No public feed update is authorized.
+Spotlight input and cancellation cleanup passed the shared-executor exercise.
+Normal and multiline replacements were also confirmed by exact fresh AX values;
+secure input retains an explicitly unverified, redacted tool result.
+Permission prompts and fields that reject paste remain explicit boundaries.
+The inspected HID service carries keyboard usages rather than Unicode strings;
+the inspected AX dialect has no verified set-value operation. Keyboard-layout/IME
+input into paste-rejecting controls remains a separate research path. No universal
+App claim is made from a service acknowledgement. No public feed update is authorized.

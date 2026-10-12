@@ -517,8 +517,9 @@ file confinement is unchanged.
 
 ## DDI phone backend (2026-10-12)
 
-Status: implemented on the devicehub-control branch; direct clipboard input is
-under renewed device acceptance. The user selected DDI as the default with a manual
+Status: implemented on the devicehub-control branch; the shared executor has passed
+the selected-device exercise, including cross-app Unicode input. Original-app update
+and production chat/UI acceptance are still pending. The user selected DDI as the default with a manual
 WDA selector, and requires text input in other apps without XCTest.
 The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
@@ -561,7 +562,8 @@ alongside SET/PULL replies. These observations did not establish failed storage;
 reading UIPasteboard in the app was also not an independent cross-app insertion
 witness. Apple-client request tracing confirmed the general/item/text-UTI shape;
 the current idevice SET and Apple client both read test UTF-8 back on the selected
-phone through the Mac transport. Phone RP insertion is a separate gate in progress.
+phone through the Mac transport. The on-phone RP path has also delivered Unicode
+to independent UIKit fields and Spotlight without activating the assistant.
 The prior receive-timeout root cause remains open. No success claim follows from
 an ACK alone. Initial keyboard commands left partial
 old text until a keyboard-settle interval and individual key-up reports were added.
@@ -582,12 +584,20 @@ input cleanup closes AX and disables further input while preserving owned releas
 state for finalization. AppService activation uses terminateExisting=false; returning to a running
 assistant must preserve the process that owns the turn and its finalization.
 
-Device acceptance currently exercises the shared executor against independent
+Device acceptance exercised all baseline tools through the shared executor against independent
 UIKit fields and ordinary system search, with actual editing callbacks and no
-assistant activation during background typing. New test-app network permission
+assistant activation during background typing. Normal and multiline replacement
+were confirmed by exact fresh AX values; the known secure test text was witnessed
+by the independent receiver while the tool result remained redacted and unverified.
+Stale snapshots refused input, in-flight long-press cancellation released the owned
+contact, and finalization removed the keyboard without cleanup warnings.
+New test-app network permission
 prompts interrupted initial runs before target input; those runs are unconfirmed,
-not passed. In-flight cancellation, clean keyboard removal, original-app update
-and production chat/UI checks remain required before delivery.
+not passed. Original-app update and production chat/UI checks remain required before delivery.
+This is global paste-based input, not proof of acceptance by every custom control.
+The inspected HID API carries keyboard usages, and the inspected AX dialect reads
+attributes; no independent Unicode/set-value injection path has been established
+for controls that reject paste. Layout/IME key sequences are a separate unverified path.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
