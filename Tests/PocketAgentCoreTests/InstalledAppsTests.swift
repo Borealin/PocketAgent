@@ -34,7 +34,36 @@ struct InstalledAppsTests {
         #expect(!InstalledApps.isLaunchable(packageType: nil, path: "/apps/Shop.app/PlugIns/Notify.appex", hasExtensionDefinition: false))
         #expect(!InstalledApps.isLaunchable(packageType: nil, path: nil, hasExtensionDefinition: true))
         #expect(!InstalledApps.isLaunchable(packageType: "BNDL", path: nil, hasExtensionDefinition: false))
-        #expect(InstalledApps.isLaunchable(packageType: nil, path: nil, hasExtensionDefinition: false))
+        #expect(!InstalledApps.isLaunchable(packageType: nil, path: nil, hasExtensionDefinition: false))
+    }
+
+    @Test func systemLookupKeepsLocalizedSettingsAndExcludesHiddenNamesakes() {
+        let records: [[String: Any]] = [
+            ["CFBundleIdentifier": "com.apple.Preferences", "CFBundlePackageType": "APPL",
+             "CFBundleDisplayName": "设置", "Path": "/Applications/Preferences.app"],
+            ["CFBundleIdentifier": "com.apple.CarPlaySettings", "CFBundlePackageType": "APPL",
+             "CFBundleDisplayName": "设置", "SBAppTags": ["hidden"]],
+            ["CFBundleIdentifier": "test.extension", "CFBundlePackageType": "APPL",
+             "CFBundleDisplayName": "设置", "NSExtension": [:]],
+            ["CFBundleIdentifier": "test.offloaded", "CFBundlePackageType": "APPL",
+             "CFBundleDisplayName": "设置", "IsDemotedApp": true],
+        ]
+        let apps = InstalledApps.fromMetadata(records)
+        #expect(apps == [InstalledApp(bundleID: "com.apple.Preferences", names: ["设置"])])
+        #expect(InstalledApps.resolve(name: "设置", in: apps) == .found(apps[0]))
+        #expect(InstalledApps.search("com.apple.Preferences", in: apps) == apps)
+    }
+
+    @Test func metadataCopiesNamesDeduplicatesAndRejectsNonApplications() {
+        let apps = InstalledApps.fromMetadata([
+            ["CFBundleIdentifier": "test.app", "CFBundlePackageType": "APPL",
+             "CFBundleDisplayName": " 应用 ", "CFBundleName": "应用"],
+            ["CFBundleIdentifier": "test.app", "CFBundlePackageType": "APPL", "CFBundleName": "App"],
+            ["CFBundleIdentifier": "test.xpc", "CFBundlePackageType": "XPC!", "CFBundleName": "App"],
+            ["CFBundleIdentifier": "test.unknown", "CFBundleName": "App"],
+            ["CFBundleIdentifier": "test.appex", "CFBundlePackageType": "APPL", "Path": "/PlugIns/App.appex"],
+        ])
+        #expect(apps == [InstalledApp(bundleID: "test.app", names: ["应用", "App"])])
     }
 
     @Test func searchesRankExactNamesAheadOfPartialNames() {
@@ -45,8 +74,10 @@ struct InstalledAppsTests {
 
     @Test func catalogAndPromptExposeDiscoveryWithoutAWorkspace() {
         let tools = Set(ToolCatalog.available(ToolCapabilities()).map(\.name))
-        #expect(tools.isSuperset(of: ["find_apps", "open_app_by_name", "search_spotlight"]))
-        #expect(ToolCatalog.scriptDecision(for: "search_spotlight") == .allow)
+        #expect(tools.isSuperset(of: ["find_apps", "open_app_by_name"]))
+        #expect(!tools.contains("search_spotlight"))
+        #expect(ToolCatalog.scriptDecision(for: "search_spotlight") != .allow)
+        #expect(!AgentInstructions.phone(assistantBundleID: "test.assistant").contains("search_spotlight"))
         let prompt = AgentInstructions.phone(assistantBundleID: "test.assistant")
         #expect(prompt.contains("禁止凭记忆猜包名"))
         #expect(prompt.contains("不能直接重放点击或输入"))

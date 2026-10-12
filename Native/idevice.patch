@@ -249,3 +249,45 @@ index f78ab57..9d39375 100644
 +        unsafe { application_listing_free_apps(ptr, count) };
 +    }
 +}
+diff --git a/ffi/src/installation_proxy.rs b/ffi/src/installation_proxy.rs
+index 035d2f0..c9f2c94 100644
+--- a/ffi/src/installation_proxy.rs
++++ b/ffi/src/installation_proxy.rs
+@@ -205,6 +205,37 @@ pub unsafe extern "C" fn installation_proxy_get_apps(
+     }
+ }
+ 
++/// Frees the application plist array returned by `installation_proxy_get_apps`.
++///
++/// # Safety
++/// `apps` must be NULL or the original unfreed pointer with its original `count`.
++/// All borrowed child nodes and strings become invalid after this call.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn installation_proxy_free_apps(apps: *mut plist_t, count: usize) {
++    if apps.is_null() { return; }
++    let values = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(apps, count)) };
++    for value in values.iter() {
++        if !value.is_null() { unsafe { plist_ffi::creation::plist_free(*value as *mut PlistWrapper) }; }
++    }
++}
++
++#[cfg(test)]
++mod app_array_tests {
++    use super::*;
++
++    #[test]
++    fn frees_empty_and_populated_application_arrays() {
++        unsafe { installation_proxy_free_apps(null_mut(), 0) };
++        for count in [0, 3] {
++            let apps = (0..count).map(|_| PlistWrapper::new_node(plist::Value::String("application".into())).into_ptr())
++                .collect::<Vec<_>>().into_boxed_slice();
++            let count = apps.len();
++            let pointer = Box::into_raw(apps) as *mut plist_t;
++            unsafe { installation_proxy_free_apps(pointer, count) };
++        }
++    }
++}
++
+ /// Frees a handle
+ ///
+ /// # Arguments

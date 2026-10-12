@@ -153,46 +153,44 @@ final class DeviceConnection {
         guard server != nil else { throw failure("Missing DVT server") }
     }
     func installedApplications() throws -> [InstalledApp] {
-        guard let server, process == nil else { throw failure("Missing available DVT server") }
-        var listing: OpaquePointer?
-        defer { if let listing { application_listing_free(listing) } }
-        try check(application_listing_new(server, &listing))
-        guard let listing else { throw failure("Missing application listing") }
-        var apps: UnsafeMutablePointer<plist_t?>?
-        var count: UInt = 0
-        defer { if let apps { application_listing_free_apps(apps, count) } }
-        try check(application_listing_get_apps(listing, &apps, &count))
+        guard let adapter, let handshake, process == nil else { throw failure("Missing available device tunnel") }
+        var client: OpaquePointer?
+        defer { if let client { installation_proxy_client_free(client) } }
+        try check(installation_proxy_connect_rsd(adapter, handshake, &client))
+        guard let client else { throw failure("Missing installation service") }
+        var raw: UnsafeMutableRawPointer?
+        var count = 0
+        try check(installation_proxy_get_apps(client, nil, nil, 0, &raw, &count))
+        let apps = raw?.assumingMemoryBound(to: plist_t?.self)
+        defer { if let apps { installation_proxy_free_apps(apps, UInt(count)) } }
         guard count == 0 || apps != nil else { throw failure("Missing installed application records") }
-        var records: [String: InstalledApp] = [:]
+        var entries: [[String: Any]] = []
         for index in 0..<count {
-            guard let app = apps?[Int(index)], plist_get_node_type(app) == PLIST_DICT,
-                  let node = plist_dict_get_item(app, "CFBundleIdentifier"),
-                  plist_get_node_type(node) == PLIST_STRING,
-                  let value = plist_get_string_ptr(node, nil) else { continue }
-            // The string and node are borrowed from apps; copy before freeing it.
-            let identifier = String(cString: value)
-            guard !identifier.isEmpty else { continue }
-            func field(_ key: String) -> String? {
-                guard let node = plist_dict_get_item(app, key), plist_get_node_type(node) == PLIST_STRING,
-                      let value = plist_get_string_ptr(node, nil) else { return nil }
-                return String(cString: value)
-            }
-            guard InstalledApps.isLaunchable(packageType: field("CFBundlePackageType"),
-                                            path: field("Path") ?? field("BundlePath"),
-                                            hasExtensionDefinition: plist_dict_get_item(app, "NSExtension") != nil) else { continue }
-            var names: [String] = []
-            for key in ["CFBundleDisplayName", "CFBundleName", "DisplayName", "displayName", "name"] {
+            guard let app = apps?[index], plist_get_node_type(app) == PLIST_DICT else { continue }
+            var entry: [String: Any] = [:]
+            for key in ["CFBundleIdentifier", "CFBundlePackageType", "Path", "BundlePath",
+                        "CFBundleDisplayName", "CFBundleName", "DisplayName", "displayName", "name"] {
                 guard let node = plist_dict_get_item(app, key), plist_get_node_type(node) == PLIST_STRING,
                       let value = plist_get_string_ptr(node, nil) else { continue }
-                let name = String(cString: value).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty && !names.contains(name) { names.append(name) }
+                entry[key] = String(cString: value)
             }
-            let previous = records[identifier]?.names ?? []
-            records[identifier] = InstalledApp(bundleID: identifier, names: previous + names.filter { !previous.contains($0) })
+            if plist_dict_get_item(app, "NSExtension") != nil { entry["NSExtension"] = true }
+            if let node = plist_dict_get_item(app, "SBAppTags"), plist_get_node_type(node) == PLIST_ARRAY {
+                entry["SBAppTags"] = (0..<plist_array_get_size(node)).compactMap { index -> String? in
+                    guard let child = plist_array_get_item(node, index), plist_get_node_type(child) == PLIST_STRING,
+                          let value = plist_get_string_ptr(child, nil) else { return nil }
+                    return String(cString: value)
+                }
+            }
+            if let node = plist_dict_get_item(app, "IsDemotedApp"), plist_get_node_type(node) == PLIST_BOOLEAN {
+                var value: UInt8 = 0; plist_get_bool_val(node, &value)
+                entry["IsDemotedApp"] = value != 0
+            }
+            entries.append(entry)
         }
-        // Free this borrowing client before ProcessControl borrows the server.
-        return records.values.sorted { $0.bundleID < $1.bundleID }
+        return InstalledApps.fromMetadata(entries)
     }
+
     func launchRunner(bundleID runnerID: String) throws -> UInt64 {
         guard !ownsRunner else { throw failure("This turn already owns a runner") }
         guard let server else { throw failure("Missing DVT server") }
@@ -671,13 +669,27 @@ final class Model: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, response) = try await http.data(for: request)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              (json["value"] as? [String: Any])?["error"] == nil else {
-            throw failure("WDA \(path): \(String(data: data, encoding: .utf8) ?? "invalid response")")
+        let route = WDARequestDiagnostics.route(path)
+        let requestID = UUID().uuidString
+        let started = ProcessInfo.processInfo.systemUptime
+        log("wda_request_started", ["requestID": requestID, "method": method, "route": route])
+        do {
+            let (data, response) = try await http.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            guard code == 200, (json["value"] as? [String: Any])?["error"] == nil else {
+                throw failure("WDA \(path): \(String(data: data, encoding: .utf8) ?? "invalid response")")
+            }
+            log("wda_request_finished", ["requestID": requestID, "method": method, "route": route,
+                "elapsedMS": Int((ProcessInfo.processInfo.systemUptime - started) * 1000), "statusCode": code])
+            return json
+        } catch {
+            var fields = Model.errorFields(error)
+            fields.merge(["requestID": requestID, "method": method, "route": route,
+                "elapsedMS": Int((ProcessInfo.processInfo.systemUptime - started) * 1000)]) { _, new in new }
+            log("wda_request_failed", fields)
+            throw error
         }
-        return json
     }
 }
 

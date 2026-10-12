@@ -33,6 +33,7 @@
 		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
 		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
+		929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65594612732E3288F588504 /* WDARequestDiagnostics.swift */; };
 		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
 		9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38833AB31402CD8F11B2F334 /* Workspace.swift */; };
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
@@ -94,6 +95,7 @@
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
+		E65594612732E3288F588504 /* WDARequestDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WDARequestDiagnostics.swift; sourceTree = "<group>"; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEndpoints.swift; sourceTree = "<group>"; };
 		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
@@ -170,6 +172,7 @@
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
+				E65594612732E3288F588504 /* WDARequestDiagnostics.swift */,
 				38833AB31402CD8F11B2F334 /* Workspace.swift */,
 			);
 			path = Core;
@@ -346,6 +349,7 @@
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
+				929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */,
 				9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */,
 				73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */,
 			);

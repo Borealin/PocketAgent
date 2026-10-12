@@ -5289,6 +5289,15 @@ struct IdeviceFfiError *installation_proxy_get_apps(struct InstallationProxyClie
                                                     size_t *out_result_len);
 
 /**
+ * Frees the application plist array returned by `installation_proxy_get_apps`.
+ *
+ * # Safety
+ * `apps` must be NULL or the original unfreed pointer with its original `count`.
+ * All borrowed child nodes and strings become invalid after this call.
+ */
+void installation_proxy_free_apps(plist_t *apps, uintptr_t count);
+
+/**
  * Frees a handle
  *
  * # Arguments

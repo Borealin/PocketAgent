@@ -262,7 +262,6 @@ nonisolated enum ToolLabels {
         case "open_app": "打开 App"
         case "find_apps": "查找 App"
         case "open_app_by_name": "打开 App"
-        case "search_spotlight": "系统搜索"
         case "tap": "点击"
         case "tap_point": "点击坐标"
         case "long_press": "长按"
@@ -295,7 +294,6 @@ nonisolated enum ToolLabels {
         case "open_app": return "打开 " + appName(args["bundle_id"]?.stringValue ?? "")
         case "open_app_by_name": return "打开 " + String((args["name"]?.stringValue ?? "App").prefix(24))
         case "find_apps": return "查找「\((args["query"]?.stringValue ?? "").prefix(24))」"
-        case "search_spotlight": return "系统搜索「\((args["query"]?.stringValue ?? "").prefix(24))」"
         case "tap": return target.map { "点击\($0)" } ?? "点击屏幕元素"
         case "long_press": return target.map { "长按\($0)" } ?? "长按屏幕元素"
         case "tap_point": return "点击屏幕位置"

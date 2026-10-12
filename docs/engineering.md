@@ -17,10 +17,10 @@ Pairing has a dedicated guide and format checks; script availability reflects
 actual initialization and interpreter startup instead of archive presence.
 
 The approved 0.3.6 work exposes native installed-app discovery, exact-name
-opening and explicit Spotlight search fallback. Bundle-based opening must
+opening and (in 0.3.6) a separate Spotlight search tool, removed in 0.3.7. Bundle-based opening must
 validate the real list instead of trying remembered identifiers. Ambiguous
 names return candidates; missing names direct the agent to system search.
-Spotlight is optional following the user's clarification; ordinary page search,
+Following the user's clarification, system search uses ordinary phone tools; ordinary page search,
 observed buttons and swipes are the primary workflow. An additive logical-point
 swipe tool supports nested scrolling and iOS edge-back gestures. Foreground/node
 changes return a fresh observation when possible without replaying clicks or
@@ -28,6 +28,38 @@ input. Existing sessions, credentials and per-device
 configuration remain untouched. Release acceptance includes iPhone 15 Pro
 Xianyu search, the stable default-endpoint hint, clean IPA inspection and
 verification of the public AltStore source against the released assets.
+
+The 0.3.7 follow-up addresses the confirmed system-app discovery failure and
+shared phone-operation timeouts. The user removed the dedicated Spotlight tool:
+system search uses ordinary observation, tap, swipe and text input. Installation Proxy `Any` lookup through the phone's
+existing RSD tunnel replaces DVT's development application list. A read-only
+15 Pro query confirmed that the former provides `com.apple.Preferences` with
+the localized display name “设置”, while the old model-facing list omitted it.
+The same query showed a hidden CarPlay Settings app with the identical name;
+`SBAppTags: hidden`, extension definitions/paths, non-APPL packages and demoted
+apps are excluded before name resolution. IDs still come from actual metadata,
+not a remembered system-app allowlist. Lookups fail explicitly if the service
+cannot supply the catalog. FFI results copy their fields before releasing both
+owned plist nodes and the boxed pointer array with a matching deallocator.
+Per-request WDA diagnostics record only method, endpoint shape, elapsed time
+and error identity; session/element IDs, arguments and response bodies are
+excluded. System Home/search observations skip the automatic status-area
+preparation gesture, avoiding an extra XCTest event during system transitions.
+The removed Spotlight implementation also misclassified the 15 Pro's observed
+`spotlight-pill` (an Other container) as absent because it only accepted Button;
+ordinary tap can use the actual observed container instead. A product-tool
+suite on the 15 Pro verified localized Settings lookup, exact-name and verified-ID
+opening, changed content after a real swipe, and system search entry/input using
+generic tools. The test used real task-title changes and the installed SideStore
+Automation companion; it did not replace the original assistant or mutate its
+history. The latest original WeChat turn opened WeChat before subsequent tap
+and observation timeouts and system expiration; a separate new read-only open
+and observation passed. That does not isolate or resolve the old tap stall.
+WDA's pinned synthesized-event implementation includes an unbounded completion
+wait, but no request-level log existed in the original failing turn, so this is
+a source-level risk, not a proven cause. Keep the 15/20-second client limits and
+no-replay semantics; newly recorded route timings support the next reproduction.
+Do not claim generic removal of WDA timeouts or repair of cellular-only startup.
 
 The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
 for independent review and iPhone 12 mini validation. Its header has
