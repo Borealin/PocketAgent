@@ -256,6 +256,25 @@ phone tools. Native file logging is initialized at app launch, so enabling it
 requires saving settings and relaunching; it stays at Info level without debug
 key dumps.
 
+Separate phone-tool failures returned `idevice 16/0: InternalError("connect:
+Socket(...ConnectionRefused...)")`. The native call emits this error at the
+initial TCP connection to the configured local VPN RemotePairing endpoint,
+before pairing verification, RSD, DDI or runner launch. These runs had no
+`rp_tunnel_connected` or `wda_ready` event, so they are not failures of WDA's
+HTTP listener or of the corrected runner ID. The user correlated the refusal
+with leaving Wi-Fi for cellular. Current logs do not record the network path,
+so the exact listener/routing condition and the effect of cellular remain
+unresolved; being on the computer's LAN is not a requirement in this code path.
+Do not replace a usable pairing record or change wireless flags speculatively.
+An unplugged cellular-on/cellular-off connection check is pending. Upstream
+[SideStore's cellular refresh manager](https://github.com/SideStore/SideStore/blob/0dd743f75afc358b0ba4a002feb5f19474492371/SideStore/Core/Shortcuts/CellularRefreshManager.swift)
+uses configured Shortcuts to temporarily disable data, wait for device
+readiness and restore data around device work.
+[Roam Control's guide](https://github.com/seanhowarthdev/Roam-Control/blob/456049eff7c9acb0b041db086e840915b283f4a8/Documentation/UserGuide.md)
+documents restoring data after a secure session is established. These are
+candidate recovery patterns, not a verified PocketAgent workaround or proof
+that the RP listener only binds on Wi-Fi.
+
 The default now resolves the exact installed companion using the current
 main app's single signing suffix in the known public bundle-ID family. A manual
 override wins; local build IDs remain exact. It never selects another account's
