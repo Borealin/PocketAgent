@@ -5,10 +5,19 @@
       "name": "PocketAgent",
       "bundleIdentifier": "io.github.borealin.PocketAgent",
       "developerName": "Borealin",
-      "localizedDescription": "Native multi-session phone assistant with configurable model providers. Version 0.3.1 is a signing candidate; phone automation runtime validation is pending. Update PocketAgent and PocketAgent Automation together.",
+      "localizedDescription": "Native phone assistant and automation companion. Candidate 0.3.5 fixes HTTP GET null placeholders; guided cellular bootstrap from 0.3.4 remains. Initial cellular developer TCP refusal and later phone-action latency remain under investigation.",
       "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png?v=0.3.2",
       "category": "developer",
       "versions": [
+        {
+          "version": "0.3.5",
+          "buildVersion": "8",
+          "minOSVersion": "26.0",
+          "size": 58971432,
+          "sha256": "9a3e018c1688a1a7a85efa9c36f62063662fc335aa8bd6eb75ce9acc576e73f5",
+          "date": "2026-10-12T05:52:43Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.3.5/PocketAgent-0.3.5.ipa"
+        },
         {
           "version": "0.3.4",
           "buildVersion": "7",
@@ -78,10 +87,19 @@
       "name": "PocketAgent Automation",
       "bundleIdentifier": "io.github.borealin.PocketAgent.WDA.xctrunner",
       "developerName": "Borealin",
-      "localizedDescription": "XCTest automation companion required for phone tools. Version 0.3.1 is a signing candidate; phone automation runtime validation is pending. Update PocketAgent and PocketAgent Automation together.",
+      "localizedDescription": "Native phone assistant and automation companion. Candidate 0.3.5 fixes HTTP GET null placeholders; guided cellular bootstrap from 0.3.4 remains. Initial cellular developer TCP refusal and later phone-action latency remain under investigation.",
       "iconURL": "https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/icon.png?v=0.3.2",
       "category": "developer",
       "versions": [
+        {
+          "version": "0.3.5",
+          "buildVersion": "8",
+          "minOSVersion": "26.0",
+          "size": 615201,
+          "sha256": "2f8565036530a4e164feb728763e7cc251836d7651fbe55bb4d0c73294f2bf33",
+          "date": "2026-10-12T05:52:43Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.3.5/PocketAgent-WDA-0.3.5.ipa"
+        },
         {
           "version": "0.3.4",
           "buildVersion": "7",
