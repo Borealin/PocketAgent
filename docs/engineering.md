@@ -139,13 +139,33 @@ and node preparation even after previous preparation. The current
 [iOS 27 user guide](https://support.apple.com/en-mide/guide/iphone/iph28f50d10d/ios)
 defines collapsing an expanded activity as an upward swipe; the existing
 horizontal recipe therefore cannot be treated as a verified cross-version
-collapse-only operation. Repeated automatic gestures are the leading
-explanation for the reported hidden indicator, but the exact visibility cause
-is not isolated: no active-run before/after capture or disabled-gesture control
-has been taken. The available screen capture was after normal completion and
-cannot prove during-run visibility. Compact-status preservation and safe
-expanded-surface handling remain open device-acceptance requirements; do not
-claim that successful gesture requests establish either property.
+collapse-only operation. An active-run device follow-up does not establish horizontal preparation as
+the cause of the missing indicator. An isolated host on the same 15 Pro showed
+no system task indicator in its own foreground UI, but an expanded task card
+appeared after switching to Settings. Two HID gestures matching the product's
+horizontal coordinates initially left the expanded card visible; the later
+compact capture coincided with an unrelated notification, so that transition
+cannot be attributed to the gesture alone. Another matching gesture on the
+visible compact indicator did not hide it. A fresh task with no horizontal
+preparation provided a clean upward-swipe control: the expanded card collapsed
+to its icon and progress ring while the same task remained active. This is a
+manual HID result, not acceptance of a new automatic WDA gesture.
+
+A real turn in the existing SideStore 0.3.6 app also showed an expanded task card
+outside the app, followed by a compact icon/progress ring during operation. It
+did not reproduce complete loss of the indicator. Its read-only Settings goal
+was not completed: Chinese-name lookup found no exact Settings entry, English
+lookup returned extension names, Spotlight and a subsequent swipe timed out,
+and the system expiration handler then terminated the task. A separate follow-up
+finished without opening Settings; the model chose another inventory lookup
+and declined the requested known system ID. These are app-discovery/model-flow
+and automation-timeout observations, not evidence of a Live Activity failure.
+The old conversations, messages, drafts and model selections were compared
+before and after and retained. No product gesture change or new IPA is claimed.
+The original missing-status report remains unexplained outside the observed
+foreground/background distinction. Compact-status preservation under repeated
+WDA preparation, safe detection of expanded surfaces and reliable automatic
+collapse remain open requirements; successful request logs do not prove them.
 
 A local appearance choice (system, light,
 dark) is stored in UserDefaults and applied as the hosting window's interface
