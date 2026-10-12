@@ -46,7 +46,7 @@ extension Model {
                 }
             }) else { throw failure("Background task registration failed") }
             let request = BGContinuedProcessingTaskRequest(identifier: identifier,
-                title: "手机助手", subtitle: ExecutionStatus(modelLabel: config.label).subtitle)
+                title: status.value.systemTaskTitle, subtitle: status.value.systemTaskSubtitle)
             request.strategy = .fail
             // Diagnostics carry no prompt, endpoint or key.
             log("agent_submitted", ["format": config.format.rawValue, "imageInput": config.supportsImages,

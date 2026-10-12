@@ -4499,11 +4499,21 @@ void application_listing_free(struct ApplicationListingHandle *handle);
  *
  * # Safety
  * All pointers must be valid and non-null.
- * Free the returned array with `idevice_plist_array_free`.
+ * Free the returned array and its plists with `application_listing_free_apps`.
  */
 struct IdeviceFfiError *application_listing_get_apps(struct ApplicationListingHandle *handle,
                                                      plist_t **apps_out,
                                                      uintptr_t *count_out);
+
+/**
+ * Frees both the installed application plists and their pointer array.
+ *
+ * # Safety
+ * `apps` must be NULL or an unfreed array returned by
+ * `application_listing_get_apps`, with its original `count`. Borrowed child
+ * nodes and strings must no longer be used. Do not pass arrays from other APIs.
+ */
+void application_listing_free_apps(plist_t *apps, uintptr_t count);
 
 /**
  * Creates a new ConditionInducerClient from a RemoteServerClient

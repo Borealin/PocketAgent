@@ -6,7 +6,7 @@ import SwiftUI
 /// Per-device automation settings. Nothing here syncs: pairing records,
 /// runner identity and tunnel address belong to this phone only.
 enum DeviceSettings {
-    static let defaultRunnerBundleID = "io.github.borealin.PocketAgent.WDA.xctrunner"
+    static let defaultRunnerBundleID = RunnerBundleID.canonicalRunnerBundleID
     static let defaultTunnelEndpoint = "10.7.0.1:49152"
     private static let runnerKey = "runnerBundleID", tunnelKey = "tunnelEndpoint"
     private static let screenshotsKey = "saveDiagnosticScreenshots", logsKey = "saveDiagnosticLogs"
@@ -17,9 +17,11 @@ enum DeviceSettings {
 
     /// Local override, then build `Info.plist`, then the public default.
     static var runnerBundleID: String {
-        nonEmpty(UserDefaults.standard.string(forKey: runnerKey))
-            ?? nonEmpty(Bundle.main.object(forInfoDictionaryKey: "PocketAgentRunnerBundleID") as? String)
-            ?? defaultRunnerBundleID
+        runnerBundleIDOverride ?? embeddedRunnerBundleID
+    }
+    static var runnerBundleIDOverride: String? { nonEmpty(UserDefaults.standard.string(forKey: runnerKey)) }
+    static var embeddedRunnerBundleID: String {
+        nonEmpty(Bundle.main.object(forInfoDictionaryKey: "PocketAgentRunnerBundleID") as? String) ?? defaultRunnerBundleID
     }
     static var tunnelEndpointText: String {
         nonEmpty(UserDefaults.standard.string(forKey: tunnelKey))

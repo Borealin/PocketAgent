@@ -35,7 +35,8 @@ extension Model {
             // Total first: a transient never reads as complete.
             if progress.totalUnitCount != units.total { progress.totalUnitCount = units.total }
             if progress.completedUnitCount != units.completed { progress.completedUnitCount = units.completed }
-            if task.subtitle != status.value.subtitle { task.updateTitle("手机助手", subtitle: status.value.subtitle) }
+            let title = status.value.systemTaskTitle, subtitle = status.value.systemTaskSubtitle
+            if task.title != title || task.subtitle != subtitle { task.updateTitle(title, subtitle: subtitle) }
             let completed = progress.completedUnitCount, total = progress.totalUnitCount
             guard completed != status.reportedUnits || total != status.reportedTotal else { return }
             let now = Date()
@@ -235,8 +236,20 @@ final class PhoneExecutor {
     var image: AgentImageAttachment?
     private var actionInFlight = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Captured while our app is foreground. Unknown, notched and landscape
+    /// layouts never receive a guessed system-surface gesture.
+    private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
+    private var compactedTaskTitle: String?
     init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration) {
         self.model = model; self.task = task; self.config = config
+        let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first { $0.isKeyWindow }
+        if UIDevice.current.userInterfaceIdiom == .phone,
+           let window, window.windowScene?.interfaceOrientation == .portrait,
+           window.screen.bounds.width < window.screen.bounds.height,
+           window.safeAreaInsets.top >= 59 {
+            taskSurfaceGeometry = (window.screen.bounds, window.safeAreaInsets.top)
+        } else { taskSurfaceGeometry = nil }
     }
 
     var remainingTime: TimeInterval { 600 - Date().timeIntervalSince(started) }
@@ -322,22 +335,80 @@ final class PhoneExecutor {
     func currentApp(_ base: String) async throws -> String {
         (try await model.request("GET", "\(base)/wda/activeAppInfo")["value"] as? [String: Any])?["bundleId"] as? String ?? ""
     }
-    func observe() async throws -> [String: Any] {
-        try checkDeadline()
+    private func invalidateObservation() {
+        image = nil; nodes = []; snapshotID += 1; appID = ""; screen = .zero
+    }
+
+    private func requireApp(_ expected: String, base: String, proceed: () throws -> Void) async throws {
+        let current = try await currentApp(base)
+        try proceed()
+        guard !expected.isEmpty, expected == current else {
+            invalidateObservation()
+            throw failure("前台 App 已改变。请重新读屏。")
+        }
+    }
+
+    /// A horizontal inward gesture collapses this turn's system task surface
+    /// without ending its task or progress. It runs under the phone action
+    /// lock, inside the status area of the exact captured portrait layout.
+    /// WDA can report a covered navigation button as hittable, so its tree
+    /// alone is not evidence that the expanded system surface is out of the way.
+    private func compactTaskSurface(_ base: String, app: String, tree: PhoneTree,
+                                    proceed: () throws -> Void) async throws -> PhoneTree {
+        guard self.base != nil, let geometry = taskSurfaceGeometry,
+              tree.frame == geometry.bounds else { return tree }
+        try proceed()
+        if compactedTaskTitle != task.title {
+            try await Task.sleep(for: .milliseconds(300))
+            try proceed()
+        }
+        try await requireApp(app, base: base, proceed: proceed)
+        try proceed()
+        let y = geometry.topInset * 0.42
+        _ = try await model.request("POST", "\(base)/wda/dragfromtoforduration", [
+            "fromX": geometry.bounds.width * 0.90, "fromY": y,
+            "toX": geometry.bounds.width * 0.55, "toY": y, "duration": 0.25])
+        try proceed()
+        try await Task.sleep(for: .milliseconds(300))
+        try proceed()
+        try await requireApp(app, base: base, proceed: proceed)
+        try proceed()
+        let fresh = try await readTree(base)
+        try proceed()
+        try await requireApp(app, base: base, proceed: proceed)
+        try proceed()
+        guard fresh.frame == geometry.bounds else {
+            invalidateObservation()
+            throw failure("屏幕方向或尺寸已变化。请重新读屏。")
+        }
+        compactedTaskTitle = task.title
+        model.log("phone_task_surface_gesture", ["gestureCompleted": true, "layout": "portrait"])
+        return fresh
+    }
+
+    func observe(proceed: () throws -> Void) async throws -> [String: Any] {
+        try proceed()
         let base = try await ready()
+        try proceed()
         let app = try await currentApp(base)
+        try proceed()
         let tree = try await readTree(base)
+        try proceed()
+        let observed = try await compactTaskSurface(base, app: app, tree: tree, proceed: proceed)
+        try proceed()
         // Text-only models skip the screenshot unless diagnostics opted in.
         let keepScreenshot = DeviceSettings.saveScreenshots
         var png: Data?
         if config.supportsImages || keepScreenshot {
             let pngText = try await model.request("GET", "/screenshot")["value"] as? String ?? ""
+            try proceed()
             guard let data = Data(base64Encoded: pngText) else { throw failure("截屏失败。") }
             png = data
         }
-        guard app == (try await currentApp(base)) else { throw failure("观察过程中 App 切换，请重新读屏。") }
-        snapshotID += 1; appID = app; screen = tree.frame
-        nodes = Array(tree.nodes.prefix(180))
+        try await requireApp(app, base: base, proceed: proceed)
+        try proceed()
+        snapshotID += 1; appID = app; screen = observed.frame
+        nodes = Array(observed.nodes.prefix(180))
         image = nil
         if config.supportsImages, let png {
             guard let uiImage = UIImage(data: png) else { throw failure("截屏失败。") }
@@ -359,21 +430,28 @@ final class PhoneExecutor {
         }
         let state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
             "screen": ["width": screen.width, "height": screen.height], "elements": elements,
-            "truncated": tree.nodes.count > nodes.count]
+            "truncated": observed.nodes.count > nodes.count]
         model.log("phone_observe", ["snapshotID": snapshotID, "elements": elements.count, "screenshotBytes": png?.count ?? 0])
         return state
     }
-    func reference(_ args: [String: AgentJSONValue], base: String) async throws {
+    func reference(_ args: [String: AgentJSONValue], base: String, proceed: () throws -> Void) async throws {
         guard snapshotID > 0, args["snapshot_id"]?.integerValue == snapshotID else {
             throw failure("屏幕引用已过期。请 observe_screen 后使用最新 snapshot_id。")
         }
-        guard appID == (try await currentApp(base)) else { throw failure("前台 App 已改变。请重新读屏。") }
+        try await requireApp(appID, base: base, proceed: proceed)
+        try proceed()
     }
-    func node(_ args: [String: AgentJSONValue], base: String) async throws -> [String: String] {
-        try await reference(args, base: base)
+    func node(_ args: [String: AgentJSONValue], base: String, proceed: () throws -> Void) async throws -> [String: String] {
+        try await reference(args, base: base, proceed: proceed)
+        try proceed()
         guard let id = args["node"]?.integerValue, id > 0, id <= nodes.count else { throw failure("无效 node，请重新读屏。") }
         let old = nodes[id - 1], tree = try await readTree(base)
-        guard tree.nodes.contains(where: {
+        try proceed()
+        let current = try await compactTaskSurface(base, app: appID, tree: tree, proceed: proceed)
+        try proceed()
+        try await requireApp(appID, base: base, proceed: proceed)
+        try proceed()
+        guard current.nodes.contains(where: {
             $0["type"] == old["type"] && $0["name"] == old["name"] && $0["label"] == old["label"] &&
             $0["enabled"] == "true" && PhoneTree.rect($0) == PhoneTree.rect(old)
         }) else { throw failure("目标元素已移动、消失或不可用。请重新读屏。") }
@@ -395,6 +473,7 @@ final class PhoneExecutor {
             try proceed()
             issued = true
             _ = try await model.request(method, path, body)
+            try proceed()
         }
         let args = call.arguments.objectValue ?? [:], name = call.name
         do {
@@ -411,7 +490,8 @@ final class PhoneExecutor {
                 guard let bundle = args["bundle_id"]?.stringValue, !bundle.isEmpty else { throw failure("缺少 bundle_id。") }
                 try await effect("POST", "\(base)/wda/apps/activate", ["bundleId": bundle])
             case "tap", "long_press":
-                let a = try await node(args, base: base), rect = PhoneTree.rect(a).intersection(screen)
+                let a = try await node(args, base: base, proceed: proceed), rect = PhoneTree.rect(a).intersection(screen)
+                try proceed()
                 guard !rect.isNull, !rect.isEmpty else { throw failure("目标在屏幕外。") }
                 var body: [String: Any] = ["x": rect.midX, "y": rect.midY]
                 let path: String
@@ -421,12 +501,20 @@ final class PhoneExecutor {
                 } else { path = "/wda/tap" }
                 try await effect("POST", "\(base)\(path)", body)
             case "tap_point":
-                try await reference(args, base: base)
+                try await reference(args, base: base, proceed: proceed)
+                try proceed()
                 guard let x = args["x"]?.numberValue, let y = args["y"]?.numberValue,
                       screen.contains(CGPoint(x: x, y: y)) else { throw failure("坐标必须位于当前屏幕逻辑点范围内。") }
+                let tree = try await readTree(base)
+                try proceed()
+                _ = try await compactTaskSurface(base, app: appID, tree: tree, proceed: proceed)
+                try proceed()
+                try await requireApp(appID, base: base, proceed: proceed)
+                try proceed()
                 try await effect("POST", "\(base)/wda/tap", ["x": x, "y": y])
             case "swipe":
-                try await reference(args, base: base)
+                try await reference(args, base: base, proceed: proceed)
+                try proceed()
                 guard let direction = args["direction"]?.stringValue, ["up", "down", "left", "right"].contains(direction) else { throw failure("无效滑动方向。") }
                 let vertical = ["up", "down"].contains(direction)
                 let reverse = ["down", "right"].contains(direction)
@@ -435,7 +523,8 @@ final class PhoneExecutor {
                     "fromX": screen.width * (vertical ? 0.5 : start), "fromY": screen.height * (vertical ? start : 0.5),
                     "toX": screen.width * (vertical ? 0.5 : end), "toY": screen.height * (vertical ? end : 0.5), "duration": 0.25])
             case "type_text":
-                let a = try await node(args, base: base)
+                let a = try await node(args, base: base, proceed: proceed)
+                try proceed()
                 guard ["XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField"].contains(a["type"] ?? ""),
                       let text = args["text"]?.stringValue, text.count <= 4000, let clear = args["clear"]?.boolValue else {
                     throw failure("请选择实际输入框并提供 text 和 clear。")
@@ -443,29 +532,39 @@ final class PhoneExecutor {
                 let nameFilter = a["name"].map { "@name=\(Self.xpathLiteral($0)) and " } ?? ""
                 let xpath = "//\(a["type"]!)[\(nameFilter)@x=\(Self.xpathLiteral(a["x"] ?? "")) and @y=\(Self.xpathLiteral(a["y"] ?? ""))]"
                 let found = try await model.request("POST", "\(base)/element", ["using": "xpath", "value": xpath])["value"] as? [String: Any]
+                try proceed()
                 guard let id = found?["element-6066-11e4-a52e-4f735466cecf"] as? String else { throw failure("输入框已不可用。") }
+                try await requireApp(appID, base: base, proceed: proceed)
+                try proceed()
                 try await effect("POST", "\(base)/element/\(id)/click", [:])
                 if clear { try await effect("POST", "\(base)/element/\(id)/clear", [:]) }
                 try await effect("POST", "\(base)/element/\(id)/value", ["text": text])
             case "press_key":
-                try await reference(args, base: base)
+                try await reference(args, base: base, proceed: proceed)
+                try proceed()
                 guard let key = args["key"]?.stringValue, ["return", "delete"].contains(key) else { throw failure("无效键盘按键。") }
                 try await effect("POST", "\(base)/wda/keys", ["value": [key == "return" ? "\n" : "\u{8}"]])
             case "dismiss_keyboard":
-                try await reference(args, base: base)
+                try await reference(args, base: base, proceed: proceed)
+                try proceed()
                 try await effect("POST", "\(base)/wda/keyboard/dismiss", [:])
             case "press_home": try await effect("POST", "/wda/homescreen", [:])
             case "wait":
                 guard let seconds = args["seconds"]?.numberValue, (0.2...5).contains(seconds) else { throw failure("等待时间应在 0.2–5 秒。") }
                 try await Task.sleep(for: .seconds(seconds))
+                try proceed()
             default: throw failure("未知手机工具。")
             }
-            if !["observe_screen", "wait"].contains(name) { try await Task.sleep(for: .milliseconds(600)) }
-            let state = try await observe()
+            if !["observe_screen", "wait"].contains(name) {
+                try await Task.sleep(for: .milliseconds(600))
+                try proceed()
+            }
+            let state = try await observe(proceed: proceed)
+            try proceed()
             let data = try JSONSerialization.data(withJSONObject: ["ok": true, "screen": state], options: [.sortedKeys])
             return (String(decoding: data, as: UTF8.self), false)
         } catch {
-            image = nil; nodes = []; snapshotID += 1
+            invalidateObservation()
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             // Never automatically repeat a mutation after an HTTP/observation error.

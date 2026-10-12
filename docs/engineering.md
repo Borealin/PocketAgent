@@ -68,8 +68,9 @@ control otherwise. Consecutive tool steps fold together without changing event
 order or call/result pairing.
 
 One reducer derives connecting, model response, phone action, retry, user-input,
-cleanup and terminal status from actual events. The chat strip and system task
-subtitle share it. Progress counts completed responses and phone actions rather
+cleanup and terminal status from actual events. The chat strip retains its
+detailed status; the system task uses the reducer's current action as its title
+with an empty subtitle. Progress counts completed responses and phone actions rather
 than a request budget. Queue rank is the position among waiting turns. Starting
 a rejected system task must keep a recoverable unsent draft without overwriting
 new edits; completed or interrupted phone work is never replayed automatically.
@@ -80,7 +81,42 @@ Keep Stop separate from the composer so running turns can still accept steering.
 Use iOS's system task surface for outside-app status; Android application-overlay
 windows are not an iOS implementation path. That surface is the system Live
 Activity of BGContinuedProcessingTask; there is no custom ActivityKit/widget
-extension or Dynamic Island design. A local appearance choice (system, light,
+extension or Dynamic Island design. Title updates use a specific current action,
+with short real-stage fallbacks after an action ends; generic assistant labels,
+repeated app names and step counts remain out of the system surface. Progress
+and task completion keep their real-work lifecycle. The empty subtitle was
+accepted in the installed app's read-only phone turn; completion showed its short
+terminal title and the new icon. The new icon is an opaque 1024-square indigo/violet pocket
+and speech mark with a white spark, shared by the app catalog and source feed;
+the obsolete drawing script that generated a black asset is removed.
+
+An opt-in 15 Pro screenshot series showed the system task surface expanded
+across the top navigation area throughout multiple observations. The matching
+foreground-app trees did not include its system controls, so app membership,
+`visible=true` and an unchanged frame alone cannot prove that a coordinate is
+safe to tap. Shorter text cannot itself be claimed to solve that obstruction.
+A read-only Settings reproduction showed its covered back button still reported
+`hittable=true`; moving the active-app detection point to its center also failed
+to distinguish the surface. Neither is an occlusion guarantee. Apple's inward
+horizontal Dynamic Island gesture collapsed the system surface while task
+progress remained active. The phone executor now prepares a compact task
+surface before observation and pointer/input actions, in its existing serial
+action queue, and rechecks cancellation, script lease and foreground app before
+and after the gesture. It rereads the page after preparation; model screenshots
+keep their original coordinates. This is restricted to the captured portrait
+iPhone layout with a Dynamic Island-sized top safe inset and matching WDA screen
+bounds; notch phones, landscape and unknown layouts do not receive a guessed
+gesture. No fabricated progress or background-task cancellation is used. The
+new binary completed a read-only phone turn using default runner resolution and
+its normal cleanup on a notch phone. A separate Dynamic Island return test ran
+the preparation sequence, but its model task had already ended before capture;
+it verifies ordinary return and harmless status-area preparation, not active
+overlay mitigation. The earlier expanded-surface collapse remains the visual
+proof for the gesture. Automatic preparation in the SideStore-signed new binary
+still requires validation on the Dynamic Island device. System expansion and a
+human switching apps can still race an action; no atomic occlusion guarantee is
+claimed.
+A local appearance choice (system, light,
 dark) is stored in UserDefaults and applied as the hosting window's interface
 style, which every sheet presented in that window inherits.
 Manual takeover is a proposal, not verified pause/resume support: continuation
@@ -163,8 +199,11 @@ and runner/VPN settings are local to each device.
 
 ## Setup and readiness
 
-Status: implemented and archived; settings workflow validation on the device
-is awaiting XCTest system authorization. Provider records
+Status: implemented and archived. The same-identity update retained the current
+history and device configuration. On-device settings confirmed automatic script
+readiness, retained synchronization and a successful RP/VPN check. Default-folder
+creation still needs the first system grant on a fresh setup; an existing
+bookmark is intentionally retained. Provider records
 retain their current schema, IDs, exact inference/catalog addresses, Keychain
 bindings and conversation selections. Standard presets derive inference and
 model-list paths from one Base URL; custom routes keep full addresses. Catalog
@@ -204,18 +243,31 @@ distinguishes initial USB trust from the new RP identity's trust/passcode
 prompt; entering the passcode stays a physical user action. Keep that stage
 pending until the device's system prompt actually completes.
 
-A sideloaded 0.3.1 installation returned the same `idevice 13/0:
-UnexpectedResponse` for every phone tool in a completed model run. Phone tool
-errors are transcript results; AgentKit run completion alone does not establish
-that a phone action succeeded. No native or run-stage log was saved for that
-run, so the specific `prepareWDA` substage remains unresolved. Its imported RP
-record was recognized by an independent USB verification; that does not prove
-the on-phone VPN tunnel worked. The installed Automation identifier differs
-from the main app's embedded default after sideload signing, but the active
-device override is unverified. Do not label that mismatch or the pairing record
-as the cause without stage evidence. Enable the existing diagnostic log option,
-save settings and relaunch before a bounded reproduction; native file logging
-is initialized at app launch and stays at Info level, without debug key dumps.
+A SideStore-signed 0.3.1 installation returned `idevice 13/0:
+UnexpectedResponse` for every phone tool. Opt-in stage logs then established
+that RP connection and DDI preparation succeeded, but DVT runner launch failed.
+The main app's embedded runner ID was unsuffixed while the installed companion
+had SideStore's signing suffix, with no local override. Configuring that exact
+installed ID made runner launch, WDA readiness, screen observations and runner
+shutdown succeed. This isolates the startup failure to the runner ID mismatch;
+it does not establish that every later VPN or model request will succeed.
+Tool errors remain transcript results: a completed model run can contain failed
+phone tools. Native file logging is initialized at app launch, so enabling it
+requires saving settings and relaunching; it stays at Info level without debug
+key dumps.
+
+The default now resolves the exact installed companion using the current
+main app's single signing suffix in the known public bundle-ID family. A manual
+override wins; local build IDs remain exact. It never selects another account's
+runner by name or arbitrary prefix, and missing matches explain how to install
+Automation or correct the advanced override. Installed IDs are copied from DVT's
+application listing and not persisted or logged. The short-lived listing client
+releases its borrowed server before ProcessControl is constructed. A dedicated
+native deallocator releases both plist nodes and the owning boxed slice; the
+upstream general array helper omitted its outer buffer. DVT connect, installed
+application listing, ID resolution and launch each log a start/failure stage
+without personal identifiers. Device configuration and conversation storage are
+unchanged.
 
 The app automatically imports/boots the bundled Linux environment and runs
 Bash, Python and Node startup checks. These read-only checks share the existing

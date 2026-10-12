@@ -160,3 +160,92 @@ index b910e17..2aa65f1 100644
 +        }
          Ok(())
      }
+diff --git a/ffi/src/dvt/application_listing.rs b/ffi/src/dvt/application_listing.rs
+index f78ab57..9d39375 100644
+--- a/ffi/src/dvt/application_listing.rs
++++ b/ffi/src/dvt/application_listing.rs
+@@ -60,7 +60,7 @@ pub unsafe extern "C" fn application_listing_free(handle: *mut ApplicationListin
+ ///
+ /// # Safety
+ /// All pointers must be valid and non-null.
+-/// Free the returned array with `idevice_plist_array_free`.
++/// Free the returned array and its plists with `application_listing_free_apps`.
+ #[unsafe(no_mangle)]
+ pub unsafe extern "C" fn application_listing_get_apps(
+     handle: *mut ApplicationListingHandle<'static>,
+@@ -76,19 +76,69 @@ pub unsafe extern "C" fn application_listing_get_apps(
+ 
+     match res {
+         Ok(apps) => {
+-            let mut ptrs: Vec<plist_t> = apps
++            let ptrs: Box<[plist_t]> = apps
+                 .into_iter()
+                 .map(|dict| {
+                     PlistWrapper::new_node(plist::Value::Dictionary(dict)).into_ptr() as plist_t
+                 })
+-                .collect();
+-            ptrs.shrink_to_fit();
++                .collect::<Vec<_>>()
++                .into_boxed_slice();
+             unsafe { *count_out = ptrs.len() };
+-            let ptr = ptrs.as_mut_ptr();
+-            std::mem::forget(ptrs);
+-            unsafe { *apps_out = ptr };
++            unsafe { *apps_out = Box::into_raw(ptrs) as *mut plist_t };
+             null_mut()
+         }
+         Err(e) => ffi_err!(e),
+     }
+ }
++
++/// Frees both the installed application plists and their pointer array.
++///
++/// # Safety
++/// `apps` must be NULL or an unfreed array returned by
++/// `application_listing_get_apps`, with its original `count`. Borrowed child
++/// nodes and strings must no longer be used. Do not pass arrays from other APIs.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn application_listing_free_apps(apps: *mut plist_t, count: usize) {
++    if apps.is_null() {
++        return;
++    }
++    let apps = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(apps, count)) };
++    for app in apps.iter() {
++        unsafe { plist_ffi::creation::plist_free(*app as *mut PlistWrapper) };
++    }
++    // The owned boxed slice drops its allocation after all plists are freed.
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn free_apps_accepts_null() {
++        unsafe { application_listing_free_apps(null_mut(), 0) };
++    }
++
++    #[test]
++    fn free_apps_accepts_empty_owned_slice() {
++        let apps: Box<[plist_t]> = Vec::new().into_boxed_slice();
++        let ptr = Box::into_raw(apps) as *mut plist_t;
++        unsafe { application_listing_free_apps(ptr, 0) };
++    }
++
++    #[test]
++    fn free_apps_accepts_populated_owned_slice_and_borrowed_children() {
++        let mut dictionary = plist::Dictionary::new();
++        dictionary.insert("CFBundleIdentifier".into(), "org.example.Test".into());
++        let app = PlistWrapper::new_node(plist::Value::Dictionary(dictionary)).into_ptr();
++        // The parent wrapper retains child wrappers created by plist accessors.
++        let child =
++            unsafe { plist_ffi::dict::plist_dict_get_item(app, c"CFBundleIdentifier".as_ptr()) };
++        assert!(!child.is_null());
++        let other = PlistWrapper::new_node(plist::Value::Array(vec!["resource".into()])).into_ptr();
++        let apps: Box<[plist_t]> =
++            vec![app as plist_t, other as plist_t, null_mut()].into_boxed_slice();
++        let count = apps.len();
++        let ptr = Box::into_raw(apps) as *mut plist_t;
++        unsafe { application_listing_free_apps(ptr, count) };
++    }
++}

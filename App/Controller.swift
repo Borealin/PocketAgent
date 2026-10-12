@@ -134,14 +134,41 @@ final class DeviceConnection {
         defer { cryptex1_assets_free(assets) }
         try check(cryptexd_install_ddi(adapter, handshake, assets, nil))
     }
-    func launchRunner() throws -> UInt64 {
+    func connectRunnerDVT() throws {
         guard !ownsRunner else { throw failure("This turn already owns a runner") }
         closeDVT()
         try check(remote_server_connect_rsd(adapter, handshake, &server))
+        guard server != nil else { throw failure("Missing DVT server") }
+    }
+    func installedApplicationBundleIDs() throws -> Set<String> {
+        guard let server, process == nil else { throw failure("Missing available DVT server") }
+        var listing: OpaquePointer?
+        defer { if let listing { application_listing_free(listing) } }
+        try check(application_listing_new(server, &listing))
+        guard let listing else { throw failure("Missing application listing") }
+        var apps: UnsafeMutablePointer<plist_t?>?
+        var count: UInt = 0
+        defer { if let apps { application_listing_free_apps(apps, count) } }
+        try check(application_listing_get_apps(listing, &apps, &count))
+        guard count == 0 || apps != nil else { throw failure("Missing installed application records") }
+        var identifiers = Set<String>()
+        for index in 0..<count {
+            guard let app = apps?[Int(index)], plist_get_node_type(app) == PLIST_DICT,
+                  let node = plist_dict_get_item(app, "CFBundleIdentifier"),
+                  plist_get_node_type(node) == PLIST_STRING,
+                  let value = plist_get_string_ptr(node, nil) else { continue }
+            // The string and node are borrowed from apps; copy before freeing it.
+            let identifier = String(cString: value)
+            if !identifier.isEmpty { identifiers.insert(identifier) }
+        }
+        // Free this borrowing client before ProcessControl borrows the server.
+        return identifiers
+    }
+    func launchRunner(bundleID runnerID: String) throws -> UInt64 {
+        guard !ownsRunner else { throw failure("This turn already owns a runner") }
         guard let server else { throw failure("Missing DVT server") }
         try check(process_control_new(server, &process))
         guard let process else { throw failure("Missing process control") }
-        let runnerID = DeviceSettings.runnerBundleID
         // XCTest resolves relative bundle paths against the runner's main app
         // bundle. This stays valid when sideload signing changes its install path.
         let environment = ["USE_PORT=8100", "USE_IP=127.0.0.1", "WDA_PRODUCT_BUNDLE_IDENTIFIER=\(runnerID)",
@@ -235,6 +262,16 @@ final class Model: ObservableObject {
     private func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
         try await runOnFFIThread(action)
     }
+    private func runnerStage<T>(_ event: String, description: String,
+                                operation: () async throws -> T) async throws -> T {
+        log(event + "_started")
+        do { return try await operation() }
+        catch {
+            log(event + "_failed", Model.errorFields(error))
+            if error is CancellationError { throw error }
+            throw failure("\(description)：\(error.localizedDescription)")
+        }
+    }
     /// Writes run metadata (event names, counts, IDs; never prompts, keys,
     /// arguments, results or response bodies) only when diagnostics are on.
     func log(_ event: String, _ fields: [String: Any] = [:]) {
@@ -299,7 +336,27 @@ final class Model: ObservableObject {
             }
             log("ddi_ready")
             try Task.checkCancellation()
-            let pid = try await ffi { try device.launchRunner() }
+            let override = DeviceSettings.runnerBundleIDOverride
+            let defaultID = DeviceSettings.embeddedRunnerBundleID
+            let assistantID = DeviceSettings.assistantBundleID
+            try await runnerStage("runner_dvt_connect", description: "Automation 开发服务连接失败") {
+                try await self.ffi { try device.connectRunnerDVT() }
+            }
+            try Task.checkCancellation()
+            let installedIDs = try await runnerStage("runner_apps_listing", description: "Automation 安装检查失败") {
+                try await self.ffi { try device.installedApplicationBundleIDs() }
+            }
+            try Task.checkCancellation()
+            let runnerID = try await runnerStage("runner_bundle_resolve", description: "Automation 配置检查失败") {
+                try RunnerBundleID.resolve(override: override, embeddedDefaultID: defaultID,
+                                           assistantBundleID: assistantID, installedIDs: installedIDs)
+            }
+            log("runner_bundle_resolved", ["usedOverride": override != nil,
+                                          "matchedAssistantSuffix": override == nil && runnerID != defaultID])
+            try Task.checkCancellation()
+            let pid = try await runnerStage("runner_launch", description: "Automation 进程启动失败") {
+                try await self.ffi { try device.launchRunner(bundleID: runnerID) }
+            }
             log("runner_launched", ["pid": pid])
         }
         if wdaSessionBase == nil {

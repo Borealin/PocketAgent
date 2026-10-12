@@ -182,7 +182,7 @@ struct PhoneSetupView: View {
                     TextField("Automation Bundle ID", text: $device.runner)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("runnerBundleID")
-                    Text("留空使用 \(DeviceSettings.runnerBundleID)").font(.caption).foregroundStyle(.secondary)
+                    Text("留空自动匹配已安装的 Automation").font(.caption).foregroundStyle(.secondary)
                     TextField("VPN 地址:端口", text: $device.tunnel)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.numbersAndPunctuation)
                         .accessibilityIdentifier("tunnelEndpoint")
@@ -193,7 +193,7 @@ struct PhoneSetupView: View {
                         .accessibilityIdentifier("saveDeviceSettings")
                 }
             } footer: {
-                Text("侧载工具可能改写 Automation 的 Bundle ID，仅在必要时修改。诊断默认关闭，只保存在本机；原生日志开关在下次启动后生效。")
+                Text("自动匹配侧载签名后的 Automation；仅在自动匹配失败时手动填写 Bundle ID。诊断默认关闭，只保存在本机；原生日志开关在下次启动后生效。")
             }
         }.navigationTitle("手机操作配置").navigationBarTitleDisplayMode(.inline)
             .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.data]) { device.importPairing($0) }

@@ -2,8 +2,8 @@ import AgentKit
 import Foundation
 
 /// The one semantic state of an accepted turn, derived only from real AgentKit
-/// events and host lifecycle calls. Shown in the chat strip and as the
-/// BGContinuedProcessingTask subtitle. There is no percentage: the task
+/// events and host lifecycle calls. Shown in the chat strip and through the
+/// BGContinuedProcessingTask system surface. There is no percentage: the task
 /// progress reports counted, completed units of work.
 nonisolated enum ExecutionPhase: Hashable, Sendable {
     /// Waiting for the serial phone queue; `rank` is 1 for the next turn.
@@ -194,7 +194,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     /// Current app / action line, empty when nothing real is known.
     var activity: String {
         var parts: [String] = []
-        if [.phoneAction, .workspaceTool, .network, .script].contains(phase), let currentAction { parts.append(currentAction) }
+        if [.phoneAction, .workspaceTool, .network].contains(phase), let currentAction { parts.append(currentAction) }
         if let currentApp, !currentApp.isEmpty { parts.append(ToolLabels.appName(currentApp)) }
         return parts.joined(separator: " · ")
     }
@@ -210,11 +210,39 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         return parts.joined(separator: "，")
     }
 
-    /// One line for the system task surface while another app is in front.
+    /// Full status detail used inside the chat.
     var subtitle: String {
         ([phaseLabel, activity, stepsLabel.isEmpty ? "" : "已执行 \(stepsLabel)"]).filter { !$0.isEmpty }
             .joined(separator: " · ")
     }
+
+    /// The system surface has little space above the app being operated.
+    /// Show the active action once; keep the full phase/app/step detail in chat.
+    /// A completed action must not linger while the model chooses its next step.
+    var systemTaskTitle: String {
+        if [.phoneAction, .workspaceTool, .network].contains(phase),
+           let action = currentAction?.trimmingCharacters(in: .whitespacesAndNewlines), !action.isEmpty {
+            return action
+        }
+        return switch phase {
+        case .queued(_, let waitingForForeground): waitingForForeground ? "回到 App 后开始" : "等待手机空闲"
+        case .connecting: modelResponses == 0 && phoneActions == 0 ? "连接模型" : "等待模型"
+        case .modelResponse: "模型回复"
+        case .phoneAction: "操作手机"
+        case .workspaceTool: "处理项目文件"
+        case .network: "请求网络"
+        case .script: "运行脚本"
+        case .retrying(let attempt, let maximum): "重试连接（\(attempt)/\(maximum)）"
+        case .needsUser: "等待你的处理"
+        case .finishing: "结束自动化"
+        case .completed: "已完成"
+        case .failed: "未完成"
+        case .cancelled: "已取消"
+        }
+    }
+
+    /// One meaningful title is enough; repeated phase and counters add no action information.
+    var systemTaskSubtitle: String { "" }
 
     /// Completed real work units (model responses, steps and observed work
     /// inside a running step) with the one unit currently in flight.

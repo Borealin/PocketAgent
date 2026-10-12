@@ -14,6 +14,7 @@
 		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
 		166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */; };
 		19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A45359ABA3EE41F69474549 /* ChatComposer.swift */; };
+		274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */; };
 		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
 		341233CF7A70637134AD1A8B /* iSHLicenses in Resources */ = {isa = PBXBuildFile; fileRef = E53F96B6F3F454BD229C1E52 /* iSHLicenses */; };
@@ -65,6 +66,7 @@
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
 		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
 		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
+		4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerBundleID.swift; sourceTree = "<group>"; };
 		4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AgentKit-LICENSE.txt"; sourceTree = "<group>"; };
 		5243D878A3E7F546CA6EF591 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptRuntime.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
 				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
+				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
 				38833AB31402CD8F11B2F334 /* Workspace.swift */,
@@ -330,6 +333,7 @@
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
 				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
 				D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */,
+				274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */,
 				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
