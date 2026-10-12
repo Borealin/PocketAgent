@@ -262,11 +262,18 @@ initial TCP connection to the configured local VPN RemotePairing endpoint,
 before pairing verification, RSD, DDI or runner launch. These runs had no
 `rp_tunnel_connected` or `wda_ready` event, so they are not failures of WDA's
 HTTP listener or of the corrected runner ID. The user correlated the refusal
-with leaving Wi-Fi for cellular. Current logs do not record the network path,
-so the exact listener/routing condition and the effect of cellular remain
-unresolved; being on the computer's LAN is not a requirement in this code path.
+with leaving Wi-Fi for cellular. In the requested network comparison, the user
+reported successful connection checks on Wi-Fi and with both Wi-Fi and cellular
+disconnected, but failure with Wi-Fi disconnected and cellular enabled. This
+narrows the trigger to the cellular state in that device configuration rather
+than requiring Wi-Fi association. Current logs do not record the network path,
+so the exact listener/routing condition remains unresolved; being on the
+computer's LAN is not a requirement in this code path.
 Do not replace a usable pairing record or change wireless flags speculatively.
-An unplugged cellular-on/cellular-off connection check is pending. Upstream
+The settings check releases its temporary tunnel immediately; it is not a
+preparation step that preserves a session for a later turn. Establishing and
+retaining a real tunnel while restoring cellular, then exercising WDA, still
+needs device validation. No cellular recovery flow is shipped in 0.3.3. Upstream
 [SideStore's cellular refresh manager](https://github.com/SideStore/SideStore/blob/0dd743f75afc358b0ba4a002feb5f19474492371/SideStore/Core/Shortcuts/CellularRefreshManager.swift)
 uses configured Shortcuts to temporarily disable data, wait for device
 readiness and restore data around device work.
