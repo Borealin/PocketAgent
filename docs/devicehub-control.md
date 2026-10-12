@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation completed; device acceptance in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `032b5ab` (15 phone tools).
+> Status: native DDI implementation completed; device acceptance in progress. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -26,7 +26,7 @@ clipboard and app launch, and the system accessibility audit service provides th
 element graph. PocketAgent's RP tunnel already reaches the same RSD service list. This
 document records the implemented backend, confirmed integration failures and the device-specific verification boundary.
 
-- Scope: the native DDI backend behind main's existing 15 phone tools, with an explicit WDA selector and the same action safety contracts.
+- Scope: the native DDI backend behind main's existing 14 phone tools, with an explicit WDA selector and the same action safety contracts.
 - Non-goals: removing WDA, which stays selectable; the cellular RP
   connection problem in engineering.md, which sits below this layer and is unaffected;
   answering system dialogs or paste permission prompts automatically; Mac-side tooling
@@ -77,7 +77,6 @@ document records the implemented backend, confirmed integration failures and the
 | press_key | Owned mainKeyboard Return/Delete | Explicit key-up reports and empty held-key state |
 | dismiss_keyboard | Escape and shared fresh observation | Unconfirmed dismissal is reported |
 | press_home | Owned Indigo Home down/up | Releases before returning |
-| search_spotlight | Prepare query, Home, bounded search gesture, then HID paste | Avoids direct launch of private Spotlight process |
 | wait | Existing local wait | Unchanged |
 
 ### Sources
@@ -136,8 +135,8 @@ retry an action after discovering that its outcome is unknown.
 
 ### Implementation contract
 
-- Align with main `032b5ab`: all 15 phone tools, installed-app names and IDs,
-  Spotlight, bounded coordinate swipe and fresh-observation recovery. Model and
+- Align with main `f8f82a4`: all 14 phone tools, installed-app names and IDs,
+  ordinary system navigation, bounded coordinate swipe and fresh-observation recovery. Model and
   script callers continue through the existing PhoneExecutor action queue.
 - Swift owns one native DDI session per turn. Native requests have deadlines;
   cancellation releases contacts/keys and removes only the owned keyboard before
@@ -183,7 +182,7 @@ retry an action after discovering that its outcome is unknown.
   replayed; the next step observes first. A closed HID connection does not prove that
   the event did not land.
 - Foreground clipboard preparation may briefly switch apps. Direct input into unlisted
-  system processes is refused; Spotlight prepares text before entering search.
+  system processes, including Spotlight, is refused; select WDA when that input is needed.
 - System dialogs and paste permission prompts are reported as needing the user's action
   on the phone. Gap 2's root cause is open, and this design does not depend on it.
 - If the hit test cannot name the foreground app, the observation says so instead of

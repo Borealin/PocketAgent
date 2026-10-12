@@ -8,11 +8,35 @@ nonisolated struct InstalledApp: Codable, Hashable, Sendable {
 }
 
 nonisolated enum InstalledApps {
-    static func isLaunchable(packageType: String?, path: String?, hasExtensionDefinition: Bool) -> Bool {
-        guard !hasExtensionDefinition else { return false }
-        if let packageType, !packageType.isEmpty, packageType != "APPL" { return false }
+    static func isLaunchable(packageType: String?, path: String?, hasExtensionDefinition: Bool,
+                             tags: [String] = [], isDemoted: Bool = false) -> Bool {
+        guard packageType == "APPL", !hasExtensionDefinition, !isDemoted,
+              !tags.contains("hidden") else { return false }
         if let path, path.lowercased().hasSuffix(".appex") { return false }
         return true
+    }
+
+    /// Installation Proxy supplies localized names for both user and system
+    /// apps. Hidden system hosts (including CarPlay Settings) are not phone
+    /// launch targets, even when their display name matches a visible app.
+    static func fromMetadata(_ entries: [[String: Any]]) -> [InstalledApp] {
+        var records: [String: InstalledApp] = [:]
+        for entry in entries {
+            guard let identifier = entry["CFBundleIdentifier"] as? String, !identifier.isEmpty,
+                  isLaunchable(packageType: entry["CFBundlePackageType"] as? String,
+                               path: (entry["Path"] as? String) ?? (entry["BundlePath"] as? String),
+                               hasExtensionDefinition: entry["NSExtension"] != nil,
+                               tags: entry["SBAppTags"] as? [String] ?? [],
+                               isDemoted: entry["IsDemotedApp"] as? Bool ?? false) else { continue }
+            var names = records[identifier]?.names ?? []
+            for key in ["CFBundleDisplayName", "CFBundleName", "DisplayName", "displayName", "name"] {
+                guard let raw = entry[key] as? String else { continue }
+                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && !names.contains(name) { names.append(name) }
+            }
+            records[identifier] = InstalledApp(bundleID: identifier, names: names)
+        }
+        return records.values.sorted { $0.bundleID < $1.bundleID }
     }
     enum Resolution: Equatable {
         case found(InstalledApp), notFound, ambiguous([InstalledApp])

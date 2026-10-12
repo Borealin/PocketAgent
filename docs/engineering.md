@@ -17,10 +17,10 @@ Pairing has a dedicated guide and format checks; script availability reflects
 actual initialization and interpreter startup instead of archive presence.
 
 The approved 0.3.6 work exposes native installed-app discovery, exact-name
-opening and explicit Spotlight search fallback. Bundle-based opening must
+opening and (in 0.3.6) a separate Spotlight search tool, removed in 0.3.7. Bundle-based opening must
 validate the real list instead of trying remembered identifiers. Ambiguous
 names return candidates; missing names direct the agent to system search.
-Spotlight is optional following the user's clarification; ordinary page search,
+Following the user's clarification, system search uses ordinary phone tools; ordinary page search,
 observed buttons and swipes are the primary workflow. An additive logical-point
 swipe tool supports nested scrolling and iOS edge-back gestures. Foreground/node
 changes return a fresh observation when possible without replaying clicks or
@@ -28,6 +28,38 @@ input. Existing sessions, credentials and per-device
 configuration remain untouched. Release acceptance includes iPhone 15 Pro
 Xianyu search, the stable default-endpoint hint, clean IPA inspection and
 verification of the public AltStore source against the released assets.
+
+The 0.3.7 follow-up addresses the confirmed system-app discovery failure and
+shared phone-operation timeouts. The user removed the dedicated Spotlight tool:
+system search uses ordinary observation, tap, swipe and text input. Installation Proxy `Any` lookup through the phone's
+existing RSD tunnel replaces DVT's development application list. A read-only
+15 Pro query confirmed that the former provides `com.apple.Preferences` with
+the localized display name “设置”, while the old model-facing list omitted it.
+The same query showed a hidden CarPlay Settings app with the identical name;
+`SBAppTags: hidden`, extension definitions/paths, non-APPL packages and demoted
+apps are excluded before name resolution. IDs still come from actual metadata,
+not a remembered system-app allowlist. Lookups fail explicitly if the service
+cannot supply the catalog. FFI results copy their fields before releasing both
+owned plist nodes and the boxed pointer array with a matching deallocator.
+Per-request WDA diagnostics record only method, endpoint shape, elapsed time
+and error identity; session/element IDs, arguments and response bodies are
+excluded. System Home/search observations skip the automatic status-area
+preparation gesture, avoiding an extra XCTest event during system transitions.
+The removed Spotlight implementation also misclassified the 15 Pro's observed
+`spotlight-pill` (an Other container) as absent because it only accepted Button;
+ordinary tap can use the actual observed container instead. A product-tool
+suite on the 15 Pro verified localized Settings lookup, exact-name and verified-ID
+opening, changed content after a real swipe, and system search entry/input using
+generic tools. The test used real task-title changes and the installed SideStore
+Automation companion; it did not replace the original assistant or mutate its
+history. The latest original WeChat turn opened WeChat before subsequent tap
+and observation timeouts and system expiration; a separate new read-only open
+and observation passed. That does not isolate or resolve the old tap stall.
+WDA's pinned synthesized-event implementation includes an unbounded completion
+wait, but no request-level log existed in the original failing turn, so this is
+a source-level risk, not a proven cause. Keep the 15/20-second client limits and
+no-replay semantics; newly recorded route timings support the next reproduction.
+Do not claim generic removal of WDA timeouts or repair of cellular-only startup.
 
 The approved chat UI revision is implemented by Opus 5.5, with Codex responsible
 for independent review and iPhone 12 mini validation. Its header has
@@ -129,6 +161,44 @@ proof for the gesture. Automatic preparation in the SideStore-signed new binary
 still requires validation on the Dynamic Island device. System expansion and a
 human switching apps can still race an action; no atomic occlusion guarantee is
 claimed.
+A 0.3.6 SideStore run on the iPhone 15 Pro subsequently reported no visible
+Dynamic Island status during operation. Its logs confirm task submission,
+handler execution, continued real progress and normal completion, with no
+system expiration. The same run issued repeated status-area preparation
+gestures. Static inspection shows that `compactedTaskTitle` only controls a
+short delay: the horizontal gesture is still issued on every normal observation
+and node preparation even after previous preparation. The current
+[iOS 27 user guide](https://support.apple.com/en-mide/guide/iphone/iph28f50d10d/ios)
+defines collapsing an expanded activity as an upward swipe; the existing
+horizontal recipe therefore cannot be treated as a verified cross-version
+collapse-only operation. An active-run device follow-up does not establish horizontal preparation as
+the cause of the missing indicator. An isolated host on the same 15 Pro showed
+no system task indicator in its own foreground UI, but an expanded task card
+appeared after switching to Settings. Two HID gestures matching the product's
+horizontal coordinates initially left the expanded card visible; the later
+compact capture coincided with an unrelated notification, so that transition
+cannot be attributed to the gesture alone. Another matching gesture on the
+visible compact indicator did not hide it. A fresh task with no horizontal
+preparation provided a clean upward-swipe control: the expanded card collapsed
+to its icon and progress ring while the same task remained active. This is a
+manual HID result, not acceptance of a new automatic WDA gesture.
+
+A real turn in the existing SideStore 0.3.6 app also showed an expanded task card
+outside the app, followed by a compact icon/progress ring during operation. It
+did not reproduce complete loss of the indicator. Its read-only Settings goal
+was not completed: Chinese-name lookup found no exact Settings entry, English
+lookup returned extension names, Spotlight and a subsequent swipe timed out,
+and the system expiration handler then terminated the task. A separate follow-up
+finished without opening Settings; the model chose another inventory lookup
+and declined the requested known system ID. These are app-discovery/model-flow
+and automation-timeout observations, not evidence of a Live Activity failure.
+The old conversations, messages, drafts and model selections were compared
+before and after and retained. No product gesture change or new IPA is claimed.
+The original missing-status report remains unexplained outside the observed
+foreground/background distinction. Compact-status preservation under repeated
+WDA preparation, safe detection of expanded surfaces and reliable automatic
+collapse remain open requirements; successful request logs do not prove them.
+
 A local appearance choice (system, light,
 dark) is stored in UserDefaults and applied as the hosting window's interface
 style, which every sheet presented in that window inherits.
@@ -369,13 +439,11 @@ the empty-field default. Saving a loopback override therefore changed the
 embedded/default VPN address. The hint now reads the embedded fallback directly;
 the effective address still uses the saved override first. This changes no
 stored settings, pairing records or conversation data.
-The fix passed the Core/distribution checks, iOS archive and clean IPA inspection.
-Device UI acceptance is pending: the 12 mini installation channel failed to
-allocate its RSD device, while the independent UI test installation on the
-15 Pro succeeded but its first explicit-PID accessibility read was refused
-with error 17. The original SideStore app was not replaced, and its original
-device preferences were read back unchanged. No updated release/feed was
-published for this fix.
+The override/default distinction is now accepted in the real 15 Pro settings
+view: the saved override remains in the text field while the hint shows the
+embedded default. Only the independent test app's setting was changed and
+restored; the original SideStore app's preferences are unchanged. The fix ships
+with the 0.3.6 candidate.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
@@ -451,13 +519,13 @@ file confinement is unchanged.
 
 Status: implemented on the devicehub-control branch; production device gates
 are in progress. The user selected DDI as the default with a manual WDA selector.
-The baseline is main `032b5ab` and all 15 phone tools retain their schemas,
+The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
 The backend is captured in ChatJob at enqueue, alongside the model configuration.
 
 PhoneControl supplies observations and primitive effects to the existing executor.
-DDI reuses RP/DDI preparation, gets installed apps through the advertised streaming
-AppService inventory, reads bounded AXChildren graphs and takes native screenshots.
+DDI reuses RP/DDI preparation, gets launchable installed apps through the same Installation Proxy metadata
+filter as WDA; AppService streaming supplies native process-path matching, reads bounded AXChildren graphs and takes native screenshots.
 Foreground identity comes from a bounded read-only hit scan and a unique
 process/app-path match. A blank centre point returned AX error 8 while the same
 app's visible input-field point returned its complete tree; the selected point is
@@ -484,10 +552,11 @@ deliver text and later timed out; its precise protocol fault remains unresolved.
 Background UIKit writes also left the old clipboard value in Spotlight. The
 backend now prepares text in the assistant foreground before clearing the target,
 confirms the foreground write and restores/revalidates the target app before
-the HID paste chord. Spotlight prepares the query before Home/search, since
-launching its private app directly produced a blank surface with refused AX hits.
-Direct input into unlisted system processes is refused before clearing; the
-search_spotlight tool covers system search. Normal installed-app input may briefly
+the HID paste chord. Launching private Spotlight directly produced a blank
+surface with refused AX hits. Direct input into unlisted system processes,
+including Spotlight, is refused before clearing; use the manual WDA option for
+that input. Main removed the standalone Spotlight tool, so this branch exposes
+the same 14 phone tools. Normal installed-app input may briefly
 switch to the assistant. The direct CoreDevice pasteboard fault remains unresolved
 and SET is not used in production. Clipboard counters changed during preparation
 even while the assistant stayed active; the source of those changes is unresolved.
@@ -673,13 +742,31 @@ screen. Recovery bypasses system-surface compaction, performs no gesture and
 never repeats the interrupted action. A read retry is bounded to two attempts;
 mutation retries remain forbidden. Scripts use the same registry and executor.
 
-The independent 15 Pro acceptance host uses the exact product PhoneExecutor
-with the installed SideStore Automation companion, preserving the original app
-identity and history. Actual app-name lookup/opening and rejection of the uninstalled guessed ID
-have passed. Full search/navigation, foreground recovery and endpoint-hint UI
-acceptance are pending a user-provided uninterrupted device window. Core tests,
-the final iOS archive and clean IPA inspection passed; the public release and
-AltStore feed remain at 0.3.5 until that acceptance is completed.
+The independent 15 Pro acceptance host uses the product PhoneExecutor with
+the existing SideStore Automation companion, preserving the original app
+identity, conversations and settings. Native tool acceptance passed actual
+Xianyu name lookup/opening, rejection of the uninstalled guessed ID, text input
+and submission, observed matching product results, scrolling with changed
+content, and return to the recognized search-input page. An externally changed
+foreground caused the old tap to be rejected before issuance and returned a
+fresh read-only screen with replay forbidden. The advanced setup view retained
+the embedded default hint while a loopback override was saved; the test restored
+that override afterward. App-not-found guidance offers home-screen/App Library
+navigation and optional Spotlight instead of forcing system search.
+
+An earlier user-started attempt failed before app discovery while the local
+VPN was disconnected; reconnecting the existing unchanged VPN restored native
+startup. That attempt is not search acceptance or evidence of cellular refusal.
+The scripted search entry was adapted to the observed home search container;
+button/static-text siblings in the setup page are distinguished by element type.
+These acceptance-driver changes are private bench code, not product fallbacks.
+The accepted scope is the native tool chain and actual UI, not a complete
+model-generated shopping conversation or a SideStore upgrade of the original
+app. Spotlight itself and direct cellular-only startup remain unverified/unfixed.
+Core tests, distribution tests, the final iOS archive and clean IPA inspection
+passed. The 0.3.6 candidate publishes both IPAs, complete corresponding source,
+checksums and inspected source metadata. Verify anonymous public source/asset
+access and metadata equality after the feed commit.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which

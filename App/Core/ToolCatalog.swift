@@ -65,9 +65,8 @@ nonisolated enum ToolCatalog {
         phone("dismiss_keyboard", "Dismiss current keyboard, then observe.", ["snapshot_id": integer]),
         phone("press_home", "Return to iPhone home screen, then observe.", [:]),
         phone("wait", "Wait 0.2–5 seconds for content loading, then return fresh screen.", ["seconds": number]),
-        phone("find_apps", "Search this iPhone's actual installed apps by display name or bundle ID. Returns device-reported names and IDs, including ambiguous matches. query may be empty to list apps (bounded). No app is opened.", ["query": string]),
-        phone("open_app_by_name", "Open an installed app by its exact device-reported name. Duplicate names return candidates; missing names recommend search_spotlight instead of guessing a bundle ID. Returns the actual screen after opening.", ["name": string]),
-        phone("search_spotlight", "Search iOS Spotlight by app name: go Home, open system search, enter query and return observed results. Does not blindly select a result. Inspect the Apps result and tap the exact target; never tap web/contact suggestions as an app.", ["query": string]),
+        phone("find_apps", "Search this iPhone's launchable user and system apps by localized display name or bundle ID. Returns device-reported names and IDs, including ambiguous matches; hidden system hosts and extensions are excluded. query may be empty to list apps (bounded). No app is opened.", ["query": string]),
+        phone("open_app_by_name", "Open an installed app by its exact device-reported name. Duplicate names return candidates; missing names recommend observing Home or the App Library instead of guessing a bundle ID. Returns the actual screen after opening.", ["name": string]),
         phone("swipe_from_to", "Swipe between logical screen points on the latest observed screen. Use a short range inside a nested list to scroll it, or swipe right starting near the left screen edge for iOS back navigation. Returns the actual screen; verify whether navigation occurred.", ["from_x": number, "from_y": number, "to_x": number, "to_y": number, "seconds": number, "snapshot_id": integer]),
     ]
 
@@ -136,7 +135,7 @@ nonisolated enum ToolCatalog {
     /// Capability section of the system prompt, generated from the same list.
     static func prompt(_ capabilities: ToolCapabilities, workspaceName: String?) -> String {
         var lines = ["## 本轮可用能力"]
-        lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开，search_spotlight 搜索系统结果；observe_screen、tap 等工具实际操作这台 iPhone。")
+        lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
         lines.append("- 网络：http_request 访问公网 HTTPS API（任意 method、headers、body/json；不支持明文 http）；不能访问本机或局域网地址。网页阅读也可以用它取原文。")
         if capabilities.workspace, let workspaceName {
             lines.append("- 项目目录「\(workspaceName)」：list_files、read_file、search_files、write_file、patch_file，路径相对项目根目录。普通文件读写无需征求确认。")
@@ -162,13 +161,13 @@ nonisolated enum AgentInstructions {
     static func phone(assistantBundleID: String) -> String {
         """
         你是运行在用户这台 iPhone 上的手机助手，使用用户的语言回答。
-        本轮已经注册真实的手机工具：查找已安装 App、按名称打开、Spotlight 搜索、读屏、点击、长按、滑动、输入、键盘操作、返回主屏幕、等待。
+        本轮已经注册真实的手机工具：查找已安装 App、按名称打开、读屏、点击、长按、滑动、输入、键盘操作、返回主屏幕、等待。
         历史回复中“没有工具/不能操作手机”描述的是旧版本，以本轮工具为准。
         普通聊天直接回答；用户要求操作或查看手机时，直接调用工具实际执行，不能只给操作教程。
         用户指定 App 时，先 find_apps 查询实际安装信息，再 open_app_by_name 使用查询返回的准确名称。
         只有已验证的 bundle_id 才能交给 open_app；禁止凭记忆猜包名，也不要重复尝试未安装的 ID。
         同名 App 要根据返回的候选判断，无法确定就询问用户。列表没有名称或没有找到时，可返回主屏幕，
-        读屏后通过滑动查找图标/App 资源库；search_spotlight 是可选的系统搜索方式，不是必须流程。
+        读屏后通过点击和滑动查找图标/App 资源库，也可进入系统搜索并使用真实搜索框。
         系统搜索只选择“App/应用”中的准确结果；不能把网页、联系人或安装广告当作目标 App。
         打开后核对返回的前台 App 与页面；成功发起打开不代表已经找到用户所需的信息。助手是 \(assistantBundleID)。
         根据 observe_screen 或动作返回的最新屏幕逐步行动。界面元素 node 与 snapshot_id
@@ -177,6 +176,7 @@ nonisolated enum AgentInstructions {
         swipe 的方向指手指运动：up 向上滑以查看下方内容，down 向下滑，left/right 左右滑。
         swipe_from_to 可在实际列表区域内滑动，避免一直滑整个屏幕；坐标使用最新 screen 的逻辑点。
         App 中搜索时先找搜索框或搜索入口；入口可能是按钮、当前搜索词或顶部搜索栏，先点击再读屏确认真实输入框。
+        搜索图标、占位词或当前查询所在的容器也可能是入口；没有输入框时先进入，不能对非输入节点反复 type_text。
         用 type_text 输入到真实输入框，再 press_key return 提交；观察查询词和结果页面，不能停在建议/历史页面就报告完成。
         输入文本 clear=true 替换原文。iOS 返回优先点击可见返回按钮；没有按钮时可用 swipe_from_to
         从屏幕左边缘向右滑，之后核对是否回到上一页。退出 App 可 press_home；回到目标 App 按已验证名称打开。

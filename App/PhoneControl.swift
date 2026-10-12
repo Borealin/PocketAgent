@@ -17,7 +17,7 @@ protocol PhoneControl: AnyObject {
     func input(_ node: [String: String]) async throws -> PhoneInput
     func click(_ input: PhoneInput) async throws
     func clear(_ input: PhoneInput) async throws
-    func prepareText(_ text: String, restoreTarget: Bool) async throws
+    func prepareText(_ text: String) async throws
     func type(_ text: String, into input: PhoneInput) async throws
     func key(_ name: String) async throws
     func dismissKeyboard() async throws
@@ -73,7 +73,7 @@ final class WDAControl: PhoneControl {
     }
     func click(_ input: PhoneInput) async throws { try await effect(try element(input) + "/click", [:]) }
     func clear(_ input: PhoneInput) async throws { try await effect(try element(input) + "/clear", [:]) }
-    func prepareText(_ text: String, restoreTarget: Bool) async throws {}
+    func prepareText(_ text: String) async throws {}
     func type(_ text: String, into input: PhoneInput) async throws { try await effect(try element(input) + "/value", ["text": text]) }
     func key(_ name: String) async throws { try await effect("\(session)/wda/keys", ["value": [name == "return" ? "\n" : "\u{8}"]]) }
     func dismissKeyboard() async throws { try await effect("\(session)/wda/keyboard/dismiss", [:]) }
@@ -181,14 +181,14 @@ final class DDIControl: PhoneControl {
             throw failure("清空请求已发出，但输入框仍有文字；未继续粘贴。请读取实际页面，不要重放输入。")
         }
     }
-    func prepareText(_ text: String, restoreTarget: Bool) async throws {
+    func prepareText(_ text: String) async throws {
         try cancellationCheck?()
         guard text.count <= 4000 else { throw failure("输入文字超过限制。") }
         preparedText = nil
         let target = observedApp, frame = observedFrame
-        if restoreTarget && !text.isEmpty {
+        if !text.isEmpty {
             guard let target, model.installedApps.contains(where: { $0.bundleID == target }) else {
-                throw failure("当前系统界面无法确认恢复；Spotlight 搜索请使用 search_spotlight，或手动切换 WDA。未修改输入框。")
+                throw failure("当前系统界面无法确认恢复；请手动切换 WDA 完成系统搜索输入。未修改输入框。")
             }
         }
         if !text.isEmpty {
@@ -210,7 +210,7 @@ final class DDIControl: PhoneControl {
             preparedText = text
             _ = try await call(["op": "clipboard_verify", "text": text])
             try cancellationCheck?()
-            if restoreTarget, let target, target != DeviceSettings.assistantBundleID {
+            if let target, target != DeviceSettings.assistantBundleID {
                 try await activate(target)
                 try await Task.sleep(for: .milliseconds(400))
                 let tree = try await readTree()

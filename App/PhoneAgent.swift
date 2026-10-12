@@ -89,7 +89,7 @@ extension Model {
                     prompt: goal, promptImages: images, permissionMode: .fullAccess,
                     systemPrompt: AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
                         capabilities: capabilities, workspaceName: workspace?.name, rules: rules)
-                        + (backend == .ddi ? "\n本轮使用 DDI。type_text 会短暂返回 PocketAgent 准备并替换系统剪贴板，再恢复和校验目标页面。系统搜索使用 search_spotlight；无法恢复的未列出系统进程不支持直接 type_text。系统粘贴许可或授权提示可能需要用户在手机上处理。输入请求已发出不代表文本已进入；核对返回的页面和文字，不得盲目重放。" : ""),
+                        + (backend == .ddi ? "\n本轮使用 DDI。type_text 会短暂返回 PocketAgent 准备并替换系统剪贴板，再恢复和校验目标页面。无法恢复的未列出系统进程不支持直接 type_text；系统搜索输入可手动切换 WDA。系统粘贴许可或授权提示可能需要用户在手机上处理。输入请求已发出不代表文本已进入；核对返回的页面和文字，不得盲目重放。" : ""),
                     priorMessages: priorMessages))
                 await withTaskCancellationHandler {
                     for await event in events {
@@ -345,14 +345,16 @@ final class PhoneExecutor {
         }
     }
 
-    /// A horizontal inward gesture collapses this turn's system task surface
-    /// without ending its task or progress. It runs under the phone action
+    /// Attempt to compact this turn's system task surface under the phone action
     /// lock, inside the status area of the exact captured portrait layout.
     /// WDA can report a covered navigation button as hittable, so its tree
     /// alone is not evidence that the expanded system surface is out of the way.
     private func compactTaskSurface(_ base: String, app: String, tree: PhoneTree,
                                     proceed: () throws -> Void) async throws -> PhoneTree {
-        guard self.base != nil, let geometry = taskSurfaceGeometry,
+        // Home and system search are navigated through their observed controls.
+        // Do not inject another status-area gesture during their transitions.
+        guard !["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(app),
+              self.base != nil, let geometry = taskSurfaceGeometry,
               tree.frame == geometry.bounds else { return tree }
         try proceed()
         if compactedTaskTitle != task.title {
@@ -534,66 +536,18 @@ final class PhoneExecutor {
                         "apps": Self.appRecords(Array(apps.prefix(40)))], error: true)
                 case .notFound:
                     return try Self.result(["ok": false, "code": "app_name_not_found",
-                        "message": "安装列表未找到准确名称。请用 search_spotlight 搜索这个名称，不要猜包名。",
-                        "next_tool": "search_spotlight", "query": target,
+                        "message": "安装列表未找到准确名称。先检查候选的实际名称；仍不能确认时可返回主屏幕读屏、滑动寻找图标或 App 资源库，也可根据页面进入系统搜索。不要猜包名。",
+                        "query": target,
                         "apps": Self.appRecords(Array(InstalledApps.search(target, in: model.installedApps).prefix(20)))], error: true)
                 }
             case "open_app":
                 guard let bundle = args["bundle_id"]?.stringValue, !bundle.isEmpty else { throw failure("缺少 bundle_id。") }
                 guard model.installedApps.contains(where: { $0.bundleID == bundle }) else {
                     return try Self.result(["ok": false, "code": "app_not_installed",
-                        "message": "此 Bundle ID 不在手机实际安装列表中。请用 find_apps 或 search_spotlight 按名称查找；不要再次尝试这个 ID。"], error: true)
+                        "message": "此 Bundle ID 不在手机实际安装列表中。请用 find_apps 按名称查找，或返回主屏幕读屏定位；不要再次尝试这个 ID。"], error: true)
                 }
                 openedBundle = bundle
                 try await effect { try await control.activate(bundle) }
-            case "search_spotlight":
-                guard let raw = args["query"]?.stringValue else { throw failure("缺少 query。") }
-                let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !query.isEmpty, query.count <= 120 else { throw failure("请提供不超过 120 字的 App 名称。") }
-                if backend == .ddi { try await effect { try await control.prepareText(query, restoreTarget: false) } }
-                try await effect { try await control.home() }
-                try await Task.sleep(for: .milliseconds(400)); try proceed()
-                let home = try await observe(proceed: proceed)
-                guard ["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(appID) else {
-                    return try Self.result(["ok": false, "code": "spotlight_unavailable", "screen": home,
-                        "action_issued": true, "replay_allowed": false,
-                        "message": "没有进入系统主屏幕或 Spotlight；未输入搜索文字。请根据实际页面处理系统提示。"], error: true)
-                }
-                let buttons = nodes.filter { $0["type"] == "XCUIElementTypeButton" && $0["enabled"] == "true"
-                    && ["搜索", "Search"].contains($0["label"] ?? "") && PhoneTree.rect($0).intersects(screen) }
-                try await requireApp(appID, base: base, proceed: proceed)
-                if buttons.count == 1 {
-                    let rect = PhoneTree.rect(buttons[0]).intersection(screen)
-                    try await effect { try await control.tap(rect.midX, rect.midY, seconds: nil) }
-                } else {
-                    try await effect { try await control.drag(screen.width * 0.5, screen.height * 0.3,
-                        screen.width * 0.5, screen.height * 0.75, seconds: 0.25) }
-                }
-                try await Task.sleep(for: .milliseconds(400)); try proceed()
-                let search = try await observe(proceed: proceed)
-                guard ["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(appID) else {
-                    return try Self.result(["ok": false, "code": "spotlight_unavailable", "screen": search,
-                        "action_issued": true, "replay_allowed": false,
-                        "message": "搜索界面属于其他 App；未输入搜索文字。"], error: true)
-                }
-                let searchable = nodes.filter { node in
-                    guard node["enabled"] == "true", PhoneTree.rect(node).intersects(screen) else { return false }
-                    if node["type"] == "XCUIElementTypeSearchField" { return true }
-                    return node["type"] == "XCUIElementTypeTextField" &&
-                        [node["label"] ?? "", node["name"] ?? ""].contains { $0.localizedCaseInsensitiveContains("search") || $0.contains("搜索") }
-                }
-                guard searchable.count == 1 else {
-                    return try Self.result(["ok": false, "code": "spotlight_field_ambiguous", "screen": search,
-                        "action_issued": true, "replay_allowed": false,
-                        "message": "无法唯一确认 Spotlight 搜索框；未输入搜索文字。请查看返回页面。"], error: true)
-                }
-                let id = try await inputElement(searchable[0], base: base, proceed: proceed)
-                try await effect { try await control.click(id) }
-                try await requireApp(appID, base: base, proceed: proceed)
-                try await effect { try await control.clear(id) }
-                try await requireApp(appID, base: base, proceed: proceed)
-                try await effect { try await control.type(query, into: id) }
-                if backend == .ddi, let identity = searchable[0]["ddi_identity"] { expectedInput = (identity, query) }
             case "tap", "long_press":
                 let a = try await node(args, base: base, proceed: proceed), rect = PhoneTree.rect(a).intersection(screen)
                 try proceed()
@@ -644,7 +598,7 @@ final class PhoneExecutor {
                     throw failure("请选择实际输入框并提供 text 和 clear。")
                 }
                 if backend == .ddi {
-                    try await effect { try await control.prepareText(text, restoreTarget: true) }
+                    try await effect { try await control.prepareText(text) }
                     // Revalidate the target after any clipboard-preparation app switch.
                     a = try await node(args, base: base, proceed: proceed)
                 }
@@ -678,7 +632,7 @@ final class PhoneExecutor {
             }
             let state = try await observe(proceed: proceed)
             try proceed()
-            var result: [String: Any] = ["ok": true, "screen": state]
+            let result: [String: Any] = ["ok": true, "screen": state]
             if let expectedInput,
                !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
                    ($0["value"] == expectedInput.text || (expectedInput.text.isEmpty && $0["value"] == $0["placeholder"])) }) {
@@ -691,10 +645,6 @@ final class PhoneExecutor {
                 return try Self.result(["ok": false, "code": "app_open_not_confirmed", "screen": state,
                     "expected_app": openedBundle, "action_issued": true, "action_outcome": "unconfirmed",
                     "replay_allowed": false, "message": "实际前台尚未确认是目标 App。请根据新页面处理授权或跳转，不要直接重放打开。"], error: true)
-            }
-            if name == "search_spotlight" {
-                result["route"] = "spotlight_results"
-                result["message"] = "请检查 App/应用分区中的准确结果，再使用此 screen 的节点点击；没有打开搜索结果。"
             }
             return try Self.result(result)
         } catch {
