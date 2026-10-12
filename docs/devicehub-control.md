@@ -233,6 +233,12 @@ screen-sharing indicator appears and its power cost.
   wireless-data permissions. After connecting the existing VPN and completing those
   system prompts, the same RP endpoint connected. These failures cannot diagnose the
   HID/display-service layer.
+- A separate Mac-side cleanup check exposed a boundary: ipb's no-stream tap returned
+  successfully but the VPN page still showed Connected in two fresh observations.
+  With a temporary Mac-side stream, the same control disconnected the VPN. Its root
+  cause is unestablished; this is a host-client observation, not a native RP failure
+  or proof that a stream is universally necessary. Cleanup restored the original
+  disconnected VPN state and a final display-service read showed no running stream.
 - Production FFI exports, the complete AX graph adapter, snapshot/tool contracts,
   system-dialog behavior through the native probe, Unicode paste, long press/swipe,
   cancellation/teardown under interruption, unplugged operation and iOS 27.0.1
