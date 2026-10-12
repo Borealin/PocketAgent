@@ -197,6 +197,19 @@ contain no private gateway or company identity. Local build overrides preserve
 the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
 
+## Device Hub backend feasibility
+
+The separate [Device Hub design](devicehub-control.md) remains production work in
+progress. A local native probe on the user-selected iPhone 12 mini reused the pinned
+idevice revision and current RP tunnel patch without replacing the installed app.
+It disproved the mandatory-display-stream assumption for ordinary touch on iOS
+27.0 / 24A437 with mounted DDI 27A5252f / CoreDevice 642.15. On-phone screenshot,
+Calculator launch, visible `7 + 5 = 12`, Home return, ASCII key delivery and raw AX
+requests 6 → 1 → 5 were exercised without XCTest/WDA. This is feasibility evidence,
+not a delivered PocketAgent backend: full AX/tool mapping, native system dialogs,
+Unicode paste, interrupted/background lifecycle, unplugged operation and the other
+DDI/OS combinations remain open. Keep WDA as the shipped default and fallback.
+
 ## Setup and readiness
 
 Status: implemented and archived. The same-identity update retained the current

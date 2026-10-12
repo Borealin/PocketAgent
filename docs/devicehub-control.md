@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: design in progress; nothing is implemented. Last checked: 2026-10-12.
+> Status: local native feasibility experiment completed on one device; the production backend is not implemented. Last checked: 2026-10-12.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -24,11 +24,11 @@ timeout are among the recorded integration problems. ipb shows that Device Hub d
 iPhone without XCTest: DDI daemons provide touch, keyboard and buttons, screenshots,
 clipboard and app launch, and the system accessibility audit service provides the UI
 element graph. PocketAgent's RP tunnel already reaches the same RSD service list. This
-document records what is confirmed, the open question that decides the architecture and
-the experiment that answers it.
+document records what is confirmed, the device-specific stream result and the remaining
+integration work.
 
 - Scope: feasibility, a backend design behind the existing phone tool names, the
-  discriminating experiment and the FFI/AX work it would unlock.
+  completed native feasibility experiment and the remaining production FFI/AX work.
 - Non-goals: removing WDA, which stays the default and the fallback; the cellular RP
   connection problem in engineering.md, which sits below this layer and is unaffected;
   answering system dialogs or paste permission prompts automatically; Mac-side tooling
@@ -36,15 +36,22 @@ the experiment that answers it.
 
 ## 2. Research conclusions
 
-- Recommendation: do not commit to replacing WDA yet. First run one discriminating
-  experiment on a single phone through PocketAgent's own tunnel; its result decides
-  whether the DDI backend must hold a display stream, which changes the lifecycle and
-  cost design below.
+- Recommendation: proceed with a local opt-in DDI backend, keeping WDA as the default
+  and fallback. A separately signed native probe reused PocketAgent's pinned idevice
+  and tunnel patch on an iPhone 12 mini. Screenshot, ordinary touch, app launch and
+  Home worked through its on-phone RP tunnel without starting XCTest or WDA.
+- The stream requirement is disproved for ordinary touch on this tested combination:
+  iOS 27.0 / 24A437, mounted DDI 27A5252f, CoreDevice 642.15. Before the no-stream
+  tap the display service reported an empty session list and `running=false`; the
+  native counter changed from 0 to 1. With a stream it changed from 0 to 1, and after
+  explicitly stopping that stream it changed to 2. Do not generalize this to another
+  iOS/DDI build or infer the cause of idevice's contradictory module comment.
 - Confirmed from sources: the transport is the same; the DDI that PocketAgent downloads
   contains every needed daemon; the pinned idevice has clients for all of them, but its
   FFI exports only app_service among them.
-- Open, root cause not established: idevice states that dtuhidd input is dropped unless a
-  displayservice media stream is active, while ipb recorded a tap landing without one.
+- Remaining boundary: the current probe is local experimental code, not the shipped
+  PocketAgent backend. It does not establish complete tool parity, long background
+  lifetime, unplugged operation, or operation with PocketAgent's downloaded DDI.
 - Main tradeoff: the DDI path removes the companion app, XCTest and the Automation Mode
   authorization and reads UI elements faster. It loses element hierarchy and types, has
   no dismiss_keyboard equivalent, could not tap system dialogs in ipb's tests, can raise a
@@ -58,7 +65,7 @@ the experiment that answers it.
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
 | WDA only (current) | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep as default and fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Stream question open; flat graph; private interfaces; gaps below | Pending the experiment |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Flat graph; private interfaces; gaps below; target-specific stream behavior | Native feasibility established on one device; production integration pending |
 | DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
@@ -68,8 +75,8 @@ the experiment that answers it.
 |---|---|---|
 | observe_screen | AX graph from `com.apple.accessibility.axAuditDaemon.remoteAXService`; dtscreencaptured screenshot; foreground PID from an AX system hit test, bundle ID from the dtappserviced process list | Flat graph; ipb found the AX frontmost query can name an unrelated process, and its hit test is a tested strategy, not universal overlay coverage |
 | open_app | dtappserviced launch | The FFI already exports app_service |
-| tap, tap_point, long_press, swipe | dtuhidd touchscreen reports | Stream question; system dialogs (ipb Gap 2) |
-| press_home | dtuhidd button event | idevice applies the stream requirement to buttons too |
+| tap, tap_point, long_press, swipe | dtuhidd touchscreen reports | Ordinary no-stream tap verified; long press, swipe and system dialogs remain separate checks |
+| press_home | dtuhidd button event | Native no-stream Home returned Calculator to SpringBoard on the tested combination |
 | type_text, press_key | dtuhidd keyboard; arbitrary Unicode through dtpasteboardd and a paste shortcut | iOS can ask the focused app to allow paste from dtpasteboardd |
 | dismiss_keyboard | No equivalent found | Gap |
 | wait | Local | Unchanged |
@@ -119,10 +126,11 @@ snapshot IDs, approvals, the single serial action queue and the no-replay rule s
 they are; WDA becomes the first backend and remains the default. A DDI backend reuses
 the turn's RP tunnel and DDI preparation, skips runner launch and opens service clients
 through new idevice FFI exports. It observes with a screenshot plus the AX graph and
-acts through dtuhidd, dtappserviced and dtpasteboardd. If the experiment confirms the
-stream requirement, the turn that starts automation owns one display stream for as long
-as it owns phone actions, as it owns the runner PID today, and discards the video
-payload.
+acts through dtuhidd, dtappserviced and dtpasteboardd. The tested matrix does not require
+an always-on display stream for ordinary touch, Home or ASCII keys. If another supported
+matrix establishes that requirement, the turn must explicitly own and tear down its
+stream, as it owns the runner PID today; do not silently introduce screen sharing or
+retry an action after discovering that its outcome is unknown.
 
 <details>
 <summary>Detailed design</summary>
@@ -164,20 +172,24 @@ payload.
 
 ### Integration order
 
-1. Run the experiment below; keep its material outside the repository and record only
-   the condensed conclusion here.
+1. Retain the completed experiment's material outside the repository. Recheck other
+   iOS/DDI combinations before assigning them the same stream policy.
 2. Observation: export screen capture and add the AX reader. Neither depends on the
    stream question.
 3. Introduce the backend protocol in the phone executor with WDA moved behind it
    unchanged.
 4. Add the input exports (HID, pasteboard and, if required, the stream) and the DDI
    backend behind a local developer setting; compare it with WDA on the same pages.
+   Keep stream ownership optional for the tested matrix; do not add a permanent
+   screen-sharing session solely on the basis of the idevice module comment.
 5. Make DDI the default only after core tests, the iOS build, IPA inspection and the
    exact-device exercise pass.
 
-### Discriminating experiment
+### Experiment scope and remaining checks
 
-On one phone, through PocketAgent's tunnel path rather than devicectl, and with no
+The completed ordinary-input control used the user-selected iPhone 12 mini. The
+remaining system-dialog and version-matrix checks follow this procedure. On one phone,
+through PocketAgent's tunnel path rather than devicectl, and with no
 Mac-side Device Hub or mirroring session open: send the same tap to a harmless target
 without a display stream and then with one active, confirming each by screenshot. Then,
 with a system alert on screen, record whether a tap lands, without attempting a
@@ -189,13 +201,43 @@ screen-sharing indicator appears and its power cost.
 
 ### Verification boundary
 
-- Established from sources and inspection only: the shared RSD path, the DDI contents,
-  the idevice clients and the missing FFI exports. ipb's device records describe a
-  Mac-hosted client, not PocketAgent on the phone.
-- Not established: any DDI service call from PocketAgent; the stream requirement; Gap 2
-  on this path; the AX dialect on iOS 27.0.1; latency, power and background behavior.
-- Nothing was built, installed or sent to a phone for this document; the DDI was mounted
-  read-only on a Mac for inspection.
+- The local probe was built for iOS, development-signed, installed on the selected
+  iPhone 12 mini and exercised. Its development IPA was checked for signature validity
+  and absence of a pairing file. Pairing was transferred separately into its local
+  data container, which is excluded from backup. The installed PocketAgent and its
+  history were not replaced.
+- The probe reused idevice 3854a5d plus this branch's `Native/idevice.patch` and the
+  same local-network permission / `tunnel_create_rppairing` path. Device-side services
+  provided the screenshots, taps, Calculator launch, the visible `7 + 5 = 12` result
+  and Home return while the probe was in the background. No Mac port forward,
+  Device Hub viewing session, XCTest or WDA runner provided these actions; USB
+  remained attached for installation and result retrieval.
+- The no-stream / active-stream / stopped-stream control described above resolves
+  the proposed mandatory stream assumption only for this matrix. The temporary stream
+  showed the system screen-sharing indicator;
+  power consumption and long media lifetime were not measured.
+- The mounted DDI was 27A5252f / CoreDevice 642.15, not the inspected PocketAgent
+  download 27A5228h / CoreDevice 642.4. Both host and device versions are part of the
+  experiment boundary; the Mac was macOS 26.5.1 with Xcode 26.5 selected.
+- A native raw-DTX AX probe completed requests 6 → 1 → 5 through the same on-phone
+  RP adapter. The decoded responses had error 0 and identified the probe application
+  root, its 375 × 812 point frame, description and three child handles. Native code
+  sent the requests and stored their replies; the Mac decoded those artifacts afterward.
+  This establishes service/dialect access, not a complete graph traversal or a
+  production observation adapter.
+- A separate no-stream keyboard probe created a mainKeyboard service, sent `a`, `b`,
+  `c` and Backspace, and removed the service successfully. The field visibly contained
+  `ab`; IME composition, arbitrary Unicode and cross-app text delivery are separate checks.
+- Initial connection attempts returned `No route to host` before DDI access. The local
+  VPN was disconnected, and the new probe had not yet completed local-network and
+  wireless-data permissions. After connecting the existing VPN and completing those
+  system prompts, the same RP endpoint connected. These failures cannot diagnose the
+  HID/display-service layer.
+- Production FFI exports, the complete AX graph adapter, snapshot/tool contracts,
+  system-dialog behavior through the native probe, Unicode paste, long press/swipe,
+  cancellation/teardown under interruption, unplugged operation and iOS 27.0.1
+  remain unverified. The shipped PocketAgent core/build/IPA/runtime gates were not
+  rerun for this documentation-only repository change.
 
 </details>
 
@@ -203,10 +245,10 @@ screen-sharing indicator appears and its power cost.
 
 | Module | Repository | Owner | Estimate | Branch | Release | Test date | Status / last checked | Depends on |
 |---|---|---|---:|---|---|---|---|---|
-| Discriminating experiment | PocketAgent, material kept local | TBD | TBD | TBD | None | None | Waiting for the user's authorization and phone choice; 2026-10-12 | One phone with Developer Mode and a DDI |
-| Screen capture export and AX reader | PocketAgent native | TBD | TBD | TBD | TBD | TBD | Not started; 2026-10-12 | None |
+| Discriminating experiment | PocketAgent, material kept local | Codex | Not tracked | devicehub-control (documentation only) | None | 2026-10-12 | Native probe completed on selected iPhone 12 mini; tested matrix only | Production integration and other matrices remain pending |
+| Screen capture export and AX reader | PocketAgent native | TBD | TBD | TBD | TBD | TBD | Production work not started; native screenshot / AX dialect feasibility checked locally | Backend lifecycle and complete graph mapping |
 | Backend boundary | PocketAgent app | TBD | TBD | TBD | TBD | TBD | Not started; 2026-10-12 | None |
 | Input exports and DDI backend | PocketAgent app and native | TBD | TBD | TBD | TBD | TBD | Not started; 2026-10-12 | Experiment and the rows above |
 
-Only the user can authorize the experiment and choose its phone. The remaining rows are
-implementation work; assignment and schedule are not set.
+The user authorized the experiment on the iPhone 12 mini on 2026-10-12. The remaining
+rows are production implementation work; assignment and schedule are not set.
