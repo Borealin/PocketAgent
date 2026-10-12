@@ -615,8 +615,8 @@ impl PocketDDISession {
                 let port = self
                     .pasteboard_port
                     .ok_or_else(|| error("DDI clipboard readback service unavailable"))?;
-                // A fresh read-only connection avoids correlating a late reply
-                // with another request. Resolve only the primary representation.
+                // One fresh transaction avoids assigning a late reply to another
+                // operation. Resolve only the primary text representation.
                 let stream = bounded(self.adapter.connect(port)).await?;
                 let mut client = bounded(RemoteXpcClient::new(stream)).await?;
                 bounded(client.do_handshake()).await?;

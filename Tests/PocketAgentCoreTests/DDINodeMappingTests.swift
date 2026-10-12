@@ -36,4 +36,23 @@ struct DDINodeMappingTests {
         #expect(secure["type"] == "XCUIElementTypeSecureTextField")
         #expect(secure["value"] == nil)
     }
+    @Test func focusedEditableTextViewOmissionDoesNotAssertEmpty() throws {
+        let raw = node(["45": 17, "77": (1 << 18) | (1 << 47), "28": true, "3": ""])
+        let empty = try #require(try DDINodeMapping.attributes(raw))
+        #expect(empty["type"] == "XCUIElementTypeTextView")
+        #expect(empty["value"] == nil)
+        #expect(empty["ddi_textview_value_omitted"] == "true")
+        #expect(!DDINodeMapping.confirmsInput(empty, text: ""))
+        #expect(!DDINodeMapping.confirmsInput(empty, text: "new text"))
+        for change in [["53": NSNull()], ["53": ["unavailable": true]], ["28": false], ["27": false], ["33": "remaining text"]] as [[String: Any]] {
+            #expect(try DDINodeMapping.attributes(raw.merging(change) { _, n in n })?["ddi_textview_value_omitted"] == nil)
+        }
+        #expect(try DDINodeMapping.attributes(raw.filter { $0.key != "3" })?["ddi_textview_value_omitted"] == "true")
+    }
+    @Test func missingValueAndPlaceholderNeverConfirmEmptyInput() {
+        #expect(!DDINodeMapping.confirmsInput([:], text: ""))
+        #expect(!DDINodeMapping.confirmsInput(["placeholder": "Search"], text: ""))
+        #expect(DDINodeMapping.confirmsInput(["value": "Search", "placeholder": "Search"], text: ""))
+        #expect(DDINodeMapping.confirmsInput(["value": "你好🌟"], text: "你好🌟"))
+    }
 }

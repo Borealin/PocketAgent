@@ -493,6 +493,7 @@ final class PhoneExecutor {
         var issued = false
         var openedBundle: String?
         var expectedInput: (identity: String, text: String)?
+        var submittedInput = false
         func proceed() throws {
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let lease, !lease.isActive { throw ActionStopped(issued: issued, reason: "脚本的手机授权已撤销。") }
@@ -608,6 +609,7 @@ final class PhoneExecutor {
                 if clear { try await effect { try await control.clear(id) } }
                 try await requireApp(appID, base: base, proceed: proceed)
                 try await effect { try await control.type(text, into: id) }
+                submittedInput = backend == .ddi
                 if backend == .ddi, clear, a["type"] != "XCUIElementTypeSecureTextField",
                    let identity = a["ddi_identity"] { expectedInput = (identity, text) }
             case "press_key":
@@ -632,14 +634,22 @@ final class PhoneExecutor {
             }
             let state = try await observe(proceed: proceed)
             try proceed()
-            let result: [String: Any] = ["ok": true, "screen": state]
+            var result: [String: Any] = ["ok": true, "screen": state]
             if let expectedInput,
                !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
-                   ($0["value"] == expectedInput.text || (expectedInput.text.isEmpty && $0["value"] == $0["placeholder"])) }) {
+                   DDINodeMapping.confirmsInput($0, text: expectedInput.text) }) {
                 return try Self.result(["ok": false, "code": "text_input_not_confirmed", "screen": state,
                     "action_issued": true, "action_outcome": "unconfirmed", "replay_allowed": false,
                     "clipboard_replaced": !expectedInput.text.isEmpty,
                     "message": "输入请求已发出，但实际输入框尚未确认目标文字。请检查页面或粘贴许可；不要直接重放输入。"], error: true)
+            }
+            if submittedInput {
+                result["input_verified"] = expectedInput != nil
+                result["action_outcome"] = expectedInput == nil ? "submitted" : "confirmed"
+                result["replay_allowed"] = false
+                if expectedInput == nil {
+                    result["message"] = "输入动作已发送，内容未独立确认（密码值被隐藏，或插入位置未固定）。请根据返回页面或目标 App 行为确认，不要直接重放。"
+                }
             }
             if let openedBundle, state["app"] as? String != openedBundle {
                 return try Self.result(["ok": false, "code": "app_open_not_confirmed", "screen": state,

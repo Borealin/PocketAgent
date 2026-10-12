@@ -35,8 +35,22 @@ nonisolated enum DDINodeMapping {
         for (key,name) in [("27","enabled"),("28","focused"),("32","visible")] {
             if let n = raw[key] as? NSNumber, n == 0 || n == 1 { a[name] = n.boolValue ? "true" : "false" }
         }
+        // The tested focused editable UITextView may omit all text attributes.
+        // Preserve that shape without asserting it is empty. A pending paste
+        // can defer confirmation to the exact final value; clear-only cannot.
+        if type == "TextView", raw["53"] == nil, a["focused"] == "true", a["enabled"] == "true",
+           (a["label"] ?? "").isEmpty, raw["33"] == nil || (raw["33"] as? String)?.isEmpty == true {
+            a["ddi_textview_value_omitted"] = "true"
+        }
         if type == "SecureTextField" { a["ddi_value"] = a.removeValue(forKey: "value") }
         if a["visible"] == "false" { return nil }
         return a
+    }
+
+    static func confirmsInput(_ node: [String: String], text: String) -> Bool {
+        if node["value"] == text { return true }
+        guard text.isEmpty else { return false }
+        guard let value = node["value"], let placeholder = node["placeholder"] else { return false }
+        return value == placeholder
     }
 }

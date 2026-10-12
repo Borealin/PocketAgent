@@ -565,9 +565,14 @@ phone through the Mac transport. Phone RP insertion is a separate gate in progre
 The prior receive-timeout root cause remains open. No success claim follows from
 an ACK alone. Initial keyboard commands left partial
 old text until a keyboard-settle interval and individual key-up reports were added.
-Clear now requires an observed field value before paste; missing values are not
-assumed empty. Replacement input returns
-an unconfirmed result if its fresh AX value does not match. Secure text subrole 5
+For a focused editable TextView with omitted text attributes, a nonempty
+replacement defers clear confirmation to the exact post-paste value; omission is
+not treated as proof of emptiness. Clear-only still reports unreadable values.
+Replacement input returns
+an unconfirmed result if its fresh AX value does not match. Missing value and
+placeholder cannot confirm empty input. Secure/insert-without-clear results
+explicitly report input_verified=false and action_outcome=submitted; they do not
+claim exact content confirmation. Secure text subrole 5
 is normalized and its value is excluded from tool results.
 The full executor check also exposed fragmented DTX replies: fragment zero is a
 header-only envelope whose nonzero length describes the message, not following

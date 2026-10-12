@@ -176,6 +176,10 @@ final class DDIControl: PhoneControl {
         try cancellationCheck?()
         let tree = try await readTree()
         guard let field = tree.nodes.first(where: { $0["ddi_identity"] == identity }) else { throw PhoneObservationIssue.nodeChanged }
+        // Omitted text is not proof of an empty field. For a nonempty
+        // replacement, defer confirmation to the executor's exact post-paste
+        // value check; a clear-only request still reports unavailable values.
+        if field["ddi_textview_value_omitted"] == "true", preparedText != nil { return }
         guard let value = field["ddi_value"] ?? field["value"] else {
             throw failure("清空请求已发出，但输入框未提供可核实的值；未继续粘贴。请读取实际页面，不要重放输入。")
         }

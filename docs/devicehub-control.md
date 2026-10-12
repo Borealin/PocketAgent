@@ -73,7 +73,7 @@ document records the implemented backend, confirmed integration failures and the
 | open_app, open_app_by_name | AppService activation without terminating the existing process | Shared ambiguity and installed-app checks |
 | tap, tap_point, long_press | Owned touchscreen contacts | Snapshot, foreground and geometry checks precede effects |
 | swipe, swipe_from_to | Bounded touchscreen path | Shared coordinate/duration limits |
-| type_text | CoreDevice SET and exact UTF-8 readback, clear verification and HID paste | No assistant activation; paste permission may require the user |
+| type_text | CoreDevice SET and exact UTF-8 readback, deferred exact replacement verification and HID paste | No assistant activation; paste permission may require the user |
 | press_key | Owned mainKeyboard Return/Delete | Explicit key-up reports and empty held-key state |
 | dismiss_keyboard | Escape and shared fresh observation | Unconfirmed dismissal is reported |
 | press_home | Owned Indigo Home down/up | Releases before returning |
