@@ -354,13 +354,11 @@ the empty-field default. Saving a loopback override therefore changed the
 embedded/default VPN address. The hint now reads the embedded fallback directly;
 the effective address still uses the saved override first. This changes no
 stored settings, pairing records or conversation data.
-The fix passed the Core/distribution checks, iOS archive and clean IPA inspection.
-Device UI acceptance is pending: the 12 mini installation channel failed to
-allocate its RSD device, while the independent UI test installation on the
-15 Pro succeeded but its first explicit-PID accessibility read was refused
-with error 17. The original SideStore app was not replaced, and its original
-device preferences were read back unchanged. No updated release/feed was
-published for this fix.
+The override/default distinction is now accepted in the real 15 Pro settings
+view: the saved override remains in the text field while the hint shows the
+embedded default. Only the independent test app's setting was changed and
+restored; the original SideStore app's preferences are unchanged. The fix ships
+with the 0.3.6 candidate.
 
 The App recovery implementation is pending device acceptance. Model owns a
 short-lived prepared RP connection shared with its next phone action; ordinary
@@ -594,13 +592,30 @@ screen. Recovery bypasses system-surface compaction, performs no gesture and
 never repeats the interrupted action. A read retry is bounded to two attempts;
 mutation retries remain forbidden. Scripts use the same registry and executor.
 
-The independent 15 Pro acceptance host uses the exact product PhoneExecutor
-with the installed SideStore Automation companion, preserving the original app
-identity and history. Actual app-name lookup/opening and rejection of the uninstalled guessed ID
-have passed. Full search/navigation, foreground recovery and endpoint-hint UI
-acceptance are pending a user-provided uninterrupted device window. Core tests,
-the final iOS archive and clean IPA inspection passed; the public release and
-AltStore feed remain at 0.3.5 until that acceptance is completed.
+The independent 15 Pro acceptance host uses the product PhoneExecutor with
+the existing SideStore Automation companion, preserving the original app
+identity, conversations and settings. Native tool acceptance passed actual
+Xianyu name lookup/opening, rejection of the uninstalled guessed ID, text input
+and submission, observed matching product results, scrolling with changed
+content, and return to the recognized search-input page. An externally changed
+foreground caused the old tap to be rejected before issuance and returned a
+fresh read-only screen with replay forbidden. The advanced setup view retained
+the embedded default hint while a loopback override was saved; the test restored
+that override afterward. App-not-found guidance offers home-screen/App Library
+navigation and optional Spotlight instead of forcing system search.
+
+An earlier user-started attempt failed before app discovery while the local
+VPN was disconnected; reconnecting the existing unchanged VPN restored native
+startup. That attempt is not search acceptance or evidence of cellular refusal.
+The scripted search entry was adapted to the observed home search container;
+button/static-text siblings in the setup page are distinguished by element type.
+These acceptance-driver changes are private bench code, not product fallbacks.
+The accepted scope is the native tool chain and actual UI, not a complete
+model-generated shopping conversation or a SideStore upgrade of the original
+app. Spotlight itself and direct cellular-only startup remain unverified/unfixed.
+Core tests, distribution tests, the final iOS archive and clean IPA inspection
+passed. Publish the 0.3.6 candidate IPAs and inspected metadata together, then
+verify the anonymous public source and release assets.
 
 PhoneExecutor. The former PhoneAgent is now the single phone entry point. AgentKit
 phone tools call `executeModel`; script requests call `executeScript`, which

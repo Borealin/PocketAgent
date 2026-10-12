@@ -538,8 +538,8 @@ final class PhoneExecutor {
                         "apps": Self.appRecords(Array(apps.prefix(40)))], error: true)
                 case .notFound:
                     return try Self.result(["ok": false, "code": "app_name_not_found",
-                        "message": "安装列表未找到准确名称。请用 search_spotlight 搜索这个名称，不要猜包名。",
-                        "next_tool": "search_spotlight", "query": target,
+                        "message": "安装列表未找到准确名称。先检查候选的实际名称；仍不能确认时可返回主屏幕读屏、滑动寻找图标或 App 资源库，也可选择 search_spotlight。不要猜包名。",
+                        "query": target,
                         "apps": Self.appRecords(Array(InstalledApps.search(target, in: model.installedApps).prefix(20)))], error: true)
                 }
             case "open_app":

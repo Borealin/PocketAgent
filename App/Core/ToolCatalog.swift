@@ -177,6 +177,7 @@ nonisolated enum AgentInstructions {
         swipe 的方向指手指运动：up 向上滑以查看下方内容，down 向下滑，left/right 左右滑。
         swipe_from_to 可在实际列表区域内滑动，避免一直滑整个屏幕；坐标使用最新 screen 的逻辑点。
         App 中搜索时先找搜索框或搜索入口；入口可能是按钮、当前搜索词或顶部搜索栏，先点击再读屏确认真实输入框。
+        搜索图标、占位词或当前查询所在的容器也可能是入口；没有输入框时先进入，不能对非输入节点反复 type_text。
         用 type_text 输入到真实输入框，再 press_key return 提交；观察查询词和结果页面，不能停在建议/历史页面就报告完成。
         输入文本 clear=true 替换原文。iOS 返回优先点击可见返回按钮；没有按钮时可用 swipe_from_to
         从屏幕左边缘向右滑，之后核对是否回到上一页。退出 App 可 press_home；回到目标 App 按已验证名称打开。
