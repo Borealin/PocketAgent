@@ -129,6 +129,24 @@ proof for the gesture. Automatic preparation in the SideStore-signed new binary
 still requires validation on the Dynamic Island device. System expansion and a
 human switching apps can still race an action; no atomic occlusion guarantee is
 claimed.
+A 0.3.6 SideStore run on the iPhone 15 Pro subsequently reported no visible
+Dynamic Island status during operation. Its logs confirm task submission,
+handler execution, continued real progress and normal completion, with no
+system expiration. The same run issued repeated status-area preparation
+gestures. Static inspection shows that `compactedTaskTitle` only controls a
+short delay: the horizontal gesture is still issued on every normal observation
+and node preparation even after previous preparation. The current
+[iOS 27 user guide](https://support.apple.com/en-mide/guide/iphone/iph28f50d10d/ios)
+defines collapsing an expanded activity as an upward swipe; the existing
+horizontal recipe therefore cannot be treated as a verified cross-version
+collapse-only operation. Repeated automatic gestures are the leading
+explanation for the reported hidden indicator, but the exact visibility cause
+is not isolated: no active-run before/after capture or disabled-gesture control
+has been taken. The available screen capture was after normal completion and
+cannot prove during-run visibility. Compact-status preservation and safe
+expanded-surface handling remain open device-acceptance requirements; do not
+claim that successful gesture requests establish either property.
+
 A local appearance choice (system, light,
 dark) is stored in UserDefaults and applied as the hosting window's interface
 style, which every sheet presented in that window inherits.
