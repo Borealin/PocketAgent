@@ -344,7 +344,7 @@ final class PhoneExecutor {
         try proceed()
         guard !expected.isEmpty, expected == current else {
             invalidateObservation()
-            throw failure("前台 App 已改变。请重新读屏。")
+            throw PhoneObservationIssue.foregroundChanged
         }
     }
 
@@ -379,14 +379,29 @@ final class PhoneExecutor {
         try proceed()
         guard fresh.frame == geometry.bounds else {
             invalidateObservation()
-            throw failure("屏幕方向或尺寸已变化。请重新读屏。")
+            throw PhoneObservationIssue.geometryChanged
         }
         compactedTaskTitle = task.title
         model.log("phone_task_surface_gesture", ["gestureCompleted": true, "layout": "portrait"])
         return fresh
     }
 
-    func observe(proceed: () throws -> Void) async throws -> [String: Any] {
+    func observe(proceed: () throws -> Void, prepareSurface: Bool = true) async throws -> [String: Any] {
+        // App activation and system overlays can briefly change the foreground
+        // while a tree is read. Retry observation only, never the prior action.
+        for attempt in 0..<2 {
+            do { return try await observeOnce(proceed: proceed, prepareSurface: prepareSurface && attempt == 0) }
+            catch let issue as PhoneObservationIssue {
+                guard attempt == 0 else { throw issue }
+                try proceed()
+                try await Task.sleep(for: .milliseconds(250))
+                try proceed()
+            }
+        }
+        throw PhoneObservationIssue.foregroundChanged
+    }
+
+    private func observeOnce(proceed: () throws -> Void, prepareSurface: Bool) async throws -> [String: Any] {
         try proceed()
         let base = try await ready()
         try proceed()
@@ -394,7 +409,7 @@ final class PhoneExecutor {
         try proceed()
         let tree = try await readTree(base)
         try proceed()
-        let observed = try await compactTaskSurface(base, app: app, tree: tree, proceed: proceed)
+        let observed = prepareSurface ? try await compactTaskSurface(base, app: app, tree: tree, proceed: proceed) : tree
         try proceed()
         // Text-only models skip the screenshot unless diagnostics opted in.
         let keepScreenshot = DeviceSettings.saveScreenshots
@@ -436,7 +451,7 @@ final class PhoneExecutor {
     }
     func reference(_ args: [String: AgentJSONValue], base: String, proceed: () throws -> Void) async throws {
         guard snapshotID > 0, args["snapshot_id"]?.integerValue == snapshotID else {
-            throw failure("屏幕引用已过期。请 observe_screen 后使用最新 snapshot_id。")
+            throw PhoneObservationIssue.staleSnapshot
         }
         try await requireApp(appID, base: base, proceed: proceed)
         try proceed()
@@ -444,7 +459,7 @@ final class PhoneExecutor {
     func node(_ args: [String: AgentJSONValue], base: String, proceed: () throws -> Void) async throws -> [String: String] {
         try await reference(args, base: base, proceed: proceed)
         try proceed()
-        guard let id = args["node"]?.integerValue, id > 0, id <= nodes.count else { throw failure("无效 node，请重新读屏。") }
+        guard let id = args["node"]?.integerValue, id > 0, id <= nodes.count else { throw PhoneObservationIssue.nodeChanged }
         let old = nodes[id - 1], tree = try await readTree(base)
         try proceed()
         let current = try await compactTaskSurface(base, app: appID, tree: tree, proceed: proceed)
@@ -454,8 +469,25 @@ final class PhoneExecutor {
         guard current.nodes.contains(where: {
             $0["type"] == old["type"] && $0["name"] == old["name"] && $0["label"] == old["label"] &&
             $0["enabled"] == "true" && PhoneTree.rect($0) == PhoneTree.rect(old)
-        }) else { throw failure("目标元素已移动、消失或不可用。请重新读屏。") }
+        }) else { throw PhoneObservationIssue.nodeChanged }
         return old
+    }
+
+    private static func appRecords(_ apps: [InstalledApp]) -> [[String: Any]] {
+        apps.map { ["bundle_id": $0.bundleID, "name": $0.name as Any? ?? NSNull(), "names": $0.names] }
+    }
+    private static func result(_ object: [String: Any], error: Bool = false) throws -> (content: String, isError: Bool) {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return (String(decoding: data, as: UTF8.self), error)
+    }
+    private func inputElement(_ a: [String: String], base: String, proceed: () throws -> Void) async throws -> String {
+        let nameFilter = a["name"].map { "@name=\(Self.xpathLiteral($0)) and " } ?? ""
+        let xpath = "//\(a["type"]!)[\(nameFilter)@x=\(Self.xpathLiteral(a["x"] ?? "")) and @y=\(Self.xpathLiteral(a["y"] ?? ""))]"
+        let found = try await model.request("POST", "\(base)/element", ["using": "xpath", "value": xpath])["value"] as? [String: Any]
+        try proceed()
+        guard let id = found?["element-6066-11e4-a52e-4f735466cecf"] as? String else { throw PhoneObservationIssue.nodeChanged }
+        try await requireApp(appID, base: base, proceed: proceed)
+        return id
     }
     /// One phone action. Cancellation, the deadline and (for scripts) the
     /// lease are rechecked after every await that can take long (runner
@@ -464,6 +496,7 @@ final class PhoneExecutor {
     /// was already sent is reported as unconfirmed and never repeated.
     private func perform(_ call: AgentToolCall, lease: ScriptLease? = nil) async throws -> (content: String, isError: Bool) {
         var issued = false
+        var openedBundle: String?
         func proceed() throws {
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let lease, !lease.isActive { throw ActionStopped(issued: issued, reason: "脚本的手机授权已撤销。") }
@@ -486,9 +519,84 @@ final class PhoneExecutor {
             image = nil
             switch name {
             case "observe_screen": break
+            case "find_apps":
+                guard let query = args["query"]?.stringValue, query.count <= 120 else { throw failure("请提供不超过 120 字的 App 名称查询。") }
+                let apps = InstalledApps.search(query, in: model.installedApps)
+                return try Self.result(["ok": true, "apps": Self.appRecords(Array(apps.prefix(40))),
+                                        "total_matches": apps.count, "truncated": apps.count > 40,
+                                        "source": "device_installed_apps"])
+            case "open_app_by_name":
+                guard let target = args["name"]?.stringValue, !InstalledApps.normalize(target).isEmpty,
+                      target.count <= 120 else { throw failure("请提供实际 App 名称。") }
+                switch InstalledApps.resolve(name: target, in: model.installedApps) {
+                case .found(let app):
+                    openedBundle = app.bundleID
+                    try await effect("POST", "\(base)/wda/apps/activate", ["bundleId": app.bundleID])
+                case .ambiguous(let apps):
+                    return try Self.result(["ok": false, "code": "app_name_ambiguous",
+                        "message": "有多个同名 App，请根据候选确认目标，不要盲选。",
+                        "apps": Self.appRecords(Array(apps.prefix(40)))], error: true)
+                case .notFound:
+                    return try Self.result(["ok": false, "code": "app_name_not_found",
+                        "message": "安装列表未找到准确名称。请用 search_spotlight 搜索这个名称，不要猜包名。",
+                        "next_tool": "search_spotlight", "query": target,
+                        "apps": Self.appRecords(Array(InstalledApps.search(target, in: model.installedApps).prefix(20)))], error: true)
+                }
             case "open_app":
                 guard let bundle = args["bundle_id"]?.stringValue, !bundle.isEmpty else { throw failure("缺少 bundle_id。") }
+                guard model.installedApps.contains(where: { $0.bundleID == bundle }) else {
+                    return try Self.result(["ok": false, "code": "app_not_installed",
+                        "message": "此 Bundle ID 不在手机实际安装列表中。请用 find_apps 或 search_spotlight 按名称查找；不要再次尝试这个 ID。"], error: true)
+                }
+                openedBundle = bundle
                 try await effect("POST", "\(base)/wda/apps/activate", ["bundleId": bundle])
+            case "search_spotlight":
+                guard let raw = args["query"]?.stringValue else { throw failure("缺少 query。") }
+                let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !query.isEmpty, query.count <= 120 else { throw failure("请提供不超过 120 字的 App 名称。") }
+                try await effect("POST", "/wda/homescreen", [:])
+                try await Task.sleep(for: .milliseconds(400)); try proceed()
+                let home = try await observe(proceed: proceed)
+                guard ["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(appID) else {
+                    return try Self.result(["ok": false, "code": "spotlight_unavailable", "screen": home,
+                        "action_issued": true, "replay_allowed": false,
+                        "message": "没有进入系统主屏幕或 Spotlight；未输入搜索文字。请根据实际页面处理系统提示。"], error: true)
+                }
+                let buttons = nodes.filter { $0["type"] == "XCUIElementTypeButton" && $0["enabled"] == "true"
+                    && ["搜索", "Search"].contains($0["label"] ?? "") && PhoneTree.rect($0).intersects(screen) }
+                try await requireApp(appID, base: base, proceed: proceed)
+                if buttons.count == 1 {
+                    let rect = PhoneTree.rect(buttons[0]).intersection(screen)
+                    try await effect("POST", "\(base)/wda/tap", ["x": rect.midX, "y": rect.midY])
+                } else {
+                    try await effect("POST", "\(base)/wda/dragfromtoforduration", [
+                        "fromX": screen.width * 0.5, "fromY": screen.height * 0.3,
+                        "toX": screen.width * 0.5, "toY": screen.height * 0.75, "duration": 0.25])
+                }
+                try await Task.sleep(for: .milliseconds(400)); try proceed()
+                let search = try await observe(proceed: proceed)
+                guard ["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(appID) else {
+                    return try Self.result(["ok": false, "code": "spotlight_unavailable", "screen": search,
+                        "action_issued": true, "replay_allowed": false,
+                        "message": "搜索界面属于其他 App；未输入搜索文字。"], error: true)
+                }
+                let searchable = nodes.filter { node in
+                    guard node["enabled"] == "true", PhoneTree.rect(node).intersects(screen) else { return false }
+                    if node["type"] == "XCUIElementTypeSearchField" { return true }
+                    return node["type"] == "XCUIElementTypeTextField" &&
+                        [node["label"] ?? "", node["name"] ?? ""].contains { $0.localizedCaseInsensitiveContains("search") || $0.contains("搜索") }
+                }
+                guard searchable.count == 1 else {
+                    return try Self.result(["ok": false, "code": "spotlight_field_ambiguous", "screen": search,
+                        "action_issued": true, "replay_allowed": false,
+                        "message": "无法唯一确认 Spotlight 搜索框；未输入搜索文字。请查看返回页面。"], error: true)
+                }
+                let id = try await inputElement(searchable[0], base: base, proceed: proceed)
+                try await effect("POST", "\(base)/element/\(id)/click", [:])
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect("POST", "\(base)/element/\(id)/clear", [:])
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect("POST", "\(base)/element/\(id)/value", ["text": query])
             case "tap", "long_press":
                 let a = try await node(args, base: base, proceed: proceed), rect = PhoneTree.rect(a).intersection(screen)
                 try proceed()
@@ -522,6 +630,18 @@ final class PhoneExecutor {
                 try await effect("POST", "\(base)/wda/dragfromtoforduration", [
                     "fromX": screen.width * (vertical ? 0.5 : start), "fromY": screen.height * (vertical ? start : 0.5),
                     "toX": screen.width * (vertical ? 0.5 : end), "toY": screen.height * (vertical ? end : 0.5), "duration": 0.25])
+            case "swipe_from_to":
+                try await reference(args, base: base, proceed: proceed)
+                guard let fromX = args["from_x"]?.numberValue, let fromY = args["from_y"]?.numberValue,
+                      let toX = args["to_x"]?.numberValue, let toY = args["to_y"]?.numberValue,
+                      let seconds = args["seconds"]?.numberValue, (0.1...2).contains(seconds),
+                      [fromX,fromY,toX,toY,seconds].allSatisfy(\.isFinite),
+                      screen.contains(CGPoint(x: fromX, y: fromY)), screen.contains(CGPoint(x: toX, y: toY)) else {
+                    throw failure("滑动起终点必须位于最新屏幕的逻辑坐标内，时长为 0.1–2 秒。")
+                }
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect("POST", "\(base)/wda/dragfromtoforduration", [
+                    "fromX": fromX, "fromY": fromY, "toX": toX, "toY": toY, "duration": seconds])
             case "type_text":
                 let a = try await node(args, base: base, proceed: proceed)
                 try proceed()
@@ -529,13 +649,7 @@ final class PhoneExecutor {
                       let text = args["text"]?.stringValue, text.count <= 4000, let clear = args["clear"]?.boolValue else {
                     throw failure("请选择实际输入框并提供 text 和 clear。")
                 }
-                let nameFilter = a["name"].map { "@name=\(Self.xpathLiteral($0)) and " } ?? ""
-                let xpath = "//\(a["type"]!)[\(nameFilter)@x=\(Self.xpathLiteral(a["x"] ?? "")) and @y=\(Self.xpathLiteral(a["y"] ?? ""))]"
-                let found = try await model.request("POST", "\(base)/element", ["using": "xpath", "value": xpath])["value"] as? [String: Any]
-                try proceed()
-                guard let id = found?["element-6066-11e4-a52e-4f735466cecf"] as? String else { throw failure("输入框已不可用。") }
-                try await requireApp(appID, base: base, proceed: proceed)
-                try proceed()
+                let id = try await inputElement(a, base: base, proceed: proceed)
                 try await effect("POST", "\(base)/element/\(id)/click", [:])
                 if clear { try await effect("POST", "\(base)/element/\(id)/clear", [:]) }
                 try await effect("POST", "\(base)/element/\(id)/value", ["text": text])
@@ -561,12 +675,38 @@ final class PhoneExecutor {
             }
             let state = try await observe(proceed: proceed)
             try proceed()
-            let data = try JSONSerialization.data(withJSONObject: ["ok": true, "screen": state], options: [.sortedKeys])
-            return (String(decoding: data, as: UTF8.self), false)
+            var result: [String: Any] = ["ok": true, "screen": state]
+            if let openedBundle, state["app"] as? String != openedBundle {
+                return try Self.result(["ok": false, "code": "app_open_not_confirmed", "screen": state,
+                    "expected_app": openedBundle, "action_issued": true, "action_outcome": "unconfirmed",
+                    "replay_allowed": false, "message": "实际前台尚未确认是目标 App。请根据新页面处理授权或跳转，不要直接重放打开。"], error: true)
+            }
+            if name == "search_spotlight" {
+                result["route"] = "spotlight_results"
+                result["message"] = "请检查 App/应用分区中的准确结果，再使用此 screen 的节点点击；没有打开搜索结果。"
+            }
+            return try Self.result(result)
         } catch {
             invalidateObservation()
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
+            if let issue = error as? PhoneObservationIssue {
+                var recovery: [String: Any] = ["ok": false, "code": issue.code,
+                    "message": issue.localizedDescription, "action_issued": issued,
+                    "action_outcome": issued ? "unconfirmed" : "not_executed",
+                    "requires_replan": true, "replay_allowed": false]
+                do {
+                    recovery["screen"] = try await observe(proceed: proceed, prepareSurface: false)
+                    try proceed()
+                    recovery["recovery"] = "fresh_observation"
+                } catch {
+                    if error is ActionStopped || error is CancellationError || Task.isCancelled || model.pendingAgentCancellation {
+                        throw ActionStopped(issued: issued, reason: "本轮已取消。")
+                    }
+                    recovery["recovery"] = "observe_screen_required"
+                }
+                return try Self.result(recovery, error: true)
+            }
             // Never automatically repeat a mutation after an HTTP/observation error.
             guard issued else { return ("动作未执行：\(error.localizedDescription)", true) }
             return ("工具未确认成功：\(error.localizedDescription)。动作可能已发生；请先 observe_screen 读取实际状态再决定是否重试。", true)

@@ -260,10 +260,14 @@ nonisolated enum ToolLabels {
         switch tool {
         case "observe_screen": "读取屏幕"
         case "open_app": "打开 App"
+        case "find_apps": "查找 App"
+        case "open_app_by_name": "打开 App"
+        case "search_spotlight": "系统搜索"
         case "tap": "点击"
         case "tap_point": "点击坐标"
         case "long_press": "长按"
         case "swipe": "滑动"
+        case "swipe_from_to": "滑动"
         case "type_text": "输入文字"
         case "press_key": "按键"
         case "dismiss_keyboard": "收起键盘"
@@ -289,6 +293,9 @@ nonisolated enum ToolLabels {
         let target = args["node"]?.integerValue.flatMap { elements[$0] }.map(quoted)
         switch call.name {
         case "open_app": return "打开 " + appName(args["bundle_id"]?.stringValue ?? "")
+        case "open_app_by_name": return "打开 " + String((args["name"]?.stringValue ?? "App").prefix(24))
+        case "find_apps": return "查找「\((args["query"]?.stringValue ?? "").prefix(24))」"
+        case "search_spotlight": return "系统搜索「\((args["query"]?.stringValue ?? "").prefix(24))」"
         case "tap": return target.map { "点击\($0)" } ?? "点击屏幕元素"
         case "long_press": return target.map { "长按\($0)" } ?? "长按屏幕元素"
         case "tap_point": return "点击屏幕位置"
@@ -299,6 +306,7 @@ nonisolated enum ToolLabels {
         case "swipe":
             let direction = ["up": "向上", "down": "向下", "left": "向左", "right": "向右"][args["direction"]?.stringValue ?? ""]
             return (direction ?? "") + "滑动"
+        case "swipe_from_to": return "滑动页面"
         case "press_key": return args["key"]?.stringValue == "delete" ? "按删除键" : "按回车键"
         case "wait": return args["seconds"]?.numberValue.map { "等待 \($0.formatted()) 秒" } ?? "等待"
         case "list_files", "read_file", "write_file", "patch_file":
