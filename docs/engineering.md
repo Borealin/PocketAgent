@@ -650,7 +650,17 @@ closure from an acknowledged unsubscribe, drops the socket in either case and
 reports the actual subscription_stop/connection_closed outcome. An unrelated
 header, partial body, protocol error, timeout or ordinary semantic request still
 fails. This does not establish a successful server ACK or a general TCP fix.
-Protocol regressions cover those distinctions; final device acceptance is pending.
+Protocol regressions cover those distinctions; production final-text input completed
+without a cleanup warning, while its closure remained explicitly unacknowledged.
+
+A fresh empty-field keyboard turn issued its focus tap but then hit the shared
+foreground/root-change guard before keys; the independent receiver remained
+unchanged. Recovery showed the same app with newly visible keyboard nodes. The
+exact transient PID-versus-root branch was not logged. After a focus tap,
+press_keys now reuses the existing bounded read-only observation recovery and
+verifies the same app, field identity and focus before sending keys. Neither the
+focus tap nor input is replayed. Final device acceptance of this transition is
+pending.
 
 During keyboard stop acceptance, a script deadline revoked the phone lease and
 stopped a partially delivered key sequence; a new direct-key turn confirmed

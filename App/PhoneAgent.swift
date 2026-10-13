@@ -643,9 +643,14 @@ final class PhoneExecutor {
                 let input = try await inputElement(a, base: base, proceed: proceed)
                 // Retapping a focused field can move its caret or disturb IME composition.
                 if a["focused"] == "false" {
+                    let expectedApp = appID
                     try await effect { try await control.click(input) }
-                    let focused = try await readTree(base)
-                    guard focused.nodes.contains(where: { $0["ddi_identity"] == a["ddi_identity"] && $0["focused"] == "true" }) else {
+                    // Keyboard appearance can change AXChildren during traversal.
+                    // Reuse bounded read-only observation recovery; never repeat
+                    // the focus tap or send keys before the same field is verified.
+                    let focused = try await observe(proceed: proceed, prepareSurface: false)
+                    guard focused["app"] as? String == expectedApp,
+                          nodes.contains(where: { $0["ddi_identity"] == a["ddi_identity"] && $0["focused"] == "true" }) else {
                         throw failure("聚焦请求已发出，但目标焦点未确认；未发送按键，请读取实际页面。")
                     }
                 }
