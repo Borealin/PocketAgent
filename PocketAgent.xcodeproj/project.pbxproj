@@ -44,6 +44,7 @@
 		A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
+		CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */; };
 		D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9546B4615DB532FC42BF7335 /* Rules.swift */; };
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
@@ -90,6 +91,7 @@
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
 		B6EC72EE2D00391C3C55564C /* NativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTools.swift; sourceTree = "<group>"; };
+		B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSequence.swift; sourceTree = "<group>"; };
 		BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneConnectionStatus.swift; sourceTree = "<group>"; };
 		BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
 		BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspaces.swift; sourceTree = "<group>"; };
@@ -167,6 +169,7 @@
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */,
+				B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */,
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
 				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
@@ -341,6 +344,7 @@
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
 				EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */,
+				CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */,
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
