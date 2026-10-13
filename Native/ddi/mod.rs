@@ -62,6 +62,7 @@ pub struct PocketDDISession {
     pasteboard_port: Option<u16>,
     hit_point: Option<(f64, f64)>,
     hid: UniversalHidServiceClient<Box<dyn ReadWrite>>,
+    keyboard_hid: Option<UniversalHidServiceClient<Box<dyn ReadWrite>>>,
     buttons: IndigoHidClient<Box<dyn ReadWrite>>,
     capture: ScreenCaptureServiceClient<Box<dyn ReadWrite>>,
     apps: AppServiceClient<Box<dyn ReadWrite>>,
@@ -308,6 +309,7 @@ impl PocketDDISession {
             installed,
             cancel,
             hid,
+            keyboard_hid: None,
             buttons,
             capture,
             keyboard: None,
@@ -341,8 +343,8 @@ impl PocketDDISession {
             // Always drop the old socket, even when unsubscribe is unconfirmed.
             let result = tokio::time::timeout(Duration::from_secs(2), ax.close())
                 .await
-                .map_err(|_| error("DDI AX unsubscribe timed out"))?
-                .map_err(error);
+                .map_err(|_| { tracing::error!("DDI cleanup unconfirmed: AX unsubscribe timeout"); error("DDI AX unsubscribe timed out") })?
+                .map_err(|e| { tracing::error!("DDI cleanup unconfirmed: AX unsubscribe"); error(e) });
             drop(ax);
             result
         } else {
@@ -508,10 +510,10 @@ impl PocketDDISession {
             let stream = bounded(self.adapter.connect(self.hid_port)).await?;
             let mut client = bounded(RemoteXpcClient::new(Box::new(stream) as Box<dyn ReadWrite>)).await?;
             bounded(client.do_handshake()).await?;
-            self.hid = UniversalHidServiceClient::new(client);
+            self.keyboard_hid = Some(UniversalHidServiceClient::new(client));
             self.proceed()?;
             self.keyboard = Some(
-                self.hid
+                self.keyboard_hid.as_mut().ok_or_else(|| error("DDI keyboard channel missing"))?
                     .create_main_keyboard()
                     .await
                     .map_err(|e| error(e.to_string()))?,
@@ -526,7 +528,7 @@ impl PocketDDISession {
         for code in codes {
             self.proceed()?;
             bounded(
-                self.hid.main_keyboard_key_down(
+                self.keyboard_hid.as_mut().ok_or_else(|| error("DDI keyboard channel missing"))?.main_keyboard_key_down(
                     self.keyboard
                         .as_mut()
                         .ok_or_else(|| error("DDI keyboard missing"))?,
@@ -542,7 +544,7 @@ impl PocketDDISession {
         // does not send an empty keyboard report.
         for code in codes {
             bounded(
-                self.hid.main_keyboard_key_up(
+                self.keyboard_hid.as_mut().ok_or_else(|| error("DDI keyboard channel missing"))?.main_keyboard_key_up(
                     self.keyboard
                         .as_mut()
                         .ok_or_else(|| error("DDI keyboard missing"))?,
@@ -569,23 +571,27 @@ impl PocketDDISession {
             }
         }
         if let Some(keyboard) = self.keyboard.as_mut() {
+            let hid = self.keyboard_hid.as_mut().ok_or_else(|| error("DDI owned keyboard channel missing"))?;
             if let Err(e) = bounded(
-                self.hid
+                hid
                     .set_main_keyboard_usages(keyboard, Vec::<KeyboardUsage>::new()),
             )
             .await
             {
+                tracing::error!("DDI cleanup unconfirmed: keyboard release");
                 errors.push(e);
             }
         }
         if remove_keyboard {
             if let Some(keyboard) = self.keyboard.as_mut() {
-                if let Err(e) = bounded(self.hid.reset_main_keyboard(keyboard)).await {
+                let hid = self.keyboard_hid.as_mut().ok_or_else(|| error("DDI owned keyboard channel missing"))?;
+                if let Err(e) = bounded(hid.reset_main_keyboard(keyboard)).await {
+                    tracing::error!("DDI cleanup unconfirmed: keyboard reset");
                     errors.push(e);
                 }
-                match bounded(self.hid.remove_main_keyboard(keyboard)).await {
-                    Ok(()) => self.keyboard = None,
-                    Err(e) => errors.push(e),
+                match bounded(hid.remove_main_keyboard(keyboard)).await {
+                    Ok(()) => { self.keyboard = None; self.keyboard_hid = None; },
+                    Err(e) => { tracing::error!("DDI cleanup unconfirmed: keyboard removal"); errors.push(e); },
                 }
             }
         }

@@ -628,8 +628,15 @@ confirmed no text was inserted; subsequent input in that turn was refused as
 uncertain. The candidate now opens a fresh HID channel before its first owned
 keyboard creation, after any touch is released, without retrying an effect.
 This addresses reuse of the setup channel after model inference; idle transport
-versus prior no-reply touch traffic is not yet isolated. Regression acceptance
-is pending on the selected phone.
+versus prior no-reply touch traffic is not yet isolated. The fresh-channel
+candidate passed physical ASCII, Shift and digit input, and two-part Pinyin plus
+selection of an actually observed candidate. The latter reported unconfirmed
+final cleanup despite independently confirmed committed text. Keyboard lifecycle
+requests now use their own fresh, retained HID channel; touch reports, including
+candidate selection, keep the original channel. Static cleanup-phase diagnostics
+distinguish keyboard release/reset/removal and AX unsubscribe without recording
+input. The precise transport cause is still open; renewed cleanup and stop
+regression acceptance is pending on the selected phone.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
