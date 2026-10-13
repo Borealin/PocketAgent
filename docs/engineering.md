@@ -611,7 +611,7 @@ results label its source and require observing target App behavior. Observations
 state and the AX result reports target_focused without inferring it from the setter
 acknowledgement. The model
 confirms focus or uses node-bound press_keys before submission. Callback and
-empty-value compatibility limits, and pending renewed acceptance, are recorded in
+empty-value compatibility limits, and completed selected-device acceptance, are recorded in
 [devicehub-control.md](devicehub-control.md#ax-final-text-route). A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard

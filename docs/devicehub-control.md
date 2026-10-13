@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. AX whole-field input is implemented with selected-device acceptance pending. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
+> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. AX whole-field input and selected-device acceptance are complete (2026-10-14). DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -377,7 +377,8 @@ parameters {value: NSString}, using a fresh AXPTranslationObject on the existing
 AX/DTX service. This is whole-field replacement, not HID typing or insertion at
 the caret. The user approved integration on 2026-10-13. Production App/Native now
 exposes this operation through the same RP/DDI session and serial executor;
-renewed build/IPA and exact-device acceptance are pending. Initial research scope
+renewed core/native/build/IPA and exact-device acceptance are complete on the
+selected iPhone 12 mini. Initial research scope
 is the selected iPhone 12 mini on iOS 27.0, with USB attached for preparation/readback;
 supplementary Mac/AX controls on the same phone isolate callback differences
 and the paste-refusing fixture. This is not a model-turn integration gate,
@@ -431,7 +432,15 @@ response rather than infer business acceptance from an AX value alone.
 Only PocketAgent iOS/native is implicated; Android, glasses firmware, schema
 and rpc are outside this Apple DDI contract. The implementation branch is devicehub-control. Owner, effort, release version
 and delivery date remain unspecified. Core/native/iOS/IPA and exact-device gates
-are being renewed; the prototype alone is not production acceptance.
+passed for the integrated code. The private acceptance exercises model and direct
+shared-script calls; it is not a renewed Linux CLI/script-runtime reuse gate.
+The real model chose explicit AX with clipboard denied, replaced a paste-refusing
+ordinary field with Chinese/emoji, and the independent UIKit receiver confirmed
+text, editingChanged and target focus. Omitted method still passed ordinary paste.
+Secure/TextView, empty/append AX, stale snapshots and revoked leases were refused.
+Exact AX confirmation remains distinct from App business validation. These results
+cover the selected portrait phone and controlled UIKit fields; arbitrary custom
+apps, unplugged/cellular startup and other OS/DDI combinations remain unverified.
 
 Rejected approaches: automatically replacing the old route despite callback
 differences; treating nil ACK or placeholder text as effect confirmation;
