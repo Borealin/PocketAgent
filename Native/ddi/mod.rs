@@ -28,6 +28,31 @@ use std::{
     time::Duration,
 };
 
+fn key_sequence(v: &Json) -> Result<(Vec<u16>, Vec<u16>), IdeviceError> {
+    let keys = v["keys"].as_array().ok_or_else(|| error("DDI keys missing"))?;
+    let modifiers = v["modifiers"].as_array().ok_or_else(|| error("DDI modifiers missing"))?;
+    let clipboard_allowed = v["clipboard_allowed"].as_bool().ok_or_else(|| error("DDI keyboard policy missing"))?;
+    if keys.is_empty() || keys.len() > 32 || modifiers.len() > 4 {
+        return Err(error("DDI keyboard sequence limit"));
+    }
+    let keys: Vec<u16> = keys.iter().map(|v| {
+        let n = v.as_u64().ok_or_else(|| error("DDI key invalid"))?;
+        match n { 4..=49 | 51..=56 | 74..=75 | 77..=82 => Ok(n as u16), _ => Err(error("DDI key unsupported")) }
+    }).collect::<Result<_, _>>()?;
+    let modifiers: Vec<u16> = modifiers.iter().map(|v| {
+        let n = v.as_u64().ok_or_else(|| error("DDI modifier invalid"))?;
+        if (224..=227).contains(&n) { Ok(n as u16) } else { Err(error("DDI modifier unsupported")) }
+    }).collect::<Result<_, _>>()?;
+    if modifiers.iter().enumerate().any(|(i, n)| modifiers[..i].contains(n)) {
+        return Err(error("DDI duplicate modifier"));
+    }
+    if !clipboard_allowed && modifiers.iter().any(|n| *n == 224 || *n == 227)
+        && keys.iter().any(|n| [6, 25, 27].contains(n)) {
+        return Err(error("DDI clipboard shortcut forbidden"));
+    }
+    Ok((keys, modifiers))
+}
+
 pub struct PocketDDICancellation(Arc<AtomicBool>);
 pub struct PocketDDISession {
     ax: Option<ax::Ax>,
@@ -581,7 +606,7 @@ impl PocketDDISession {
             ));
         }
         let expected = v["expected_app"].as_str();
-        if ["tap", "hold", "drag", "clear", "paste", "key"].contains(&op) {
+        if ["tap", "hold", "drag", "clear", "paste", "key", "keys"].contains(&op) {
             if let Some(frame) = v["expected_frame"].as_object() {
                 let g = self.geometry().await?;
                 for (k, n) in [
@@ -699,14 +724,52 @@ impl PocketDDISession {
                 self.key(&[42], expected).await?;
                 Ok(json!({}))
             }
-            // Swift sets the local device clipboard through UIPasteboard,
-            // under the same executor lock/checks, before this HID chord.
+            "keys" => {
+                let (keys, modifiers) = key_sequence(v)?;
+                for code in keys {
+                    self.proceed()?;
+                    let mut chord = modifiers.clone();
+                    chord.push(code);
+                    self.key(&chord, expected).await?;
+                }
+                Ok(json!({}))
+            }
+            // The executor prepares and verifies the device clipboard service
+            // before this chord; it does not use foreground UIKit writes.
             "paste" => {
                 self.key(&[0xe3, 25], expected).await?;
                 Ok(json!({}))
             }
             _ => Err(error("Unknown DDI operation")),
         }
+    }
+}
+
+#[cfg(test)]
+mod keyboard_sequence_tests {
+    use super::*;
+
+    #[test]
+    fn clipboard_policy_blocks_modified_copy_cut_paste_before_hid() {
+        for key in [6, 25, 27] {
+            for modifier in [224, 227] {
+                assert!(key_sequence(&json!({"keys":[key],"modifiers":[225,modifier],"clipboard_allowed":false})).is_err());
+            }
+        }
+        assert!(key_sequence(&json!({"keys":[4],"modifiers":[227],"clipboard_allowed":false})).is_ok());
+        assert!(key_sequence(&json!({"keys":[25],"modifiers":[227],"clipboard_allowed":true})).is_ok());
+    }
+
+    #[test]
+    fn validates_whole_bounded_sequence_before_any_input() {
+        for value in [json!({"keys":[],"modifiers":[],"clipboard_allowed":false}),
+            json!({"keys":vec![4;33],"modifiers":[],"clipboard_allowed":false}),
+            json!({"keys":[4,0x4f60],"modifiers":[],"clipboard_allowed":false}),
+            json!({"keys":[4],"modifiers":[227,227],"clipboard_allowed":true}),
+            json!({"keys":[4],"modifiers":[]})] {
+            assert!(key_sequence(&value).is_err());
+        }
+        assert_eq!(key_sequence(&json!({"keys":[17,12,11,4,18],"modifiers":[],"clipboard_allowed":false})).unwrap(), (vec![17,12,11,4,18],vec![]));
     }
 }
 

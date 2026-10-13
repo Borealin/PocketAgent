@@ -17,6 +17,11 @@ writes the device clipboard through CoreDevice, checks its actual UTF-8 contents
 then pastes through the owned HID keyboard without activating PocketAgent. The
 target app can request paste permission; rejected or unconfirmed insertion is
 reported rather than replayed.
+DDI also offers `press_keys` for model-controlled physical keys and IME candidates.
+The phone setup's clipboard switch permits or forbids the paste path and known
+clipboard shortcuts; permission and backend are captured when the turn is queued.
+`type_text` retains its existing schema. Keyboard calls return the actual screen
+without assuming the layout or claiming that composition has committed.
 The published candidate instructions below describe the earlier WDA release;
 the DDI change has not been published to that feed.
 

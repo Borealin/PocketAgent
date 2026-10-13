@@ -19,7 +19,7 @@ final class TurnStatus {
 
 @MainActor
 extension Model {
-    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, goal: String, images: [AgentImageAttachment],
+    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, clipboardAllowed: Bool, goal: String, images: [AgentImageAttachment],
                            task: BGContinuedProcessingTask, progress: Progress, status: TurnStatus,
                            conversationID: UUID, promptID: UUID,
                            priorMessages: [AgentTranscriptMessage],
@@ -58,8 +58,8 @@ extension Model {
                     RulesContext.load(global: WorkspaceStore.globalDirectory, workspace: workspace?.root)
                 }.value
                 let capabilities = ToolCapabilities(workspace: workspace != nil, scripts: ScriptRuntime.shared.isBundled,
-                                                    skills: !rules.skills.isEmpty)
-                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend)
+                                                    skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed)
+                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed)
                 let turn = TurnTools(phone: phone, workspace: workspace, capabilities: capabilities,
                     onScriptStage: { stage in
                         status.value.applyScript(stage); publish("script_" + stage.rawValue); onStatus?(status.value)
@@ -88,8 +88,7 @@ extension Model {
                 let events = await runtime.start(AgentRunRequest(conversationID: conversationID, promptID: promptID,
                     prompt: goal, promptImages: images, permissionMode: .fullAccess,
                     systemPrompt: AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
-                        capabilities: capabilities, workspaceName: workspace?.name, rules: rules)
-                        + (backend == .ddi ? "\n本轮使用 DDI。type_text 会通过设备开发服务替换系统剪贴板并模拟粘贴，不会切回 PocketAgent。系统粘贴许可或授权提示可能需要用户在手机上处理。输入请求已发出不代表文本已进入；核对返回的页面和文字，不得盲目重放。" : ""),
+                        capabilities: capabilities, workspaceName: workspace?.name, rules: rules),
                     priorMessages: priorMessages))
                 await withTaskCancellationHandler {
                     for await event in events {
@@ -231,6 +230,8 @@ final class PhoneExecutor {
     var base: String?
     let control: any PhoneControl
     let backend: PhoneBackendKind
+    let clipboardAllowed: Bool
+    var inputCapabilities: ToolCapabilities { ToolCapabilities(phoneBackend: backend, clipboardAllowed: clipboardAllowed) }
     var requests = 0
     var calls = 0
     var snapshotID = 0
@@ -244,8 +245,9 @@ final class PhoneExecutor {
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
     private var compactedTaskTitle: String?
-    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind) {
+    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
+        self.clipboardAllowed = clipboardAllowed
         control = backend == .ddi ? DDIControl(model) : WDAControl(model)
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first { $0.isKeyWindow }
@@ -282,7 +284,7 @@ final class PhoneExecutor {
     /// limit) no further effect is issued, including one that was waiting
     /// for the action lock or for the runner to start.
     func executeScript(_ call: AgentToolCall, lease: ScriptLease) async -> (content: String, isError: Bool, denied: Bool) {
-        if case .deny(let reason) = ToolCatalog.scriptDecision(for: call.name) { return (reason, true, true) }
+        if case .deny(let reason) = ToolCatalog.scriptDecision(for: call.name, capabilities: inputCapabilities) { return (reason, true, true) }
         guard lease.isActive else { return ("脚本的手机授权已撤销，动作未执行。", true, true) }
         await acquire()
         defer { release() }
@@ -463,12 +465,12 @@ final class PhoneExecutor {
         try proceed()
         try await requireApp(appID, base: base, proceed: proceed)
         try proceed()
-        guard current.nodes.contains(where: {
+        guard let refreshed = current.nodes.first(where: {
             $0["type"] == old["type"] && $0["name"] == old["name"] && $0["label"] == old["label"] &&
             $0["enabled"] == "true" && PhoneTree.rect($0) == PhoneTree.rect(old) &&
             $0["ddi_identity"] == old["ddi_identity"]
         }) else { throw PhoneObservationIssue.nodeChanged }
-        return old
+        return refreshed
     }
 
     private static func appRecords(_ apps: [InstalledApp]) -> [[String: Any]] {
@@ -494,6 +496,8 @@ final class PhoneExecutor {
         var openedBundle: String?
         var expectedInput: (identity: String, text: String)?
         var submittedInput = false
+        var submittedKeys = false
+        var keySequence: KeyboardSequence?
         func proceed() throws {
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let lease, !lease.isActive { throw ActionStopped(issued: issued, reason: "脚本的手机授权已撤销。") }
@@ -510,6 +514,18 @@ final class PhoneExecutor {
         let args = call.arguments.objectValue ?? [:], name = call.name
         do {
             try proceed()
+            if case .deny(let reason) = ToolCatalog.decision(for: name, capabilities: inputCapabilities) {
+                return try Self.result(["ok": false, "code": "capability_denied", "message": reason,
+                    "action_issued": false, "action_outcome": "not_started", "replay_allowed": false], error: true)
+            }
+            if name == "press_keys" {
+                do { keySequence = try KeyboardSequence(arguments: args, clipboardAllowed: clipboardAllowed) }
+                catch let issue as KeyboardSequence.Issue {
+                    return try Self.result(["ok": false, "code": issue == .clipboardDenied ? "clipboard_denied" : "invalid_keys",
+                        "message": issue.localizedDescription, "action_issued": false,
+                        "action_outcome": "not_started", "replay_allowed": false], error: true)
+                }
+            }
             guard calls < 100 else { throw failure("本轮手机工具已达到 100 次上限。") }
             calls += 1
             let base = try await ready()
@@ -617,6 +633,25 @@ final class PhoneExecutor {
                 try proceed()
                 guard let key = args["key"]?.stringValue, ["return", "delete"].contains(key) else { throw failure("无效键盘按键。") }
                 try await effect { try await control.key(key) }
+            case "press_keys":
+                let a = try await node(args, base: base, proceed: proceed)
+                guard ["XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField"].contains(a["type"] ?? ""),
+                      let sequence = keySequence else { throw failure("请选择实际输入框并提供硬件按键序列。") }
+                guard ["true", "false"].contains(a["focused"] ?? "") else {
+                    throw failure("输入框未提供可核实的焦点状态，未点击或发送按键；请先观察并明确聚焦目标。")
+                }
+                let input = try await inputElement(a, base: base, proceed: proceed)
+                // Retapping a focused field can move its caret or disturb IME composition.
+                if a["focused"] == "false" {
+                    try await effect { try await control.click(input) }
+                    let focused = try await readTree(base)
+                    guard focused.nodes.contains(where: { $0["ddi_identity"] == a["ddi_identity"] && $0["focused"] == "true" }) else {
+                        throw failure("聚焦请求已发出，但目标焦点未确认；未发送按键，请读取实际页面。")
+                    }
+                }
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect { try await control.pressKeys(sequence) }
+                submittedKeys = true
             case "dismiss_keyboard":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
@@ -635,6 +670,16 @@ final class PhoneExecutor {
             let state = try await observe(proceed: proceed)
             try proceed()
             var result: [String: Any] = ["ok": true, "screen": state]
+            if submittedKeys {
+                result["input_method"] = "physical_keys"
+                result["input_verified"] = false
+                result["composition_state"] = "unknown"
+                result["keyboard_layout"] = "unknown"
+                result["action_outcome"] = "submitted"
+                result["replay_allowed"] = false
+                result["clipboard_shortcut_requested"] = keySequence?.clipboardShortcut ?? false
+                result["message"] = "按键请求已发出；字段值可能仍是输入法组合串。请核对新屏幕中的实际文字和候选，不推断布局、已提交状态或候选顺序。"
+            }
             if let expectedInput,
                !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
                    DDINodeMapping.confirmsInput($0, text: expectedInput.text) }) {

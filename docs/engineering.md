@@ -609,12 +609,18 @@ access. This is input-method feasibility, not an integrated on-phone input mode.
 The IME's marked Latin value differs from committed text; a future implementation
 must verify layout, candidate and final content. Candidate paging, rare/polyphonic
 characters, mixed text, emoji and interrupted composition remain unverified.
-The next-stage input-contract proposal keeps type_text as a final-text request
-and adds a separate press_keys primitive for model-controlled IME interaction.
-User settings would constrain clipboard access, enforced before effects for
-model and script callers, while the selected backend remains frozen. This is a
-design recommendation following an Opus consultation, not implemented behavior;
-details and recovery boundaries are in devicehub-control.md.
+The user approved the additive input contract on 2026-10-13. type_text keeps its
+final-text schema; press_keys supplies 1–32 physical key positions and modifiers
+on a freshly observed input field, using the owned DDI keyboard and fixed timing.
+It returns the actual screen with input_verified=false and unknown composition/
+layout, rather than claiming a committed Unicode string. Already-focused fields
+are not retapped. WDA does not expose this new DDI primitive.
+The device-local clipboard policy defaults to allowed for compatibility, is frozen
+at job enqueue, filters model tools and is enforced in the shared executor for
+scripts and model calls before effects. Disallowed copy/cut/paste chords are also
+checked at native input validation. No route switches or replay follow uncertain
+effects. This extension is under renewed acceptance; design and recovery limits
+are in devicehub-control.md.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current

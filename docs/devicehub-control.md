@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: native DDI implementation, original-app update and selected-device acceptance completed, including cross-app Unicode input through the production chat path. User selected DDI as default with a selectable WDA backend on 2026-10-12. Main baseline: `f8f82a4` (14 phone tools).
+> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation is under renewed acceptance. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -322,32 +322,39 @@ paging, polyphonic/rare characters, mixed language, punctuation, emoji and
 recovery after partial composition remain unverified. No keyboard installation,
 dictionary training or text-replacement setting was needed for the bench check.
 
-### Proposed model input contract (not implemented)
+### Model input contract (implementation under acceptance)
 
 The user asked to reconsider exposing both paths to the model because IME
 composition differs from WDA's final-text request. After two design-consultation
 rounds with Opus 5.5, the recommendation is to retain type_text's final-text
-contract and add a bounded press_keys primitive. This is a proposal, not an
-approved implementation or an additional delivered tool. The consultation used
+contract and add a bounded press_keys primitive. The user approved this design
+and exact-device validation on 2026-10-13. The implementation is not delivered
+until the renewed core/native/build/IPA/device gates complete. The consultation used
 generic concepts only; the repository contracts were checked locally afterward.
 
 - type_text keeps its existing parameters and final-text intent for old scripts.
   WDA uses the existing value request; the current DDI implementation uses paste,
   whose clipboard replacement and permission effects must be disclosed.
-- press_keys represents physical keyboard usages/chords, not final Unicode text.
-  It returns a fresh screen and observed composition/candidates when available;
-  unavailable state must remain explicitly unknown. The model can choose keys,
+- press_keys(node, keys, modifiers, snapshot_id) represents 1–32 physical US-key
+  positions/chords, not final Unicode text. Modifiers apply separately to each
+  key and are released after each chord. Only DDI exposes this new primitive;
+  WDA retains its existing tools. It returns a fresh screen containing whatever
+  candidate nodes are visible; composition and layout remain explicitly unknown,
+  and the result does not claim final-text confirmation. The model can choose keys,
   inspect candidates and select an observed candidate with the ordinary UI tools.
   It must not assume that a number or Space has the same meaning in every IME.
-- User settings define a hard clipboard allow/deny policy, frozen with the job,
+- User settings define a device-local hard clipboard allow/deny policy, frozen with the job,
   rather than freezing one input method for the whole turn. The model can choose
   available operations per action within that policy. The user's control backend
   remains fixed. Enforce the policy in the shared executor before clipboard or
   input effects for both model and script callers; tool filtering alone is not
-  enforcement.
+  enforcement. Existing installations default to allowed to preserve behavior.
+  Command/Control copy, cut and paste chords are refused before focus or any
+  input when denied; native validation also checks the captured keyboard policy.
 - On DDI with clipboard denied, the current type_text paste route must be hidden
-  and refused before effects; a keyboard primitive can remain available once
-  integrated and accepted. WDA's existing final-text route does not use clipboard.
+  and refused before effects; the keyboard primitive remains available. WDA's
+  existing final-text route does not use clipboard. A focused field is not
+  retapped between sequences, preserving its observed caret/composition state.
 - No automatic route change after clear, partial typing or an uncertain result.
   Recovery needs a fresh, verified current value, a known insertion position and
   an ended composition before planning any replacement or continuation.

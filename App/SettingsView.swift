@@ -157,6 +157,13 @@ struct PhoneSetupView: View {
                 Link("打开安装说明", destination: URL(string: "https://github.com/Borealin/PocketAgent#installation")!)
             } header: { Text("首次配置") }
             Section {
+                Toggle("允许使用剪贴板", isOn: $device.clipboardAllowed)
+                    .disabled(settingsBusy).accessibilityIdentifier("allowPhoneClipboard")
+                    .onChange(of: device.clipboardAllowed) { device.saveClipboardPolicy() }
+                Text("允许时，模型可选择粘贴或逐键输入。关闭后，DDI 的文本粘贴和复制、剪切、粘贴组合键被拒绝。逐键输入使用实际键盘布局，中文需观察候选选字；WDA 的原有文本接口不使用剪贴板。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("文字输入") }
+            Section {
                 Label("连接 LocalDevVPN", systemImage: "2.circle")
                 Text("打开 LocalDevVPN，点 Connect 并允许添加 VPN。运行手机操作期间保持连接，手机保持解锁。")
                     .font(.caption).foregroundStyle(.secondary)

@@ -35,6 +35,8 @@ enum DeviceSettings {
     static var phoneBackend: PhoneBackendKind {
         UserDefaults.standard.string(forKey: "phoneControlBackend").flatMap(PhoneBackendKind.init(rawValue:)) ?? .defaultBackend
     }
+    /// Preserve existing text behavior on upgrade; this policy is device-local.
+    static var clipboardAllowed: Bool { UserDefaults.standard.object(forKey: "phoneClipboardAllowed") as? Bool ?? true }
     /// Off by default; screenshots may contain personal screen content.
     static var saveScreenshots: Bool { UserDefaults.standard.bool(forKey: screenshotsKey) }
     /// Off by default: no run log or native idevice log file is written.
@@ -135,6 +137,7 @@ enum DeviceSettings {
 @MainActor
 final class DeviceSettingsModel: ObservableObject {
     @Published var backend = DeviceSettings.phoneBackend
+    @Published var clipboardAllowed = DeviceSettings.clipboardAllowed
     @Published var runner = UserDefaults.standard.string(forKey: "runnerBundleID") ?? ""
     @Published var tunnel = UserDefaults.standard.string(forKey: "tunnelEndpoint") ?? ""
     @Published var saveScreenshots = DeviceSettings.saveScreenshots
@@ -161,6 +164,17 @@ final class DeviceSettingsModel: ObservableObject {
         generation += 1
         connectionVerified = false
         status = backend == .ddi ? "已选择 DDI，无需安装 Automation。" : "已选择 WDA，请安装匹配的 Automation。"
+    }
+
+    func saveClipboardPolicy() {
+        guard engine.beginDeviceConfigurationChange() else {
+            clipboardAllowed = DeviceSettings.clipboardAllowed
+            status = "请等待当前手机任务结束后再修改剪贴板许可。"
+            return
+        }
+        defer { engine.endDeviceConfigurationChange() }
+        UserDefaults.standard.set(clipboardAllowed, forKey: "phoneClipboardAllowed")
+        status = clipboardAllowed ? "后续回合允许模型使用剪贴板输入。" : "后续回合禁止剪贴板；DDI 使用逐键输入。"
     }
 
     func save() {

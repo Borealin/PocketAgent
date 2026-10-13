@@ -14,6 +14,8 @@ nonisolated struct ToolCapabilities: Hashable, Sendable {
     var scripts = false
     /// At least one skill is advertised.
     var skills = false
+    var phoneBackend = PhoneBackendKind.ddi
+    var clipboardAllowed = true
 }
 
 nonisolated enum ToolDecision: Equatable, Sendable {
@@ -68,6 +70,12 @@ nonisolated enum ToolCatalog {
         phone("find_apps", "Search this iPhone's launchable user and system apps by localized display name or bundle ID. Returns device-reported names and IDs, including ambiguous matches; hidden system hosts and extensions are excluded. query may be empty to list apps (bounded). No app is opened.", ["query": string]),
         phone("open_app_by_name", "Open an installed app by its exact device-reported name. Duplicate names return candidates; missing names recommend observing Home or the App Library instead of guessing a bundle ID. Returns the actual screen after opening.", ["name": string]),
         phone("swipe_from_to", "Swipe between logical screen points on the latest observed screen. Use a short range inside a nested list to scroll it, or swipe right starting near the left screen edge for iOS back navigation. Returns the actual screen; verify whether navigation occurred.", ["from_x": number, "from_y": number, "to_x": number, "to_y": number, "seconds": number, "snapshot_id": integer]),
+        phone("press_keys", "DDI: focus an observed input field and press 1–32 physical keyboard keys. modifiers applies to each key as a chord; all keys are released. These are keyboard positions, not Unicode text. Inspect the fresh screen and visible IME candidates; layout, composition and final text are not inferred. Clipboard shortcuts require permission.", [
+            "node": integer, "snapshot_id": integer,
+            "keys": .object(["type": .string("array"), "items": options(KeyboardSequence.keyUsages.keys.sorted()),
+                              "minItems": .number(1), "maxItems": .number(Double(KeyboardSequence.maximumKeys))]),
+            "modifiers": .object(["type": .string("array"), "items": options(KeyboardSequence.modifierUsages.keys.sorted()),
+                                   "maxItems": .number(4), "uniqueItems": .bool(true)])]),
     ]
 
     static let fileTools: [ToolSpec] = [
@@ -116,6 +124,10 @@ nonisolated enum ToolCatalog {
     /// per-step confirmation; tools whose capability is absent are refused.
     static func decision(for name: String, capabilities: ToolCapabilities) -> ToolDecision {
         guard let spec = spec(name) else { return .deny("未知工具 \(name)") }
+        if name == "press_keys", capabilities.phoneBackend != .ddi { return .deny("press_keys 当前只支持 DDI。") }
+        if name == "type_text", capabilities.phoneBackend == .ddi, !capabilities.clipboardAllowed {
+            return .deny("本轮禁止使用剪贴板，DDI type_text 粘贴路径不可用；请使用 press_keys 并观察输入法。")
+        }
         switch spec.kind {
         case .phone, .network: return .allow
         case .file: return capabilities.workspace ? .allow : .deny("本会话未选择项目目录。")
@@ -128,14 +140,21 @@ nonisolated enum ToolCatalog {
 
     /// Requests from a running script's phone helper: only phone tools. A
     /// script cannot start another script, read rules or reach the model.
-    static func scriptDecision(for name: String) -> ToolDecision {
-        kind(of: name) == .phone ? .allow : .deny("脚本只能调用手机工具，不能调用 \(name)。")
+    static func scriptDecision(for name: String, capabilities: ToolCapabilities = ToolCapabilities()) -> ToolDecision {
+        guard kind(of: name) == .phone else { return .deny("脚本只能调用手机工具，不能调用 \(name)。") }
+        return decision(for: name, capabilities: capabilities)
     }
 
     /// Capability section of the system prompt, generated from the same list.
     static func prompt(_ capabilities: ToolCapabilities, workspaceName: String?) -> String {
         var lines = ["## 本轮可用能力"]
         lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
+        if capabilities.phoneBackend == .ddi {
+            lines.append(capabilities.clipboardAllowed
+                ? "- 本轮 DDI 允许剪贴板：type_text 请求最终文字，会替换系统剪贴板并粘贴，目标可能要求许可。"
+                : "- 本轮 DDI 禁止剪贴板：type_text 不可用；复制、剪切、粘贴组合键也被执行层拒绝。")
+            lines.append("- press_keys 按硬件键位发送按键，不能直接输入汉字或 Emoji。中文先输入拼音，读取真实候选后选字；不同键盘的选字键可能不同。返回的字段值可能仍是组合串，不能当作已提交汉字。")
+        } else { lines.append("- 本轮 WDA 的 type_text 使用现有最终文本接口；press_keys 当前不可用。") }
         lines.append("- 网络：http_request 访问公网 HTTPS API（任意 method、headers、body/json；不支持明文 http）；不能访问本机或局域网地址。网页阅读也可以用它取原文。")
         if capabilities.workspace, let workspaceName {
             lines.append("- 项目目录「\(workspaceName)」：list_files、read_file、search_files、write_file、patch_file，路径相对项目根目录。普通文件读写无需征求确认。")
@@ -177,7 +196,10 @@ nonisolated enum AgentInstructions {
         swipe_from_to 可在实际列表区域内滑动，避免一直滑整个屏幕；坐标使用最新 screen 的逻辑点。
         App 中搜索时先找搜索框或搜索入口；入口可能是按钮、当前搜索词或顶部搜索栏，先点击再读屏确认真实输入框。
         搜索图标、占位词或当前查询所在的容器也可能是入口；没有输入框时先进入，不能对非输入节点反复 type_text。
-        用 type_text 输入到真实输入框，再 press_key return 提交；观察查询词和结果页面，不能停在建议/历史页面就报告完成。
+        可用时用 type_text 请求最终文字；需要操作输入法时用 press_keys 发送键位、读屏并选择真实候选。
+        press_keys 的 modifiers 对每个 key 生效（例如 keys=["a"], modifiers=["command"] 全选）。
+        不推断当前布局、组合状态或候选顺序，不把“Next keyboard”的值当成当前输入法。
+        逐键后可能仍在拼音组合中，先核对实际候选/已提交文字，再 press_key return 提交搜索；观察查询词和结果页面。
         输入文本 clear=true 替换原文。iOS 返回优先点击可见返回按钮；没有按钮时可用 swipe_from_to
         从屏幕左边缘向右滑，之后核对是否回到上一页。退出 App 可 press_home；回到目标 App 按已验证名称打开。
         搜索无结果时根据页面调整关键词；打不开入口时先返回上一页/首页再重新观察，不能盲目重复相同节点。

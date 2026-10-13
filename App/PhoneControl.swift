@@ -20,6 +20,7 @@ protocol PhoneControl: AnyObject {
     func prepareText(_ text: String) async throws
     func type(_ text: String, into input: PhoneInput) async throws
     func key(_ name: String) async throws
+    func pressKeys(_ sequence: KeyboardSequence) async throws
     func dismissKeyboard() async throws
     func home() async throws
 }
@@ -76,6 +77,7 @@ final class WDAControl: PhoneControl {
     func prepareText(_ text: String) async throws {}
     func type(_ text: String, into input: PhoneInput) async throws { try await effect(try element(input) + "/value", ["text": text]) }
     func key(_ name: String) async throws { try await effect("\(session)/wda/keys", ["value": [name == "return" ? "\n" : "\u{8}"]]) }
+    func pressKeys(_ sequence: KeyboardSequence) async throws { throw failure("press_keys 当前只支持 DDI。") }
     func dismissKeyboard() async throws { try await effect("\(session)/wda/keyboard/dismiss", [:]) }
     func home() async throws { try await effect("/wda/homescreen", [:]) }
 }
@@ -104,7 +106,7 @@ final class DDIControl: PhoneControl {
         }
         defer { watcher.cancel() }
         var requestObject = object
-        if ["tap", "hold", "drag", "clear", "paste", "key"].contains(object["op"] as? String ?? "") {
+        if ["tap", "hold", "drag", "clear", "paste", "key", "keys"].contains(object["op"] as? String ?? "") {
             if let observedApp { requestObject["expected_app"] = observedApp }
             if let frame = observedFrame { requestObject["expected_frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height] }
         }
@@ -211,6 +213,10 @@ final class DDIControl: PhoneControl {
         preparedText = nil
     }
     func key(_ name: String) async throws { _ = try await call(["op": "key", "key": name]) }
+    func pressKeys(_ sequence: KeyboardSequence) async throws {
+        _ = try await call(["op": "keys", "keys": sequence.keys, "modifiers": sequence.modifiers,
+                           "clipboard_allowed": sequence.clipboardAllowed])
+    }
     func dismissKeyboard() async throws { _ = try await call(["op": "key", "key": "escape"]) }
     func home() async throws { _ = try await call(["op": "home"]) }
 }
