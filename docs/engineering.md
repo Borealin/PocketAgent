@@ -609,6 +609,12 @@ access. This is input-method feasibility, not an integrated on-phone input mode.
 The IME's marked Latin value differs from committed text; a future implementation
 must verify layout, candidate and final content. Candidate paging, rare/polyphonic
 characters, mixed text, emoji and interrupted composition remain unverified.
+The next-stage input-contract proposal keeps type_text as a final-text request
+and adds a separate press_keys primitive for model-controlled IME interaction.
+User settings would constrain clipboard access, enforced before effects for
+model and script callers, while the selected backend remains frozen. This is a
+design recommendation following an Opus consultation, not implemented behavior;
+details and recovery boundaries are in devicehub-control.md.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current

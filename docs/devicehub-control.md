@@ -321,3 +321,40 @@ conversion to Pinyin or blind Space would not preserve arbitrary text. Candidate
 paging, polyphonic/rare characters, mixed language, punctuation, emoji and
 recovery after partial composition remain unverified. No keyboard installation,
 dictionary training or text-replacement setting was needed for the bench check.
+
+### Proposed model input contract (not implemented)
+
+The user asked to reconsider exposing both paths to the model because IME
+composition differs from WDA's final-text request. After two design-consultation
+rounds with Opus 5.5, the recommendation is to retain type_text's final-text
+contract and add a bounded press_keys primitive. This is a proposal, not an
+approved implementation or an additional delivered tool. The consultation used
+generic concepts only; the repository contracts were checked locally afterward.
+
+- type_text keeps its existing parameters and final-text intent for old scripts.
+  WDA uses the existing value request; the current DDI implementation uses paste,
+  whose clipboard replacement and permission effects must be disclosed.
+- press_keys represents physical keyboard usages/chords, not final Unicode text.
+  It returns a fresh screen and observed composition/candidates when available;
+  unavailable state must remain explicitly unknown. The model can choose keys,
+  inspect candidates and select an observed candidate with the ordinary UI tools.
+  It must not assume that a number or Space has the same meaning in every IME.
+- User settings define a hard clipboard allow/deny policy, frozen with the job,
+  rather than freezing one input method for the whole turn. The model can choose
+  available operations per action within that policy. The user's control backend
+  remains fixed. Enforce the policy in the shared executor before clipboard or
+  input effects for both model and script callers; tool filtering alone is not
+  enforcement.
+- On DDI with clipboard denied, the current type_text paste route must be hidden
+  and refused before effects; a keyboard primitive can remain available once
+  integrated and accepted. WDA's existing final-text route does not use clipboard.
+- No automatic route change after clear, partial typing or an uncertain result.
+  Recovery needs a fresh, verified current value, a known insertion position and
+  an ended composition before planning any replacement or continuation.
+
+An optional type_text method parameter is a later extension if multiple accepted
+final-text routes become available on the same backend. It must preserve old
+calls and expose only actual capabilities. Do not add an automatic keyboard/IME
+final-text route until candidate selection and interrupted composition are
+verified. A separate paste_text tool would currently duplicate the high-level
+intent; revisit it only if distinct paste planning needs justify that surface.
