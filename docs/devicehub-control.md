@@ -368,9 +368,63 @@ remains a failure. Input cleanup and socket release still run, and no action is
 replayed. Selected-device acceptance includes both normal ACK and the explicit
 connection-closed-before-ack outcome.
 
-An optional type_text method parameter is a later extension if multiple accepted
-final-text routes become available on the same backend. It must preserve old
-calls and expose only actual capabilities. Do not add an automatic keyboard/IME
-final-text route until candidate selection and interrupted composition are
-verified. A separate paste_text tool would currently duplicate the high-level
-intent; revisit it only if distinct paste planning needs justify that surface.
+### AX final-text route (feasibility; not integrated)
+
+The user requested adoption research from
+[调研通讯协议与 XCTest 能力差距](codex://threads/01a130f2-4687-7a62-89be-6747168b9a43).
+Its retained research commit b11b7e6 describes request8/attribute53 with
+parameters {value: NSString}, using a fresh AXPTranslationObject on the existing
+AX/DTX service. This is whole-field replacement, not HID typing or insertion at
+the caret. A private iOS/Rust prototype reuses PocketAgent's RP and DDI session;
+production App/Native sources and tool routing remain unchanged. Research scope
+is the selected iPhone 12 mini on iOS 27.0, with USB attached for preparation/readback;
+supplementary Mac/AX controls on the same phone isolate callback differences
+and the paste-refusing fixture. This is not a model-turn integration gate,
+disconnected startup proof or arbitrary-app acceptance.
+
+Confirmed compatibility problems constrain adoption:
+
+- In the tested UITextField subclass, AX replacement fires editingChanged while
+  shouldChangeCharactersIn is skipped. A physical-key control reaches
+  that delegate in the same fixture. Whole-field AX replacement therefore does
+  not establish keyboard or paste validation parity. A fixture explicitly
+  refusing paste still accepts AX replacement; that is a scoped control, not an
+  all-app guarantee.
+- UITextView's actual text changes without textViewDidChange. The discrepancy
+  also occurs after confirming focus. The downstream setter/callback mechanism
+  remains unisolated; TextView must not be enabled by default on this evidence.
+- Clearing an ordinary field leaves actual text empty, while AX value and text
+  length report its placeholder and placeholder length. Neither property can
+  confirm empty input in this case. A nil/error0 setter reply is only submission
+  evidence. Do not synthesize empty confirmation or emulate append by combining
+  a read value with new text.
+- A later connection initialization times out before any input is issued. The
+  precise setup stage and root cause are not isolated. This research demonstrates
+  a scoped input path, not reliable repeated startup or production acceptance.
+
+The integration proposal is to retain type_text and press_keys, and add an
+optional explicit DDI method (ax or paste) to type_text. Preserve old calls'
+paste default and WDA behavior. The initial AX scope would be nonempty,
+clear=true replacement of observed ordinary TextField/SearchField nodes;
+secure fields, TextView, caret insertion, composition, SwiftUI/WebView and
+business validation coverage require separate decisions or verification.
+When the user authorizes whole-field replacement, clipboard-denied turns could
+explicitly select AX without granting clipboard access; paste and clipboard chords retain their current hard policy. An
+uncertain AX effect must never trigger automatic paste or key replay.
+
+Native/ddi/archive.rs and ax.rs would add the narrowly encoded setter request;
+mod.rs would resolve fresh identity, foreground, frame and visible hit before
+effects. PhoneControl, PhoneAgent and ToolCatalog would carry the selected
+method, enforce eligibility/policy before effects and identify the returned
+verification source. Reuse the serial queue, frozen backend/policy, cancellation
+and exact post-observation checks. The model must inspect the target App's
+response rather than infer business acceptance from an AX value alone.
+Only PocketAgent iOS/native is implicated; Android, glasses firmware, schema
+and rpc are outside this Apple DDI contract. Production implementation, owner,
+effort, version and delivery date are undecided. Existing core/native/iOS/IPA
+and exact-device gates apply when integration is approved.
+
+Rejected approaches: automatically replacing the old route despite callback
+differences; treating nil ACK or placeholder text as effect confirmation;
+introducing a duplicate paste_text tool. No automatic keyboard/IME final-text
+route is added before candidate and interrupted-composition coverage exists.

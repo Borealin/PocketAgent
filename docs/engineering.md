@@ -600,9 +600,11 @@ in the independent receiver and returned to the existing assistant process.
 The original App's first host-prepared prompt paste requested iOS paste permission;
 the bench setup allowed that known prompt before starting the production turn.
 This is global paste-based input, not proof of acceptance by every custom control.
-The inspected HID API carries keyboard usages, and the inspected AX dialect reads
-attributes; no independent Unicode/set-value injection path has been established
-for controls that reject paste. A later Mac-side UniversalHID bench check confirmed
+The HID API carries keyboard usages and the production AX dialect remains read-only.
+A separate on-phone feasibility prototype now uses AX request8/attribute53 for
+whole-field Unicode replacement; it has not changed the production tools. Its
+callback and empty-value compatibility limits are recorded in
+[devicehub-control.md](devicehub-control.md#ax-final-text-route-feasibility-not-integrated). A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard
 access. This is input-method feasibility, not an integrated on-phone input mode.
