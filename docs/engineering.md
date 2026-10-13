@@ -622,6 +622,15 @@ checked at native input validation. No route switches or replay follow uncertain
 effects. This extension is under renewed acceptance; design and recovery limits
 are in devicehub-control.md.
 
+The first production-chat keyboard run opened the target successfully but failed
+at mainKeyboard creation with a transport error. Independent UIKit callbacks
+confirmed no text was inserted; subsequent input in that turn was refused as
+uncertain. The candidate now opens a fresh HID channel before its first owned
+keyboard creation, after any touch is released, without retrying an effect.
+This addresses reuse of the setup channel after model inference; idle transport
+versus prior no-reply touch traffic is not yet isolated. Regression acceptance
+is pending on the selected phone.
+
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
 candidates can be signed and installed. Private logs, pairing, signing and

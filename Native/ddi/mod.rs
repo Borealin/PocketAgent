@@ -58,6 +58,7 @@ pub struct PocketDDISession {
     ax: Option<ax::Ax>,
     adapter: NativeAdapter,
     ax_port: u16,
+    hid_port: u16,
     pasteboard_port: Option<u16>,
     hit_point: Option<(f64, f64)>,
     hid: UniversalHidServiceClient<Box<dyn ReadWrite>>,
@@ -295,6 +296,8 @@ impl PocketDDISession {
             ax: Some(ax),
             adapter: a.clone(),
             ax_port: port,
+            hid_port: h.services.get("com.apple.coredevice.hid.universalhidservice")
+                .ok_or_else(|| error("DDI HID service missing"))?.port,
             pasteboard_port: h
                 .services
                 .get("com.apple.coredevice.pasteboardservice")
@@ -496,6 +499,17 @@ impl PocketDDISession {
     async fn key(&mut self, codes: &[u16], expected: Option<&str>) -> Result<(), IdeviceError> {
         self.proceed()?;
         if self.keyboard.is_none() {
+            // Model inference can leave the setup connection idle before the
+            // first key. Open a fresh channel before creating an owned service;
+            // this is preparation, never a retry of a keyboard effect.
+            if self.touch.is_some() {
+                return Err(error("DDI keyboard preparation while contact is held"));
+            }
+            let stream = bounded(self.adapter.connect(self.hid_port)).await?;
+            let mut client = bounded(RemoteXpcClient::new(Box::new(stream) as Box<dyn ReadWrite>)).await?;
+            bounded(client.do_handshake()).await?;
+            self.hid = UniversalHidServiceClient::new(client);
+            self.proceed()?;
             self.keyboard = Some(
                 self.hid
                     .create_main_keyboard()
