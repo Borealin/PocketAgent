@@ -16,6 +16,8 @@ pub struct Ax {
     next: u32,
     bytes: usize,
     subscribed: bool,
+    closing: Option<u32>,
+    close_header_ended: bool,
 }
 struct Incoming {
     id: u32,
@@ -99,6 +101,8 @@ impl Ax {
             next: 1,
             bytes: 0,
             subscribed: false,
+            closing: None,
+            close_header_ended: false,
         };
         let setup = tokio::time::timeout(Duration::from_secs(6), async {
             let id = ax.invoke("deviceAPIVersion", vec![]).await?;
@@ -182,10 +186,30 @@ impl Ax {
             }
             let start = payload.len();
             payload.resize(start + len, 0);
-            self.stream
-                .read_exact(&mut payload[start..])
-                .await
-                .map_err(|_| "Short AX DTX payload")?;
+            let mut received = 0;
+            while received < len {
+                match self.stream.read(&mut payload[start + received..]).await {
+                    Ok(0) => {
+                        if self.close_reply_ended(&h, len, received) {
+                            return Err("AX unsubscribe connection closed before ACK body".into());
+                        }
+                        tracing::error!(part, count, expected = len, received, id, conv,
+                            "AX fragment ended before its declared length");
+                        return Err("Short AX DTX payload".into());
+                    }
+                    Ok(n) => received += n,
+                    Err(e) => {
+                        if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::UnexpectedEof)
+                            && self.close_reply_ended(&h, len, received)
+                        {
+                            return Err("AX unsubscribe connection closed before ACK body".into());
+                        }
+                        tracing::error!(part, count, expected = len, received, id, conv,
+                            kind = ?e.kind(), "AX fragment read failed");
+                        return Err("Short AX DTX payload".into());
+                    }
+                }
+            }
             if part == count - 1 {
                 break h;
             }
@@ -243,6 +267,21 @@ impl Ax {
             data,
             args,
         })
+    }
+    fn close_reply_ended(&mut self, header: &[u8; 32], len: usize, received: usize) -> bool {
+        // The AX daemon can close after emitting only the empty unsubscribe
+        // reply header (also handled explicitly by ipb). This is a connection
+        // closure, never an acknowledged unsubscribe or a valid semantic reply.
+        let matches = self.closing.is_some_and(|id| {
+            u32_at(header, 16) == Ok(id) && u32_at(header, 20) == Ok(1)
+                && u32_at(header, 28) == Ok(0)
+                && u32_at(header, 24) == Ok(0)
+                && u16::from_le_bytes([header[8], header[9]]) == 0
+                && u16::from_le_bytes([header[10], header[11]]) == 1
+                && len == 16 && received == 0
+        });
+        self.close_header_ended = matches;
+        matches
     }
     async fn ack(&mut self, id: u32) -> Result<Option<Value>, String> {
         for _ in 0..256 {
@@ -308,7 +347,10 @@ impl Ax {
         };
         tokio::time::timeout(Duration::from_secs(4), operation)
             .await
-            .map_err(|_| "AX semantic request timed out; session must close".to_string())?
+            .map_err(|_| {
+                tracing::error!(kind, "AX semantic request timed out");
+                "AX semantic request timed out; session must close".to_string()
+            })?
     }
     pub async fn hit(&mut self, x: f64, y: f64) -> Result<Value, String> {
         self.read(6, format!("{{{x}, {y}}}").into(), None).await
@@ -385,9 +427,9 @@ impl Ax {
         }
         Ok((pid, nodes))
     }
-    pub async fn close(&mut self) -> Result<(), String> {
+    pub async fn close(&mut self) -> Result<&'static str, String> {
         if !self.subscribed {
-            return Ok(());
+            return Ok("not_subscribed");
         }
         self.subscribed = false;
         let id = self
@@ -396,8 +438,18 @@ impl Ax {
                 vec![AuxValue::archived_value(false)],
             )
             .await?;
-        self.ack(id).await?;
-        Ok(())
+        self.closing = Some(id);
+        self.close_header_ended = false;
+        let result = self.ack(id).await;
+        self.closing = None;
+        match result {
+            Ok(_) => Ok("acknowledged"),
+            Err(_) if self.close_header_ended => {
+                tracing::info!("AX unsubscribe connection closed before ACK body");
+                Ok("connection_closed_before_ack")
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 pub fn identity(v: &Value) -> Result<(u64, u64), String> {
@@ -416,7 +468,7 @@ pub fn identity(v: &Value) -> Result<(u64, u64), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    async fn unsubscribe_after_error(error_id: u32) -> Result<(), String> {
+    async fn unsubscribe_after_error(error_id: u32) -> Result<&'static str, String> {
         let (mut server, reader) = tokio::io::duplex(4096);
         let peer = tokio::spawn(async move {
             let mut header = [0u8; 32];
@@ -432,7 +484,8 @@ mod tests {
                 PayloadHeader::default(), None, None).serialize();
             server.write_all(&ack).await.unwrap();
         });
-        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true };
+        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
+            closing: None, close_header_ended: false };
         let result = ax.close().await;
         peer.await.unwrap();
         result
@@ -444,6 +497,46 @@ mod tests {
     #[tokio::test]
     async fn unsubscribe_ack_keeps_its_own_error_unconfirmed() {
         assert_eq!(unsubscribe_after_error(20).await.unwrap_err(), "AX DTX error response");
+    }
+    async fn truncated_unsubscribe(reply_id: u32, body_bytes: usize) -> Result<&'static str, String> {
+        let (mut server, reader) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            let mut header = [0u8; 32];
+            server.read_exact(&mut header).await.unwrap();
+            let mut body = vec![0; u32_at(&header, 12).unwrap() as usize];
+            server.read_exact(&mut body).await.unwrap();
+            let reply = Message::new(MessageHeader::new(0, 1, reply_id, 1, 0, false),
+                PayloadHeader::default(), None, None).serialize();
+            server.write_all(&reply[..32 + body_bytes]).await.unwrap();
+        });
+        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
+            closing: None, close_header_ended: false };
+        let result = ax.close().await;
+        peer.await.unwrap();
+        result
+    }
+    #[tokio::test]
+    async fn unsubscribe_header_then_eof_reports_connection_closure_without_ack() {
+        assert_eq!(truncated_unsubscribe(20, 0).await.unwrap(), "connection_closed_before_ack");
+    }
+    #[tokio::test]
+    async fn unrelated_unsubscribe_header_then_eof_is_still_an_error() {
+        assert_eq!(truncated_unsubscribe(19, 0).await.unwrap_err(), "Short AX DTX payload");
+    }
+    #[tokio::test]
+    async fn partial_unsubscribe_body_then_eof_is_still_an_error() {
+        assert_eq!(truncated_unsubscribe(20, 1).await.unwrap_err(), "Short AX DTX payload");
+    }
+    #[tokio::test]
+    async fn ordinary_ack_cannot_accept_a_header_only_reply() {
+        let (mut server, reader) = tokio::io::duplex(4096);
+        let reply = Message::new(MessageHeader::new(0, 1, 20, 1, 0, false),
+            PayloadHeader::default(), None, None).serialize();
+        server.write_all(&reply[..32]).await.unwrap();
+        drop(server);
+        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
+            closing: None, close_header_ended: false };
+        assert_eq!(ax.ack(20).await.unwrap_err(), "Short AX DTX payload");
     }
     #[test]
     fn rejects_truncated_aux_before_allocation() {
@@ -544,6 +637,8 @@ mod tests {
             next: 1,
             bytes: 0,
             subscribed: false,
+            closing: None,
+            close_header_ended: false,
         };
         let received = ax.incoming().await.unwrap();
         assert_eq!(received.id, 42);

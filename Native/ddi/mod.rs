@@ -338,7 +338,7 @@ impl PocketDDISession {
         }
         self.ax.as_mut().ok_or_else(|| error("AX session missing"))
     }
-    async fn close_ax(&mut self) -> Result<(), IdeviceError> {
+    async fn close_ax(&mut self) -> Result<&'static str, IdeviceError> {
         if let Some(mut ax) = self.ax.take() {
             // Always drop the old socket, even when unsubscribe is unconfirmed.
             let result = tokio::time::timeout(Duration::from_secs(2), ax.close())
@@ -348,7 +348,7 @@ impl PocketDDISession {
             drop(ax);
             result
         } else {
-            Ok(())
+            Ok("not_observed")
         }
     }
     async fn geometry(&mut self) -> Result<Geometry, IdeviceError> {
@@ -609,8 +609,9 @@ impl PocketDDISession {
             .as_str()
             .ok_or_else(|| error("DDI operation missing"))?;
         if op == "stop_observing" {
-            self.close_ax().await?;
-            return Ok(json!({}));
+            let stop = self.close_ax().await?;
+            return Ok(json!({"subscription_stop": stop,
+                "subscription_acknowledged": stop == "acknowledged", "connection_closed": true}));
         }
         if op == "return" {
             let bundle = v["bundle_id"]
@@ -980,7 +981,7 @@ pub unsafe extern "C" fn pocket_ddi_close(
         let input = session.cleanup_input(true).await;
         let ax = session.close_ax().await;
         input?;
-        ax
+        ax.map(|_| ())
     });
     drop(session);
     match result {

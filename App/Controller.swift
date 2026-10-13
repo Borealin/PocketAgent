@@ -689,8 +689,8 @@ final class Model: ObservableObject {
             // A failed unsubscribe still drops its socket and must not prevent
             // returning to this app or releasing the owned input services.
             do {
-                _ = try await ffi { try device.ddiRequest(["op": "stop_observing"]) }
-                log("ddi_observation_stopped")
+                let closed = try await ffi { try device.ddiRequest(["op": "stop_observing"]) }
+                log("ddi_observation_closed", ["subscription_stop": closed["subscription_stop"] as? String ?? "unknown"])
             } catch { warnings.append("DDI 观察订阅停止未确认，连接已释放。"); log("ddi_observation_stop_failed", Model.errorFields(error)) }
             do {
                 // Finalization runs uncancelled. Returning to our app is a

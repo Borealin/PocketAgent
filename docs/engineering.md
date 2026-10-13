@@ -641,7 +641,16 @@ release/reset/removal confirmed. Finalization now unsubscribes before activating
 the assistant, so app switching cannot race the old target subscription. DTX ACK
 handling correlates error responses to the requested conversation; an older
 error cannot fail a newer unsubscribe, while its own error stays unconfirmed.
-Regression acceptance of this finalization change is pending on the selected phone.
+Device framing diagnostics then isolated the warning: the current unsubscribe's
+single-fragment control reply header declared 16 payload bytes, but the stream
+ended before any body byte arrived. There was no semantic-read timeout in that
+reproduction. The installed ipb AX client also reports connection-closed-before-ack
+separately. Teardown now distinguishes that narrowly correlated empty-reply
+closure from an acknowledged unsubscribe, drops the socket in either case and
+reports the actual subscription_stop/connection_closed outcome. An unrelated
+header, partial body, protocol error, timeout or ordinary semantic request still
+fails. This does not establish a successful server ACK or a general TCP fix.
+Protocol regressions cover those distinctions; final device acceptance is pending.
 
 During keyboard stop acceptance, a script deadline revoked the phone lease and
 stopped a partially delivered key sequence; a new direct-key turn confirmed

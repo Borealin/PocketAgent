@@ -359,6 +359,14 @@ generic concepts only; the repository contracts were checked locally afterward.
   Recovery needs a fresh, verified current value, a known insertion position and
   an ended composition before planning any replacement or continuation.
 
+Finalization cancels AX observation before returning to the assistant. The tested
+AX daemon can send only the correlated empty unsubscribe reply header and close
+before its body; this is reported as connection_closed_before_ack with
+subscription_acknowledged=false and connection_closed=true. It is not a confirmed
+unsubscribe ACK. A timeout, partial body, unrelated header or ordinary read error
+remains a failure. Input cleanup and socket release still run, and no action is
+replayed. Final acceptance of this closure handling is pending.
+
 An optional type_text method parameter is a later extension if multiple accepted
 final-text routes become available on the same backend. It must preserve old
 calls and expose only actual capabilities. Do not add an automatic keyboard/IME
