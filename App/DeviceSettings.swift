@@ -174,7 +174,7 @@ final class DeviceSettingsModel: ObservableObject {
         }
         defer { engine.endDeviceConfigurationChange() }
         UserDefaults.standard.set(clipboardAllowed, forKey: "phoneClipboardAllowed")
-        status = clipboardAllowed ? "后续回合允许模型使用剪贴板输入。" : "后续回合禁止剪贴板；DDI 使用逐键输入。"
+        status = clipboardAllowed ? "后续回合允许模型使用剪贴板输入。" : "后续回合禁止剪贴板；DDI 可直接替换普通单行文本框或逐键输入。"
     }
 
     func save() {

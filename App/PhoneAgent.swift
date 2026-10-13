@@ -440,6 +440,7 @@ final class PhoneExecutor {
             if let name = a["name"], name != a["label"] { result["name"] = String(name.prefix(400)) }
             if let placeholder = a["placeholder"] { result["placeholder"] = String(placeholder.prefix(400)) }
             if let value = a["value"], a["type"] != "XCUIElementTypeSecureTextField" { result["value"] = String(value.prefix(2000)) }
+            if ["true", "false"].contains(a["focused"] ?? "") { result["focused"] = a["focused"] == "true" }
             return result
         }
         let state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
@@ -498,6 +499,8 @@ final class PhoneExecutor {
         var submittedInput = false
         var submittedKeys = false
         var keySequence: KeyboardSequence?
+        var textInput: TextInputRequest?
+        var inputApp: String?
         func proceed() throws {
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let lease, !lease.isActive { throw ActionStopped(issued: issued, reason: "脚本的手机授权已撤销。") }
@@ -524,6 +527,13 @@ final class PhoneExecutor {
                     return try Self.result(["ok": false, "code": issue == .clipboardDenied ? "clipboard_denied" : "invalid_keys",
                         "message": issue.localizedDescription, "action_issued": false,
                         "action_outcome": "not_started", "replay_allowed": false], error: true)
+                }
+            }
+            if name == "type_text" {
+                do { textInput = try TextInputRequest(arguments: args, backend: backend, clipboardAllowed: clipboardAllowed) }
+                catch let issue as TextInputRequest.Issue {
+                    return try Self.result(["ok": false, "code": issue.code, "message": issue.localizedDescription,
+                        "action_issued": false, "action_outcome": "not_started", "replay_allowed": false], error: true)
                 }
             }
             guard calls < 100 else { throw failure("本轮手机工具已达到 100 次上限。") }
@@ -608,11 +618,31 @@ final class PhoneExecutor {
                 try await requireApp(appID, base: base, proceed: proceed)
                 try await effect { try await control.drag(fromX, fromY, toX, toY, seconds: seconds) }
             case "type_text":
+                guard let request = textInput else { throw failure("缺少输入请求。") }
+                // Refuse unsupported AX targets before node recovery can compact
+                // a system task surface. Fresh node/native checks follow below.
+                if request.method == .ax {
+                    try await reference(args, base: base, proceed: proceed)
+                    if let id = args["node"]?.integerValue, id > 0, id <= nodes.count {
+                        try request.validateTarget(nodes[id - 1])
+                    }
+                }
                 var a = try await node(args, base: base, proceed: proceed)
                 try proceed()
                 guard ["XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField"].contains(a["type"] ?? ""),
-                      let text = args["text"]?.stringValue, text.count <= 4000, let clear = args["clear"]?.boolValue else {
+                      a["enabled"] == "true" else {
                     throw failure("请选择实际输入框并提供 text 和 clear。")
+                }
+                try request.validateTarget(a)
+                let text = request.text, clear = request.clear
+                inputApp = appID
+                if request.method == .ax {
+                    let input = try await inputElement(a, base: base, proceed: proceed)
+                    guard let identity = a["ddi_identity"] else { throw PhoneObservationIssue.nodeChanged }
+                    try await effect { try await control.replaceTextAX(text, into: input) }
+                    submittedInput = true
+                    expectedInput = (identity, text)
+                    break
                 }
                 if backend == .ddi {
                     try await effect { try await control.prepareText(text) }
@@ -672,7 +702,7 @@ final class PhoneExecutor {
                 try await Task.sleep(for: .milliseconds(600))
                 try proceed()
             }
-            let state = try await observe(proceed: proceed)
+            let state = try await observe(proceed: proceed, prepareSurface: textInput?.method != .ax)
             try proceed()
             var result: [String: Any] = ["ok": true, "screen": state]
             if submittedKeys {
@@ -686,17 +716,29 @@ final class PhoneExecutor {
                 result["message"] = "按键请求已发出；字段值可能仍是输入法组合串。请核对新屏幕中的实际文字和候选，不推断布局、已提交状态或候选顺序。"
             }
             if let expectedInput,
-               !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
-                   DDINodeMapping.confirmsInput($0, text: expectedInput.text) }) {
+               state["app"] as? String != inputApp || !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
+                   (textInput?.method == .ax ? TextInputRequest.confirmsAXInput($0, text: expectedInput.text) :
+                    DDINodeMapping.confirmsInput($0, text: expectedInput.text)) }) {
                 return try Self.result(["ok": false, "code": "text_input_not_confirmed", "screen": state,
                     "action_issued": true, "action_outcome": "unconfirmed", "replay_allowed": false,
-                    "clipboard_replaced": !expectedInput.text.isEmpty,
-                    "message": "输入请求已发出，但实际输入框尚未确认目标文字。请检查页面或粘贴许可；不要直接重放输入。"], error: true)
+                    "input_method": textInput?.method.rawValue ?? "paste",
+                    "input_verified": false, "clipboard_replaced": textInput?.method == .paste && !expectedInput.text.isEmpty,
+                    "message": "输入请求已发出，但实际输入框尚未确认目标文字。请检查新页面和目标 App 反应；不要重放或自动切换输入方式。"], error: true)
             }
             if submittedInput {
+                result["action_issued"] = true
+                result["input_method"] = textInput?.method.rawValue ?? "paste"
+                result["clipboard_replaced"] = textInput?.method == .paste && !(textInput?.text.isEmpty ?? true)
                 result["input_verified"] = expectedInput != nil
                 result["action_outcome"] = expectedInput == nil ? "submitted" : "confirmed"
                 result["replay_allowed"] = false
+                if textInput?.method == .ax {
+                    result["verification_source"] = "fresh_ax_value"
+                    result["business_outcome_verified"] = false
+                    let focus = nodes.first(where: { $0["ddi_identity"] == expectedInput?.identity })?["focused"]
+                    result["target_focused"] = ["true", "false"].contains(focus ?? "") ? (focus == "true") as Any : NSNull()
+                    result["message"] = "新 AX 字段值已匹配目标文字；焦点可能仍在其他字段，部分校验回调可能未触发。提交前核对目标焦点，或用绑定目标节点的 press_keys。请观察 App 的实际反应，不推断业务成功，不自动重试或改用粘贴。"
+                }
                 if expectedInput == nil {
                     result["message"] = "输入动作已发送，内容未独立确认（密码值被隐藏，或插入位置未固定）。请根据返回页面或目标 App 行为确认，不要直接重放。"
                 }
@@ -711,6 +753,13 @@ final class PhoneExecutor {
             invalidateObservation()
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
+            if textInput?.method == .ax, !(error is PhoneObservationIssue) {
+                return try Self.result(["ok": false, "code": (error as? TextInputRequest.Issue)?.code ?? "ax_input_failed",
+                    "message": "\(error.localizedDescription) 请读取新屏幕；不能重放或自动切换输入方式。",
+                    "action_issued": issued, "action_outcome": issued ? "unconfirmed" : "not_started",
+                    "input_method": "ax", "input_verified": false, "clipboard_replaced": false,
+                    "replay_allowed": false], error: true)
+            }
             if let issue = error as? PhoneObservationIssue {
                 var recovery: [String: Any] = ["ok": false, "code": issue.code,
                     "message": issue.localizedDescription, "action_issued": issued,

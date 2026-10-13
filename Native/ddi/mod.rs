@@ -221,10 +221,43 @@ impl Geometry {
         json!({"x":self.x,"y":self.y,"width":self.width,"height":self.height})
     }
 }
+fn json_geometry(v: &Json, message: &'static str) -> Result<Geometry, IdeviceError> {
+    let d = v.as_object().ok_or_else(|| error(message))?;
+    let get = |key: &str| d.get(key).and_then(Json::as_f64).filter(|n| n.is_finite()).ok_or_else(|| error(message));
+    let g = Geometry { x: get("x")?, y: get("y")?, width: get("width")?, height: get("height")? };
+    if g.width <= 0.0 || g.height <= 0.0 { return Err(error(message)); }
+    Ok(g)
+}
+fn ax_field_frame(attrs: &Value, screen: Geometry) -> Result<Geometry, IdeviceError> {
+    let d = attrs.as_dictionary().ok_or_else(|| error("AX field attributes missing"))?;
+    if d.get("45").and_then(Value::as_unsigned_integer) != Some(15)
+        || !matches!(d.get("51").and_then(Value::as_unsigned_integer), Some(0 | 1))
+    { return Err(error("AX replacement requires an ordinary TextField or SearchField")); }
+    if !matches!(d.get("27"), Some(v) if v.as_boolean() == Some(true) || v.as_unsigned_integer() == Some(1)) {
+        return Err(error("AX replacement field is not enabled"));
+    }
+    if d.get("32").is_some_and(|v| v.as_boolean() == Some(false) || v.as_unsigned_integer() == Some(0)) {
+        return Err(error("AX replacement field is not visible"));
+    }
+    let r = d.get("21").and_then(Value::as_dictionary).ok_or_else(|| error("AX field frame missing"))?;
+    let get = |key: &str| r.get(key).and_then(number).filter(|n| n.is_finite()).ok_or_else(|| error("AX field frame invalid"));
+    let field = Geometry { x:get("x")?, y:get("y")?, width:get("width")?, height:get("height")? };
+    if field.width <= 0.0 || field.height <= 0.0 || field.x < screen.x || field.y < screen.y
+        || field.x + field.width > screen.x + screen.width || field.y + field.height > screen.y + screen.height
+    { return Err(error("AX field frame outside current display")); }
+    Ok(field)
+}
 fn number(v: &Value) -> Option<f64> {
     v.as_real()
         .or_else(|| v.as_unsigned_integer().map(|n| n as f64))
         .or_else(|| v.as_signed_integer().map(|n| n as f64))
+}
+fn parse_identity(raw: &str) -> Result<(u64, u64), IdeviceError> {
+    let (pid, object) = raw.split_once(':').ok_or_else(|| error("AX replacement identity invalid"))?;
+    if object.contains(':') { return Err(error("AX replacement identity invalid")); }
+    let pid = pid.parse::<u64>().ok().filter(|n| *n > 0).ok_or_else(|| error("AX replacement identity invalid"))?;
+    let object = object.parse::<u64>().map_err(|_| error("AX replacement identity invalid"))?;
+    Ok((pid, object))
 }
 impl PocketDDISession {
     async fn open(
@@ -631,7 +664,7 @@ impl PocketDDISession {
             ));
         }
         let expected = v["expected_app"].as_str();
-        if ["tap", "hold", "drag", "clear", "paste", "key", "keys"].contains(&op) {
+        if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace"].contains(&op) {
             if let Some(frame) = v["expected_frame"].as_object() {
                 let g = self.geometry().await?;
                 for (k, n) in [
@@ -658,6 +691,46 @@ impl PocketDDISession {
             ),
             "foreground" => Ok(json!({"app":self.foreground().await?})),
             "snapshot" => self.snapshot().await,
+            "ax_replace" => {
+                let identity = v["identity"].as_str().ok_or_else(|| error("AX replacement identity missing"))?;
+                let text = v["text"].as_str().filter(|s| !s.is_empty() && s.len() <= 16_000)
+                    .ok_or_else(|| error("AX replacement text must be nonempty and at most 16000 UTF-8 bytes"))?;
+                if v["clear"].as_bool() != Some(true) { return Err(error("AX replacement requires clear=true")); }
+                let expected_app = expected.ok_or_else(|| error("AX replacement expected app missing"))?;
+                let expected_screen = json_geometry(&v["expected_frame"], "AX replacement expected display frame missing or invalid")?;
+                let target_rect = json_geometry(&v["target_frame"], "AX replacement target frame missing or invalid")?;
+                let screen = self.geometry().await?;
+                if screen != expected_screen || self.foreground().await? != expected_app {
+                    return Err(error("AX replacement app or display changed"));
+                }
+                let (selected_pid, x, y) = self.active_hit(screen).await?;
+                let (graph_pid, nodes) = self.ax().await?.graph(x, y).await.map_err(error)?;
+                if graph_pid != selected_pid || self.bundle_for_pid(graph_pid).await? != expected_app {
+                    return Err(error("AX replacement foreground changed"));
+                }
+                let (target_pid, target_object) = parse_identity(identity)?;
+                if target_pid != graph_pid { return Err(error("AX replacement identity belongs to another process")); }
+                let attrs = nodes.iter().find(|node| node.as_dictionary().and_then(|d| d.get("token"))
+                    .and_then(|token| ax::identity(token).ok()) == Some((target_pid, target_object)))
+                    .ok_or_else(|| error("AX replacement field is absent from fresh complete graph"))?;
+                let field_rect = ax_field_frame(attrs, screen)?;
+                if field_rect != target_rect { return Err(error("AX replacement target frame changed")); }
+                let token = attrs.as_dictionary().and_then(|d| d.get("token"))
+                    .ok_or_else(|| error("AX replacement token missing"))?.clone();
+                let center_x = field_rect.x + field_rect.width / 2.0;
+                let center_y = field_rect.y + field_rect.height / 2.0;
+                if self.geometry().await? != screen || self.foreground().await? != expected_app {
+                    return Err(error("AX replacement app or display changed before effect"));
+                }
+                let hit = self.ax().await?.hit(center_x, center_y).await.map_err(error)?;
+                if ax::identity(&hit).map_err(error)? != (target_pid, target_object) {
+                    return Err(error("AX replacement target is covered or changed"));
+                }
+                self.proceed()?;
+                self.ax().await?.set_text(&token, text).await.map_err(error)?;
+                self.proceed()?;
+                Ok(json!({"action_issued":true,"replay_allowed":false,"route":"ax-set-value"}))
+            }
             "clipboard_set" | "clipboard_verify" => {
                 let expected = v["text"]
                     .as_str()
@@ -993,6 +1066,27 @@ pub unsafe extern "C" fn pocket_ddi_close(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ax_replacement_eligibility_requires_enabled_visible_ordinary_single_line_field() {
+        let screen = Geometry { x: 0.0, y: 0.0, width: 390.0, height: 844.0 };
+        let field = |role: u64, subrole: u64, enabled: bool, visible: bool, x: f64| archive::fields(&[
+            ("45", role.into()), ("51", subrole.into()), ("27", enabled.into()), ("32", visible.into()),
+            ("21", archive::fields(&[("x", x.into()), ("y", 100.0.into()), ("width", 200.0.into()), ("height", 44.0.into())])),
+        ]);
+        assert_eq!(ax_field_frame(&field(15u64, 0u64, true, true, 20.0), screen).unwrap().x, 20.0);
+        assert!(ax_field_frame(&field(15u64, 1u64, true, true, 20.0), screen).is_ok());
+        for attrs in [field(15u64, 5u64, true, true, 20.0), field(17u64, 0u64, true, true, 20.0),
+            field(15u64, 0u64, false, true, 20.0), field(15u64, 0u64, true, false, 20.0),
+            field(15u64, 0u64, true, true, 200.0)] { assert!(ax_field_frame(&attrs, screen).is_err()); }
+        let missing_subrole = archive::fields(&[("45", 15u64.into()), ("27", true.into()), ("32", true.into()),
+            ("21", archive::fields(&[("x", 1.0.into()), ("y", 1.0.into()), ("width", 2.0.into()), ("height", 2.0.into())]))]);
+        assert!(ax_field_frame(&missing_subrole, screen).is_err());
+    }
+    #[test]
+    fn ax_replacement_identity_requires_exact_pid_object_pair() {
+        assert_eq!(parse_identity("12:34").unwrap(), (12, 34));
+        for invalid in ["0:1", "1:x", "1:2:3", "-1:2", "01:02junk"] { assert!(parse_identity(invalid).is_err()); }
+    }
     #[test]
     fn logical_touch_bounds_and_scaled_display() {
         let display = archive::fields(&[

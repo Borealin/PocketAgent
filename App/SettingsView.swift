@@ -160,7 +160,7 @@ struct PhoneSetupView: View {
                 Toggle("允许使用剪贴板", isOn: $device.clipboardAllowed)
                     .disabled(settingsBusy).accessibilityIdentifier("allowPhoneClipboard")
                     .onChange(of: device.clipboardAllowed) { device.saveClipboardPolicy() }
-                Text("允许时，模型可选择粘贴或逐键输入。关闭后，DDI 的文本粘贴和复制、剪切、粘贴组合键被拒绝。逐键输入使用实际键盘布局，中文需观察候选选字；WDA 的原有文本接口不使用剪贴板。")
+                Text("默认通过粘贴输入。关闭后，DDI 的粘贴和复制、剪切、粘贴组合键被拒绝；模型仍可在你授权的范围内直接替换普通单行文本框，或逐键输入。直接替换可能不触发部分校验，需检查 App 的反应；逐键输入中文需观察候选。WDA 保留原有文本接口。")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("文字输入") }
             Section {
@@ -191,7 +191,7 @@ struct PhoneSetupView: View {
                 if !device.status.isEmpty { Text(device.status).font(.caption).accessibilityIdentifier("deviceSetupStatus") }
             } footer: {
                 Text(device.backend == .ddi
-                    ? "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。DDI 无需 XCTest 授权；输入文字会替换系统剪贴板并模拟粘贴，不会切回本 App。目标 App 可能提示粘贴许可。"
+                    ? "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。DDI 无需 XCTest 授权；默认输入会替换剪贴板并粘贴，目标 App 可能提示许可。模型也可选择直接替换普通单行文本框，之后需检查 App 的反应。"
                     : "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
             }
             Section {

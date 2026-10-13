@@ -50,9 +50,9 @@ nonisolated enum ToolCatalog {
     private static func options(_ values: [String]) -> AgentJSONValue {
         .object(["type": .string("string"), "enum": .array(values.map(AgentJSONValue.string))])
     }
-    private static func phone(_ name: String, _ summary: String, _ properties: [String: AgentJSONValue]) -> ToolSpec {
+    private static func phone(_ name: String, _ summary: String, _ properties: [String: AgentJSONValue], required: [String]? = nil) -> ToolSpec {
         // Existing phone tools keep every property required.
-        ToolSpec(name: name, kind: .phone, summary: summary, properties: properties, required: Array(properties.keys))
+        ToolSpec(name: name, kind: .phone, summary: summary, properties: properties, required: required ?? Array(properties.keys))
     }
 
     static let phoneTools: [ToolSpec] = [
@@ -62,7 +62,9 @@ nonisolated enum ToolCatalog {
         phone("tap_point", "Tap screen coordinates in logical points from latest screenshot, when no accessibility node exists.", ["x": number, "y": number, "snapshot_id": integer]),
         phone("long_press", "Long press an observed node for 0.5–3 seconds; returns actual screen.", ["node": integer, "seconds": number, "snapshot_id": integer]),
         phone("swipe", "Swipe finger across screen. up shows lower content; down shows upper content. Returns fresh screen.", ["direction": options(["up", "down", "left", "right"]), "snapshot_id": integer]),
-        phone("type_text", "Focus an observed text/search field and type text. clear=true replaces existing text; false appends.", ["node": integer, "text": string, "clear": boolean, "snapshot_id": integer]),
+        phone("type_text", "Type text into an observed field. clear=true replaces existing text; false appends. Optional method defaults to paste; DDI also supports method=ax for nonempty whole-field replacement in an ordinary TextField or SearchField.", ["node": integer, "text": string, "clear": boolean, "snapshot_id": integer,
+              "method": options([TextInputMethod.paste.rawValue, TextInputMethod.ax.rawValue])],
+              required: ["node", "text", "clear", "snapshot_id"]),
         phone("press_key", "Press keyboard return/search or delete on current focused field, then observe.", ["key": options(["return", "delete"]), "snapshot_id": integer]),
         phone("dismiss_keyboard", "Dismiss current keyboard, then observe.", ["snapshot_id": integer]),
         phone("press_home", "Return to iPhone home screen, then observe.", [:]),
@@ -125,9 +127,6 @@ nonisolated enum ToolCatalog {
     static func decision(for name: String, capabilities: ToolCapabilities) -> ToolDecision {
         guard let spec = spec(name) else { return .deny("未知工具 \(name)") }
         if name == "press_keys", capabilities.phoneBackend != .ddi { return .deny("press_keys 当前只支持 DDI。") }
-        if name == "type_text", capabilities.phoneBackend == .ddi, !capabilities.clipboardAllowed {
-            return .deny("本轮禁止使用剪贴板，DDI type_text 粘贴路径不可用；请使用 press_keys 并观察输入法。")
-        }
         switch spec.kind {
         case .phone, .network: return .allow
         case .file: return capabilities.workspace ? .allow : .deny("本会话未选择项目目录。")
@@ -151,9 +150,11 @@ nonisolated enum ToolCatalog {
         lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
         if capabilities.phoneBackend == .ddi {
             lines.append(capabilities.clipboardAllowed
-                ? "- 本轮 DDI 允许剪贴板：type_text 请求最终文字，会替换系统剪贴板并粘贴，目标可能要求许可。"
-                : "- 本轮 DDI 禁止剪贴板：type_text 不可用；复制、剪切、粘贴组合键也被执行层拒绝。")
+                ? "- DDI type_text 默认使用 paste：会替换系统剪贴板并粘贴，目标可能要求许可。method=ax 可对普通 TextField/SearchField 执行非空整字段替换；只用于确需避免剪贴板时，观察返回屏幕和业务结果。AX 与 paste 的目标回调可能不同；失败后不得自动改用另一种方式。"
+                : "- 本轮 DDI 禁止剪贴板：type_text 默认 paste 被执行层拒绝；可显式 method=ax 对普通 TextField/SearchField 做非空整字段替换。AX 与 paste 的目标回调可能不同；检查返回屏幕和业务结果，失败后不得自动改用另一种方式。复制、剪切、粘贴组合键也被执行层拒绝。")
             lines.append("- press_keys 按硬件键位发送按键，不能直接输入汉字或 Emoji。中文先输入拼音，读取真实候选后选字；不同键盘的选字键可能不同。返回的字段值可能仍是组合串，不能当作已提交汉字。")
+            lines.append("- method=ax 仅用于用户已授权的整字段替换（clear=true、非空文字）；不支持追加、光标插入、密码框或 TextView。它不走剪贴板，也不逐键输入；部分校验回调可能不触发。字段值匹配不等于业务成功，继续观察目标 App 的反应，不扩大用户授权范围。")
+            lines.append("- AX 不保证目标获得焦点。提交搜索前检查 target_focused 和元素 focused；未确认聚焦时先点击实际目标并观察，或用 press_keys 绑定目标节点发送 return。不能因刚写入字段就直接用 press_key 操作可能仍聚焦的另一字段。")
         } else { lines.append("- 本轮 WDA 的 type_text 使用现有最终文本接口；press_keys 当前不可用。") }
         lines.append("- 网络：http_request 访问公网 HTTPS API（任意 method、headers、body/json；不支持明文 http）；不能访问本机或局域网地址。网页阅读也可以用它取原文。")
         if capabilities.workspace, let workspaceName {

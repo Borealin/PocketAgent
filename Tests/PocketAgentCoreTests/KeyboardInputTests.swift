@@ -42,15 +42,17 @@ struct KeyboardInputTests {
 
     @Test func clipboardPolicyAndBackendApplyToDefinitionsAndScriptRequests() {
         let denied = ToolCapabilities(phoneBackend: .ddi, clipboardAllowed: false)
-        #expect(!ToolCatalog.available(denied).contains { $0.name == "type_text" })
+        #expect(ToolCatalog.available(denied).contains { $0.name == "type_text" })
         #expect(ToolCatalog.available(denied).contains { $0.name == "press_keys" })
-        #expect(ToolCatalog.decision(for: "type_text", capabilities: denied) != .allow)
-        #expect(ToolCatalog.scriptDecision(for: "type_text", capabilities: denied) != .allow)
+        #expect(ToolCatalog.decision(for: "type_text", capabilities: denied) == .allow)
+        #expect(ToolCatalog.scriptDecision(for: "type_text", capabilities: denied) == .allow)
         #expect(ToolCatalog.scriptDecision(for: "press_keys", capabilities: denied) == .allow)
         let wda = ToolCapabilities(phoneBackend: .wda, clipboardAllowed: false)
         #expect(ToolCatalog.decision(for: "type_text", capabilities: wda) == .allow)
         #expect(ToolCatalog.decision(for: "press_keys", capabilities: wda) != .allow)
         #expect(ToolCatalog.scriptDecision(for: "press_keys", capabilities: wda) != .allow)
         #expect(ToolCatalog.spec("type_text")?.required.sorted() == ["clear", "node", "snapshot_id", "text"])
+        #expect(ToolCatalog.spec("type_text")?.properties["method"] != nil)
+        #expect(ToolCatalog.prompt(denied, workspaceName: nil).contains("method=ax"))
     }
 }

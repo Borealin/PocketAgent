@@ -311,8 +311,29 @@ impl Encoder {
     }
 }
 pub fn request(kind: u64, parameters: Value, token: Option<&Value>) -> Result<Vec<u8>, String> {
-    if ![1, 5, 6].contains(&kind) {
+    if ![1, 5, 6, 8].contains(&kind) {
         return Err(invalid("request kind"));
+    }
+    if kind == 8 {
+        let p = parameters
+            .as_dictionary()
+            .ok_or_else(|| invalid("set value parameters"))?;
+        if p.len() != 1 || p.get("value").and_then(Value::as_string).is_none() {
+            return Err(invalid("set value requires one NSString value"));
+        }
+        let t = token
+            .and_then(Value::as_dictionary)
+            .ok_or_else(|| invalid("set value token"))?;
+        if t.get("pid")
+            .and_then(Value::as_unsigned_integer)
+            .filter(|n| *n > 0)
+            .is_none()
+            || t.get("objectID")
+                .and_then(Value::as_unsigned_integer)
+                .is_none()
+        {
+            return Err(invalid("set value token identity"));
+        }
     }
     let mut e = Encoder {
         objects: vec!["$null".into()],
@@ -354,7 +375,10 @@ pub fn request(kind: u64, parameters: Value, token: Option<&Value>) -> Result<Ve
         ("requestType", kind.into()),
         ("clientType", 0u64.into()),
         ("actionType", 0u64.into()),
-        ("attributeType", 0u64.into()),
+        (
+            "attributeType",
+            if kind == 8 { 53u64.into() } else { 0u64.into() },
+        ),
         ("translation", translation),
         ("parameters", params),
         ("$class", class),
@@ -401,6 +425,33 @@ mod tests {
                 .len(),
             2
         );
+    }
+    #[test]
+    fn set_text_encodes_only_value_attribute_and_observed_token() {
+        let token = fields(&[("pid", 42u64.into()), ("objectID", u64::MAX.into())]);
+        let decoded = decode(&request(8, fields(&[("value", "hello 世界".into())]), Some(&token)).unwrap()).unwrap();
+        let d = decoded.as_dictionary().unwrap();
+        assert_eq!(d["requestType"].as_unsigned_integer(), Some(8));
+        assert_eq!(d["attributeType"].as_unsigned_integer(), Some(53));
+        assert_eq!(
+            d["parameters"].as_dictionary().unwrap()["value"].as_string(),
+            Some("hello 世界")
+        );
+        assert_eq!(
+            d["translation"].as_dictionary().unwrap()["objectID"].as_unsigned_integer(),
+            Some(u64::MAX)
+        );
+        assert!(
+            request(
+                8,
+                fields(&[("value", "x".into()), ("other", "y".into())]),
+                Some(&token)
+            )
+            .is_err()
+        );
+        assert!(request(8, fields(&[("value", "x".into())]), None).is_err());
+        assert!(request(8, fields(&[("value", Value::Data(vec![1]))]), Some(&token)).is_err());
+        assert!(request(9, fields(&[]), Some(&token)).is_err());
     }
     #[test]
     fn rejects_invalid_and_cyclic_uids() {

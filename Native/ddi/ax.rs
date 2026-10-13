@@ -1,4 +1,4 @@
-// Read-only AXP requests; protocol dialect from MIT ipb (see ipb-LICENSE.txt).
+// Bounded AXP observation and whole-value replacement; protocol dialect from MIT ipb (see ipb-LICENSE.txt).
 use super::archive::{self, MAX_BYTES, fields};
 use idevice::{
     ReadWrite,
@@ -355,6 +355,11 @@ impl Ax {
     pub async fn hit(&mut self, x: f64, y: f64) -> Result<Value, String> {
         self.read(6, format!("{{{x}, {y}}}").into(), None).await
     }
+    /// Submit once; a nil result is submission, never text/business confirmation.
+    pub async fn set_text(&mut self, token: &Value, text: &str) -> Result<(), String> {
+        self.read(8, fields(&[("value", text.into())]), Some(token)).await?;
+        Ok(())
+    }
     async fn attributes(&mut self, token: &Value, ids: &[u64]) -> Result<Value, String> {
         self.read(
             5,
@@ -609,6 +614,31 @@ mod tests {
             server.write_all(&reply).await.unwrap();
         });
         assert!(Ax::new(Box::new(reader)).await.is_err());
+        peer.await.unwrap();
+    }
+    #[tokio::test]
+    async fn set_text_emits_one_type8_attribute53_request_and_never_replays() {
+        let (mut server, reader) = tokio::io::duplex(8192);
+        let peer = tokio::spawn(async move {
+            let mut header = [0u8; 32];
+            server.read_exact(&mut header).await.unwrap();
+            let mut payload = vec![0; u32_at(&header, 12).unwrap() as usize];
+            server.read_exact(&mut payload).await.unwrap();
+            let aux = u32_at(&payload, 4).unwrap() as usize;
+            let method = archive::decode(&payload[16 + aux..]).unwrap();
+            assert_eq!(method.as_string(), Some("processDataFromHost:"));
+            let args = arguments(&payload[16..16 + aux]).unwrap();
+            let request = archive::decode(args[0].as_data().unwrap()).unwrap();
+            let d = request.as_dictionary().unwrap();
+            assert_eq!(d["requestType"].as_unsigned_integer(), Some(8));
+            assert_eq!(d["attributeType"].as_unsigned_integer(), Some(53));
+            assert_eq!(d["parameters"].as_dictionary().unwrap()["value"].as_string(), Some("hello"));
+            let mut extra = [0u8; 32];
+            assert!(tokio::time::timeout(Duration::from_millis(40), server.read_exact(&mut extra)).await.is_err());
+        });
+        let token = archive::fields(&[("pid", 7u64.into()), ("objectID", 9u64.into())]);
+        let mut ax = Ax { stream: Box::new(reader), next: 1, bytes: 0, subscribed: false, closing: None, close_header_ended: false };
+        assert!(ax.set_text(&token, "hello").await.is_err());
         peer.await.unwrap();
     }
     #[tokio::test]

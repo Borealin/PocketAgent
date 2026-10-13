@@ -44,6 +44,7 @@
 		A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
+		CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4597769ADE790DBCF5243A /* TextInputRequest.swift */; };
 		CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */; };
 		D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9546B4615DB532FC42BF7335 /* Rules.swift */; };
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
@@ -85,6 +86,7 @@
 		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		73652AF715C4968790030FB2 /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
+		7F4597769ADE790DBCF5243A /* TextInputRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInputRequest.swift; sourceTree = "<group>"; };
 		88E51E4C8A00C974E4731352 /* PairingImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingImport.swift; sourceTree = "<group>"; };
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
@@ -181,6 +183,7 @@
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
+				7F4597769ADE790DBCF5243A /* TextInputRequest.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
 				E65594612732E3288F588504 /* WDARequestDiagnostics.swift */,
 				38833AB31402CD8F11B2F334 /* Workspace.swift */,
@@ -364,6 +367,7 @@
 				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
+				CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
 				929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */,
 				9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */,

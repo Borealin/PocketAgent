@@ -607,7 +607,10 @@ AX uses request8/attribute53 once after fresh native identity/foreground/frame/h
 checks, without focus, clipboard or HID effects. Model and script calls share
 TextInputRequest validation, including the frozen clipboard policy. A fresh
 exact non-placeholder AX value is field confirmation, never business validation;
-results label its source and require observing target App behavior. Callback and
+results label its source and require observing target App behavior. Observations expose known focused
+state and the AX result reports target_focused without inferring it from the setter
+acknowledgement. The model
+confirms focus or uses node-bound press_keys before submission. Callback and
 empty-value compatibility limits, and pending renewed acceptance, are recorded in
 [devicehub-control.md](devicehub-control.md#ax-final-text-route). A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus

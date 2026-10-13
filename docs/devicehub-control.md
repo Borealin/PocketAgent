@@ -423,7 +423,10 @@ method, byte limits and target class for the shared model/script executor.
 PhoneControl and PhoneAgent carry the method and reuse serial/frozen policy,
 cancellation and fresh post-observation checks. AX confirmation excludes empty
 or placeholder-equal values and is labeled fresh_ax_value with
-business_outcome_verified=false; errors never initiate another input route. The model must inspect the target App's
+business_outcome_verified=false, plus target_focused from the fresh AX observation
+(unknown remains null). Known focus is also exposed in screen elements. Submission
+uses the observed focus or node-bound press_keys; setter acknowledgement alone
+does not establish a keyboard target. Errors never initiate another input route. The model must inspect the target App's
 response rather than infer business acceptance from an AX value alone.
 Only PocketAgent iOS/native is implicated; Android, glasses firmware, schema
 and rpc are outside this Apple DDI contract. The implementation branch is devicehub-control. Owner, effort, release version
