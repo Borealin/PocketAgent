@@ -600,11 +600,16 @@ in the independent receiver and returned to the existing assistant process.
 The original App's first host-prepared prompt paste requested iOS paste permission;
 the bench setup allowed that known prompt before starting the production turn.
 This is global paste-based input, not proof of acceptance by every custom control.
-The HID API carries keyboard usages and the production AX dialect remains read-only.
-A separate on-phone feasibility prototype now uses AX request8/attribute53 for
-whole-field Unicode replacement; it has not changed the production tools. Its
-callback and empty-value compatibility limits are recorded in
-[devicehub-control.md](devicehub-control.md#ax-final-text-route-feasibility-not-integrated). A later Mac-side UniversalHID bench check confirmed
+The HID API carries keyboard usages. type_text now accepts optional method=ax
+for nonempty clear=true replacement of ordinary TextField/SearchField nodes;
+omitted method retains paste, and WDA rejects explicit AX before preparation.
+AX uses request8/attribute53 once after fresh native identity/foreground/frame/hit
+checks, without focus, clipboard or HID effects. Model and script calls share
+TextInputRequest validation, including the frozen clipboard policy. A fresh
+exact non-placeholder AX value is field confirmation, never business validation;
+results label its source and require observing target App behavior. Callback and
+empty-value compatibility limits, and pending renewed acceptance, are recorded in
+[devicehub-control.md](devicehub-control.md#ax-final-text-route). A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard
 access. This is input-method feasibility, not an integrated on-phone input mode.
@@ -618,7 +623,7 @@ It returns the actual screen with input_verified=false and unknown composition/
 layout, rather than claiming a committed Unicode string. Already-focused fields
 are not retapped. WDA does not expose this new DDI primitive.
 The device-local clipboard policy defaults to allowed for compatibility, is frozen
-at job enqueue, filters model tools and is enforced in the shared executor for
+at job enqueue, informs model tools and is enforced in the shared executor for
 scripts and model calls before effects. Disallowed copy/cut/paste chords are also
 checked at native input validation. No route switches or replay follow uncertain
 effects. This extension is implemented and the selected-device gate is complete; design

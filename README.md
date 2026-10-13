@@ -20,7 +20,11 @@ reported rather than replayed.
 DDI also offers `press_keys` for model-controlled physical keys and IME candidates.
 The phone setup's clipboard switch permits or forbids the paste path and known
 clipboard shortcuts; permission and backend are captured when the turn is queued.
-`type_text` retains its existing schema. Keyboard calls return the actual screen
+`type_text` retains its required parameters and defaults to paste. Optional
+`method: "ax"` replaces a nonempty ordinary TextField/SearchField value without
+clipboard access; use it only for authorized whole-field replacement and inspect
+the App response because some validation callbacks may not fire. AX excludes
+password fields, TextView and caret insertion; uncertain effects are never replayed. Keyboard calls return the actual screen
 without assuming the layout or claiming that composition has committed.
 The published candidate instructions below describe the earlier WDA release;
 the DDI change has not been published to that feed.

@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
+> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. AX whole-field input is implemented with selected-device acceptance pending. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -73,7 +73,7 @@ document records the implemented backend, confirmed integration failures and the
 | open_app, open_app_by_name | AppService activation without terminating the existing process | Shared ambiguity and installed-app checks |
 | tap, tap_point, long_press | Owned touchscreen contacts | Snapshot, foreground and geometry checks precede effects |
 | swipe, swipe_from_to | Bounded touchscreen path | Shared coordinate/duration limits |
-| type_text | CoreDevice SET and exact UTF-8 readback, deferred exact replacement verification and HID paste | No assistant activation; paste permission may require the user |
+| type_text | Default CoreDevice clipboard/HID paste; optional AX request8/attribute53 whole-value replacement | AX accepts nonempty ordinary TextField/SearchField replacement only; exact AX value is not business acceptance |
 | press_key | Owned mainKeyboard Return/Delete | Explicit key-up reports and empty held-key state |
 | dismiss_keyboard | Escape and shared fresh observation | Unconfirmed dismissal is reported |
 | press_home | Owned Indigo Home down/up | Releases before returning |
@@ -298,13 +298,13 @@ Normal and multiline replacements were also confirmed by exact fresh AX values;
 secure input retains an explicitly unverified, redacted tool result.
 Permission prompts and fields that reject paste remain explicit boundaries.
 The inspected HID service carries keyboard usages rather than Unicode strings;
-the inspected AX dialect has no verified set-value operation. Keyboard-layout/IME
-input into paste-rejecting controls remains a separate production integration path. No universal
+the AX whole-value setter is now integrated as an explicit input method. Keyboard-layout/IME
+input remains available for candidate and caret operations. No universal
 App claim is made from a service acknowledgement. No public feed update is authorized.
 
 ### Input without clipboard permission
 
-The current production type_text uses paste; sending individual HID keyboard
+The default production type_text uses paste; sending individual HID keyboard
 usages is a separate route that does not access the clipboard. A Mac-side
 UniversalHID bench check on the selected phone established ordinary ASCII input
 under the English layout and Chinese composition under the existing Pinyin IME:
@@ -332,9 +332,9 @@ and exact-device validation on 2026-10-13. The renewed core/native/build/IPA/dev
 Detailed verification remains in the private local handoff. The consultation used
 generic concepts only; the repository contracts were checked locally afterward.
 
-- type_text keeps its existing parameters and final-text intent for old scripts.
-  WDA uses the existing value request; the current DDI implementation uses paste,
-  whose clipboard replacement and permission effects must be disclosed.
+- type_text keeps its existing required parameters and final-text intent for old scripts.
+  Optional method defaults to paste. WDA uses the existing value request; DDI uses
+  clipboard paste by default or explicit method=ax for eligible whole-field replacement.
 - press_keys(node, keys, modifiers, snapshot_id) represents 1–32 physical US-key
   positions/chords, not final Unicode text. Modifiers apply separately to each
   key and are released after each chord. Only DDI exposes this new primitive;
@@ -351,8 +351,8 @@ generic concepts only; the repository contracts were checked locally afterward.
   enforcement. Existing installations default to allowed to preserve behavior.
   Command/Control copy, cut and paste chords are refused before focus or any
   input when denied; native validation also checks the captured keyboard policy.
-- On DDI with clipboard denied, the current type_text paste route must be hidden
-  and refused before effects; the keyboard primitive remains available. WDA's
+- On DDI with clipboard denied, type_text remains advertised for explicit AX;
+  omitted/paste method is refused before preparation or effects. The keyboard primitive remains available. WDA's
   existing final-text route does not use clipboard. A focused field is not
   retapped between sequences, preserving its observed caret/composition state.
 - No automatic route change after clear, partial typing or an uncertain result.
@@ -368,15 +368,16 @@ remains a failure. Input cleanup and socket release still run, and no action is
 replayed. Selected-device acceptance includes both normal ACK and the explicit
 connection-closed-before-ack outcome.
 
-### AX final-text route (feasibility; not integrated)
+### AX final-text route
 
 The user requested adoption research from
 [调研通讯协议与 XCTest 能力差距](codex://threads/01a130f2-4687-7a62-89be-6747168b9a43).
 Its retained research commit b11b7e6 describes request8/attribute53 with
 parameters {value: NSString}, using a fresh AXPTranslationObject on the existing
 AX/DTX service. This is whole-field replacement, not HID typing or insertion at
-the caret. A private iOS/Rust prototype reuses PocketAgent's RP and DDI session;
-production App/Native sources and tool routing remain unchanged. Research scope
+the caret. The user approved integration on 2026-10-13. Production App/Native now
+exposes this operation through the same RP/DDI session and serial executor;
+renewed build/IPA and exact-device acceptance are pending. Initial research scope
 is the selected iPhone 12 mini on iOS 27.0, with USB attached for preparation/readback;
 supplementary Mac/AX controls on the same phone isolate callback differences
 and the paste-refusing fixture. This is not a model-turn integration gate,
@@ -402,27 +403,32 @@ Confirmed compatibility problems constrain adoption:
   precise setup stage and root cause are not isolated. This research demonstrates
   a scoped input path, not reliable repeated startup or production acceptance.
 
-The integration proposal is to retain type_text and press_keys, and add an
-optional explicit DDI method (ax or paste) to type_text. Preserve old calls'
-paste default and WDA behavior. The initial AX scope would be nonempty,
+The implementation retains type_text and press_keys, and adds an optional
+explicit DDI method (ax or paste) to type_text. Old calls retain their
+paste default and WDA behavior; explicit AX on WDA is refused before preparation.
+The initial AX scope is nonempty,
 clear=true replacement of observed ordinary TextField/SearchField nodes;
 secure fields, TextView, caret insertion, composition, SwiftUI/WebView and
 business validation coverage require separate decisions or verification.
-When the user authorizes whole-field replacement, clipboard-denied turns could
+When the user authorizes whole-field replacement, clipboard-denied turns can
 explicitly select AX without granting clipboard access; paste and clipboard chords retain their current hard policy. An
 uncertain AX effect must never trigger automatic paste or key replay.
 
-Native/ddi/archive.rs and ax.rs would add the narrowly encoded setter request;
-mod.rs would resolve fresh identity, foreground, frame and visible hit before
-effects. PhoneControl, PhoneAgent and ToolCatalog would carry the selected
-method, enforce eligibility/policy before effects and identify the returned
-verification source. Reuse the serial queue, frozen backend/policy, cancellation
-and exact post-observation checks. The model must inspect the target App's
+Native/ddi/archive.rs and ax.rs encode only request8/attribute53 with one string
+value. mod.rs resolves the exact identity in a fresh complete graph, requires
+enabled role15/subrole0 or1, unchanged field/display frames and foreground,
+and an exact center hit immediately before the single setter. It performs no
+focus tap, HID clear, clipboard request or retry. TextInputRequest validates
+method, byte limits and target class for the shared model/script executor.
+PhoneControl and PhoneAgent carry the method and reuse serial/frozen policy,
+cancellation and fresh post-observation checks. AX confirmation excludes empty
+or placeholder-equal values and is labeled fresh_ax_value with
+business_outcome_verified=false; errors never initiate another input route. The model must inspect the target App's
 response rather than infer business acceptance from an AX value alone.
 Only PocketAgent iOS/native is implicated; Android, glasses firmware, schema
-and rpc are outside this Apple DDI contract. Production implementation, owner,
-effort, version and delivery date are undecided. Existing core/native/iOS/IPA
-and exact-device gates apply when integration is approved.
+and rpc are outside this Apple DDI contract. The implementation branch is devicehub-control. Owner, effort, release version
+and delivery date remain unspecified. Core/native/iOS/IPA and exact-device gates
+are being renewed; the prototype alone is not production acceptance.
 
 Rejected approaches: automatically replacing the old route despite callback
 differences; treating nil ACK or placeholder text as effect confirmation;
