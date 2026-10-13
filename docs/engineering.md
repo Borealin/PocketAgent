@@ -619,8 +619,8 @@ The device-local clipboard policy defaults to allowed for compatibility, is froz
 at job enqueue, filters model tools and is enforced in the shared executor for
 scripts and model calls before effects. Disallowed copy/cut/paste chords are also
 checked at native input validation. No route switches or replay follow uncertain
-effects. This extension is under renewed acceptance; design and recovery limits
-are in devicehub-control.md.
+effects. This extension is implemented and the selected-device gate is complete; design
+and recovery limits are in devicehub-control.md.
 
 The first production-chat keyboard run opened the target successfully but failed
 at mainKeyboard creation with a transport error. Independent UIKit callbacks
@@ -653,14 +653,13 @@ fails. This does not establish a successful server ACK or a general TCP fix.
 Protocol regressions cover those distinctions; production final-text input completed
 without a cleanup warning, while its closure remained explicitly unacknowledged.
 
-A fresh empty-field keyboard turn issued its focus tap but then hit the shared
-foreground/root-change guard before keys; the independent receiver remained
-unchanged. Recovery showed the same app with newly visible keyboard nodes. The
+A fresh empty-field keyboard turn reported an issued action and the shared
+foreground/root-change guard, while the independent receiver remained unchanged. Recovery showed the same app with newly visible keyboard nodes. The
 exact transient PID-versus-root branch was not logged. After a focus tap,
 press_keys now reuses the existing bounded read-only observation recovery and
 verifies the same app, field identity and focus before sending keys. Neither the
-focus tap nor input is replayed. Final device acceptance of this transition is
-pending.
+focus tap nor input is replayed. The repeated empty-field device check passed;
+the exact cause of the earlier transient observation remains unestablished.
 
 During keyboard stop acceptance, a script deadline revoked the phone lease and
 stopped a partially delivered key sequence; a new direct-key turn confirmed

@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation is under renewed acceptance. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
+> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -322,14 +322,14 @@ paging, polyphonic/rare characters, mixed language, punctuation, emoji and
 recovery after partial composition remain unverified. No keyboard installation,
 dictionary training or text-replacement setting was needed for the bench check.
 
-### Model input contract (implementation under acceptance)
+### Model input contract (implemented)
 
 The user asked to reconsider exposing both paths to the model because IME
 composition differs from WDA's final-text request. After two design-consultation
 rounds with Opus 5.5, the recommendation is to retain type_text's final-text
 contract and add a bounded press_keys primitive. The user approved this design
-and exact-device validation on 2026-10-13. The implementation is not delivered
-until the renewed core/native/build/IPA/device gates complete. The consultation used
+and exact-device validation on 2026-10-13. The renewed core/native/build/IPA/device gates are complete on the selected phone.
+Detailed verification remains in the private local handoff. The consultation used
 generic concepts only; the repository contracts were checked locally afterward.
 
 - type_text keeps its existing parameters and final-text intent for old scripts.
@@ -365,7 +365,8 @@ before its body; this is reported as connection_closed_before_ack with
 subscription_acknowledged=false and connection_closed=true. It is not a confirmed
 unsubscribe ACK. A timeout, partial body, unrelated header or ordinary read error
 remains a failure. Input cleanup and socket release still run, and no action is
-replayed. Final acceptance of this closure handling is pending.
+replayed. Selected-device acceptance includes both normal ACK and the explicit
+connection-closed-before-ack outcome.
 
 An optional type_text method parameter is a later extension if multiple accepted
 final-text routes become available on the same backend. It must preserve old
