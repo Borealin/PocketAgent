@@ -299,5 +299,25 @@ secure input retains an explicitly unverified, redacted tool result.
 Permission prompts and fields that reject paste remain explicit boundaries.
 The inspected HID service carries keyboard usages rather than Unicode strings;
 the inspected AX dialect has no verified set-value operation. Keyboard-layout/IME
-input into paste-rejecting controls remains a separate research path. No universal
+input into paste-rejecting controls remains a separate production integration path. No universal
 App claim is made from a service acknowledgement. No public feed update is authorized.
+
+### Input without clipboard permission
+
+The current production type_text uses paste; sending individual HID keyboard
+usages is a separate route that does not access the clipboard. A Mac-side
+UniversalHID bench check on the selected phone established ordinary ASCII input
+under the English layout and Chinese composition under the existing Pinyin IME:
+after reading the desired first candidate, Space committed it. Both the field's
+fresh AX value and independent UIKit editing callback confirmed the committed
+text. No clipboard command or XCTest was used. This extends the input-method
+feasibility evidence; it does not establish integration through PocketAgent's
+on-phone RP adapter or a complete replacement input implementation.
+
+The IME exposes a marked Latin value while composing; it is not the final
+Chinese text. A production implementation must confirm the active layout, read
+and select the actual candidate, then compare the committed field value. Blind
+conversion to Pinyin or blind Space would not preserve arbitrary text. Candidate
+paging, polyphonic/rare characters, mixed language, punctuation, emoji and
+recovery after partial composition remain unverified. No keyboard installation,
+dictionary training or text-replacement setting was needed for the bench check.

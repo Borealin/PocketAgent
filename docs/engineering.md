@@ -602,7 +602,13 @@ the bench setup allowed that known prompt before starting the production turn.
 This is global paste-based input, not proof of acceptance by every custom control.
 The inspected HID API carries keyboard usages, and the inspected AX dialect reads
 attributes; no independent Unicode/set-value injection path has been established
-for controls that reject paste. Layout/IME key sequences are a separate unverified path.
+for controls that reject paste. A later Mac-side UniversalHID bench check confirmed
+ASCII with an English layout and Chinese via existing Pinyin candidates plus
+Space, with exact AX and independent UIKit callback confirmation and no clipboard
+access. This is input-method feasibility, not an integrated on-phone input mode.
+The IME's marked Latin value differs from committed text; a future implementation
+must verify layout, candidate and final content. Candidate paging, rare/polyphonic
+characters, mixed text, emoji and interrupted composition remain unverified.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
