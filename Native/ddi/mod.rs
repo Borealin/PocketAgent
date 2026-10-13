@@ -344,7 +344,7 @@ impl PocketDDISession {
             let result = tokio::time::timeout(Duration::from_secs(2), ax.close())
                 .await
                 .map_err(|_| { tracing::error!("DDI cleanup unconfirmed: AX unsubscribe timeout"); error("DDI AX unsubscribe timed out") })?
-                .map_err(|e| { tracing::error!("DDI cleanup unconfirmed: AX unsubscribe"); error(e) });
+                .map_err(|e| { tracing::error!(reason = %e, "DDI cleanup unconfirmed: AX unsubscribe"); error(e) });
             drop(ax);
             result
         } else {
@@ -608,6 +608,10 @@ impl PocketDDISession {
         let op = v["op"]
             .as_str()
             .ok_or_else(|| error("DDI operation missing"))?;
+        if op == "stop_observing" {
+            self.close_ax().await?;
+            return Ok(json!({}));
+        }
         if op == "return" {
             let bundle = v["bundle_id"]
                 .as_str()

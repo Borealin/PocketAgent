@@ -635,8 +635,21 @@ final cleanup despite independently confirmed committed text. Keyboard lifecycle
 requests now use their own fresh, retained HID channel; touch reports, including
 candidate selection, keep the original channel. Static cleanup-phase diagnostics
 distinguish keyboard release/reset/removal and AX unsubscribe without recording
-input. The precise transport cause is still open; renewed cleanup and stop
-regression acceptance is pending on the selected phone.
+input. The exact initial HID transport cause is still open. Later staged diagnostics
+identified a repeated finalization warning as AX unsubscribe, with keyboard
+release/reset/removal confirmed. Finalization now unsubscribes before activating
+the assistant, so app switching cannot race the old target subscription. DTX ACK
+handling correlates error responses to the requested conversation; an older
+error cannot fail a newer unsubscribe, while its own error stays unconfirmed.
+Regression acceptance of this finalization change is pending on the selected phone.
+
+During keyboard stop acceptance, a script deadline revoked the phone lease and
+stopped a partially delivered key sequence; a new direct-key turn confirmed
+modifier release. A later script was refused by the existing preflight live-task
+check despite the earlier stop result reporting zero guest processes. The guard
+requested an App restart; the kernel/count failure cause is unestablished. This
+is separate from DDI keyboard input and must not be described as successful
+script-runtime reuse. No script safeguard is bypassed.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current

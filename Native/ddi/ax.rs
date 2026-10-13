@@ -21,6 +21,7 @@ struct Incoming {
     id: u32,
     conversation: u32,
     needs_reply: bool,
+    error: bool,
     data: Option<Value>,
     args: Vec<Value>,
 }
@@ -201,8 +202,12 @@ impl Ax {
         if aux > total || total.checked_add(16) != Some(payload.len()) {
             return Err("Invalid AX payload length".into());
         }
-        if payload[0] == 4 {
-            return Err("AX DTX error response".into());
+        let error = payload[0] == 4;
+        // Error payloads belong to their DTX conversation. Do not decode their
+        // archived body or mistake an older response for the current ACK.
+        if error {
+            return Ok(Incoming { id: u32_at(&header, 16)?, conversation: u32_at(&header, 20)?,
+                needs_reply: u32_at(&header, 28)? == 1, error, data: None, args: vec![] });
         }
         let data = if total > aux {
             Some(archive::decode(&payload[16 + aux..])?)
@@ -234,6 +239,7 @@ impl Ax {
             id,
             conversation,
             needs_reply,
+            error,
             data,
             args,
         })
@@ -242,6 +248,7 @@ impl Ax {
         for _ in 0..256 {
             let m = self.incoming().await?;
             if m.id == id && m.conversation == 1 && !m.needs_reply {
+                if m.error { return Err("AX DTX error response".into()); }
                 return Ok(m.data);
             }
         }
@@ -262,6 +269,7 @@ impl Ax {
             .await?;
             for _ in 0..256 {
                 let m = self.incoming().await?;
+                if m.error { return Err("AX DTX error response".into()); }
                 if m.data.as_ref().and_then(Value::as_string)
                     != Some("processDataFromRemoteDevice:")
                 {
@@ -408,6 +416,35 @@ pub fn identity(v: &Value) -> Result<(u64, u64), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn unsubscribe_after_error(error_id: u32) -> Result<(), String> {
+        let (mut server, reader) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            let mut header = [0u8; 32];
+            server.read_exact(&mut header).await.unwrap();
+            let mut payload = vec![0; u32_at(&header, 12).unwrap() as usize];
+            server.read_exact(&mut payload).await.unwrap();
+            let id = u32_at(&header, 16).unwrap();
+            let mut old = Message::new(MessageHeader::new(0, 1, error_id, 1, 0, false),
+                PayloadHeader::default(), None, None).serialize();
+            old[32] = 4;
+            server.write_all(&old).await.unwrap();
+            let ack = Message::new(MessageHeader::new(0, 1, id, 1, 0, false),
+                PayloadHeader::default(), None, None).serialize();
+            server.write_all(&ack).await.unwrap();
+        });
+        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true };
+        let result = ax.close().await;
+        peer.await.unwrap();
+        result
+    }
+    #[tokio::test]
+    async fn unsubscribe_ack_ignores_an_older_error_conversation() {
+        assert!(unsubscribe_after_error(19).await.is_ok());
+    }
+    #[tokio::test]
+    async fn unsubscribe_ack_keeps_its_own_error_unconfirmed() {
+        assert_eq!(unsubscribe_after_error(20).await.unwrap_err(), "AX DTX error response");
+    }
     #[test]
     fn rejects_truncated_aux_before_allocation() {
         let mut bytes = vec![0; 16];
