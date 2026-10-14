@@ -37,6 +37,7 @@
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
 		721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E07338DA36C6016FB8828 /* PhoneBackend.swift */; };
 		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
+		73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925006F86E0B486805C14187 /* StreamingSummary.swift */; };
 		7BF504059BFF50CB719B57D3 /* ipb-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */; };
 		828CF5DA8A7C898956B83BEC /* PendingEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */; };
 		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
@@ -124,6 +125,7 @@
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8B0353F740886263A926C60F /* AssistantRequestProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRequestProjection.swift; sourceTree = "<group>"; };
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
+		925006F86E0B486805C14187 /* StreamingSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingSummary.swift; sourceTree = "<group>"; };
 		92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViews.swift; sourceTree = "<group>"; };
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
@@ -241,6 +243,7 @@
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
+				925006F86E0B486805C14187 /* StreamingSummary.swift */,
 				7F385985B41CF2BDD68B588A /* SyncApply.swift */,
 				7F4597769ADE790DBCF5243A /* TextInputRequest.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
@@ -451,6 +454,7 @@
 				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
+				73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */,
 				531747ABA296FFBD9252BB24 /* SyncApply.swift in Sources */,
 				CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
@@ -545,7 +549,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
 				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
-				POCKETAGENT_LEGACY_KEYCHAIN_SERVICE = "";
 				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -610,7 +613,6 @@
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
 				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
-				POCKETAGENT_LEGACY_KEYCHAIN_SERVICE = "";
 				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

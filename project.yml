@@ -15,7 +15,6 @@ settings:
     HEADER_SEARCH_PATHS: '$(SRCROOT)/Native'
     OTHER_LDFLAGS: '$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a'
     POCKETAGENT_RUNNER_BUNDLE_ID: io.github.borealin.PocketAgent.WDA.xctrunner
-    POCKETAGENT_LEGACY_KEYCHAIN_SERVICE: ''
 packages:
   AgentKit:
     url: https://github.com/AkinoKaede/AgentKit.git
@@ -81,7 +80,6 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         PocketAgentRunnerBundleID: '$(POCKETAGENT_RUNNER_BUNDLE_ID)'
-        PocketAgentLegacyKeychainService: '$(POCKETAGENT_LEGACY_KEYCHAIN_SERVICE)'
 schemes:
   PocketAgent:
     build:

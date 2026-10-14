@@ -340,8 +340,7 @@ env -u SDKROOT python3 Scripts/build.py --development /path/to/local-signing.jso
 ```
 
 The file contains `identity`, `team`, `profile`, `bundleID` and `runnerBundleID`.
-`legacyKeychainService` is an optional migration override for an existing local
-installation. Use a development profile covering the bundle IDs you install.
+Use a development profile covering the bundle IDs you install.
 Development artifacts go to `build/development/` and are never used to generate
 the public source.
 
