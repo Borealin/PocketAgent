@@ -1,10 +1,11 @@
 import AgentKit
 import Foundation
 
-/// The model service rejected a request as larger than its context (or
-/// request size) limit. Ends the turn without a retry, a model change or a
-/// replayed action. The text names only the HTTP status, a known error code
-/// and a limit the service reported, never the response body, key or endpoint.
+/// The model service rejected a request as larger than its context window
+/// or its request size limit. Ends the turn without a retry, a model change
+/// or a replayed action. The text names only the HTTP status, a known error
+/// code and a limit the service reported, never the response body, key or
+/// endpoint.
 nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
     enum Path: Equatable, Sendable {
         /// The turn's own model request.
@@ -13,38 +14,60 @@ nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
         case summary
     }
 
+    enum Kind: Equatable, Sendable {
+        /// More tokens than the model's context window.
+        case contextWindow
+        /// More bytes than the service or a gateway accepts (HTTP 413 or a
+        /// request-size code); often images or attachments.
+        case requestSize
+    }
+
     var path: Path
+    var kind: Kind
     /// HTTP status, when the rejection was an HTTP error response.
     var status: Int?
-    /// One of `codes`, when the service sent it.
+    /// One of the known codes, when the service sent it.
     var code: String?
-    /// The limit the service reported, in tokens, when it said so.
+    /// The context limit the service reported, in tokens, when it said so.
     var reportedLimit: Int?
 
     var errorDescription: String? {
         let request = path == .summary ? "整理较早对话的请求" : "本次请求"
-        let limit = reportedLimit.map { "（服务报告上限约 \($0) token）" } ?? ""
         let source = [status.map { "HTTP \($0)" }, code].compactMap { $0 }.joined(separator: " ")
-        return "模型服务拒绝了\(request)：超过它的上下文上限\(limit)\(source.isEmpty ? "" : "，\(source)")。"
-            + "已停止本轮、不重试，也没有执行新的手机动作。可在「模型服务」中为这个模型设置更小的本机输入上限"
-            + (reportedLimit == nil ? "" : "（低于服务报告的上限）") + "，然后发送新消息：新一轮会先按上限整理较早的对话。"
+        let what = switch kind {
+        case .contextWindow: "超过它的上下文上限" + (reportedLimit.map { "（服务报告上限约 \($0) token）" } ?? "")
+        case .requestSize: "请求体积超过服务或网关的上限"
+        }
+        let advice = switch kind {
+        case .contextWindow:
+            "可在「模型服务」中为这个模型设置更小的本机输入上限" + (reportedLimit == nil ? "" : "（低于服务报告的上限）")
+                + "，然后发送新消息：新一轮会尝试先按上限整理较早的对话；没有可安全切分的位置或单段对话过大时仍可能超限，可缩短输入或开始新对话。"
+        case .requestSize:
+            "可减少图片或附件、缩短输入后发送新消息；本机输入上限只按 token 估计，不一定能避开体积限制。"
+        }
+        return "模型服务拒绝了\(request)：\(what)\(source.isEmpty ? "" : "，\(source)")。已停止本轮且不重试；拒绝后不再执行新的手机动作，此前已执行的动作和结果保留。"
+            + advice
     }
 
-    /// Provider codes that mean the request is too large for the model.
-    static let codes: Set<String> = [
-        "context_length_exceeded", "context_window_exceeded", "model_context_window_exceeded",
-        "prompt_too_long", "request_too_large",
+    /// Provider codes of a context-window overflow.
+    static let contextCodes: Set<String> = [
+        "context_length_exceeded", "context_window_exceeded", "model_context_window_exceeded", "prompt_too_long",
     ]
-    /// Message phrases (lowercased) that mean the same; checked only on a
-    /// 400/413/422 response or an in-stream failure, never on 401/403/429/5xx.
-    static let phrases = [
-        "maximum context length", "context length", "context_length", "context window", "context_window",
-        "prompt is too long", "input is too long", "too many input tokens", "input token count",
-        "maximum number of tokens allowed", "reduce the length of the messages", "range of input length",
-        "request entity too large", "payload too large",
-        "上下文长度", "上下文窗口", "超出上下文", "超过上下文", "输入长度超",
+    /// Provider codes of a request-size rejection.
+    static let sizeCodes: Set<String> = ["request_too_large", "payload_too_large"]
+    /// Phrases that by themselves state an overflow (lowercased).
+    static let overflowPhrases = [
+        "maximum context length is", "prompt is too long", "input is too long", "too many input tokens",
+        "exceeds the maximum number of tokens", "reduce the length of the messages", "range of input length should be",
     ]
-    /// Phrases of rate limits and quotas, which are never a context limit.
+    /// A context noun counts only together with an overflow verb, so field or
+    /// parameter errors ("Unknown field: context_length") are not overflows.
+    static let contextNouns = [
+        "context length", "context_length", "context window", "context_window", "input token count", "input length",
+        "上下文长度", "上下文窗口", "上下文", "输入长度",
+    ]
+    static let overflowVerbs = ["exceed", "too long", "too large", "超过", "超出", "过长", "超限"]
+    /// Phrases of rate limits and quotas, which are never a size limit.
     static let excluded = ["rate limit", "rate_limit", "per min", "tokens per", "tpm", "rpm", "quota", "限流", "频率"]
 
     /// Maps a provider rejection to this error; anything else (network,
@@ -58,11 +81,9 @@ nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
             guard case .http(let httpStatus, let body) = provider, [400, 413, 422].contains(httpStatus) else { return nil }
             status = httpStatus
             (code, message) = parse(body)
-        } else if String(describing: type(of: error)) == "AgentProviderStreamFailure" {
-            // AgentKit's in-stream provider failure (an internal type): its code and message.
+        } else if let failure = StreamFailureBridge.read(error) {
             status = nil
-            code = Mirror(reflecting: error).children.first { $0.label == "code" }.flatMap { $0.value as? String }
-            message = error.localizedDescription
+            (code, message) = failure
         } else {
             return nil
         }
@@ -71,9 +92,20 @@ nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
         if excluded.contains(where: text.contains) || normalized.map({ $0.contains("rate") || $0.contains("quota") }) == true {
             return nil
         }
-        let known = normalized.flatMap { codes.contains($0) ? $0 : nil }
-        guard known != nil || status == 413 || phrases.contains(where: text.contains) else { return nil }
-        return ProviderContextLimit(path: path, status: status, code: known, reportedLimit: reportedLimit(in: message))
+        if let normalized, contextCodes.contains(normalized) {
+            return ProviderContextLimit(path: path, kind: .contextWindow, status: status, code: normalized,
+                                        reportedLimit: reportedLimit(in: message))
+        }
+        if overflowPhrases.contains(where: text.contains)
+            || contextNouns.contains(where: text.contains) && overflowVerbs.contains(where: text.contains) {
+            return ProviderContextLimit(path: path, kind: .contextWindow, status: status, code: nil,
+                                        reportedLimit: reportedLimit(in: message))
+        }
+        if status == 413 || normalized.map(sizeCodes.contains) == true {
+            return ProviderContextLimit(path: path, kind: .requestSize, status: status,
+                                        code: normalized.flatMap { sizeCodes.contains($0) ? $0 : nil }, reportedLimit: nil)
+        }
+        return nil
     }
 
     /// `error.code`/`error.type` and `error.message` (or a top-level message)
@@ -103,5 +135,30 @@ nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
             return value
         }
         return nil
+    }
+}
+
+/// Reads AgentKit's in-stream provider failure (`response.failed`, an SSE
+/// `error` event or a body `error` field), whose type is internal to the SDK.
+/// Depends on its private shape at the pinned revision 22fc575 (Package.swift):
+/// `AgentKit.AgentProviderStreamFailure { code: String?; message: String }`,
+/// with the message as `localizedDescription`. Any other type or shape is nil,
+/// so a changed SDK falls back to the generic failure text.
+nonisolated enum StreamFailureBridge {
+    static let typeName = "AgentKit.AgentProviderStreamFailure"
+
+    static func read(_ error: any Error) -> (code: String?, message: String)? {
+        guard String(reflecting: type(of: error)) == typeName else { return nil }
+        let mirror = Mirror(reflecting: error)
+        guard let codeField = mirror.children.first(where: { $0.label == "code" }),
+              mirror.children.contains(where: { $0.label == "message" }) else { return nil }
+        let code: String?
+        let field = Mirror(reflecting: codeField.value)
+        if field.displayStyle == .optional {
+            code = field.children.first.flatMap { $0.value as? String }
+        } else {
+            code = codeField.value as? String
+        }
+        return (code, error.localizedDescription)
     }
 }
