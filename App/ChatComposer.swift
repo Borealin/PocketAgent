@@ -38,7 +38,8 @@ struct ExecutionStrip: View {
                     }
                 }
                 if let context = status?.contextLabel {
-                    Text(context).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    Text(context).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("contextBudget")
                 }
                 if let note = status?.contextNote {

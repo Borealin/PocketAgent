@@ -74,8 +74,10 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         self.modelLabel = modelLabel; self.phase = phase; self.budget = budget
     }
 
-    /// The frozen budget and the latest request estimate. An unknown window
-    /// is shown as a soft maintenance target, never as the model's limit.
+    /// The turn's frozen model, its frozen budget and the latest request
+    /// estimate (the composer may already show another model for the next
+    /// turn). An unknown window is shown as a soft maintenance target, never
+    /// as the model's limit.
     var contextLabel: String? {
         guard let budget else { return nil }
         let limit = switch budget.source {
@@ -83,7 +85,8 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         case .explicitCeiling(let ceiling): "本机输入上限 \(ceiling) token"
         case .unknown: "窗口未知：按约 \(budget.target) token 软目标整理，不是模型上限"
         }
-        return [requestEstimate.map { "本轮请求估计约 \($0) token" }, limit].compactMap { $0 }.joined(separator: " · ")
+        let figures = [requestEstimate.map { "请求估计约 \($0) token" }, limit].compactMap { $0 }.joined(separator: " · ")
+        return (modelLabel.isEmpty ? "本轮" : "本轮 \(modelLabel)") + "：" + figures
     }
 
     mutating func apply(_ event: AgentEvent, now: Date = Date()) {
