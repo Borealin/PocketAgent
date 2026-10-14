@@ -93,7 +93,13 @@ enum LongHistoryBenchmark {
             var decoded: HistoryFile?
             let decode = try seconds { decoded = try HistoryCodec.decode(data) }
             guard decoded?.sessions[0].messages.count == size else { throw Failure(detail: "解码后消息数不符") }
-            let owner = HistoryOwner(file: file, writer: { try storage.write($0) })
+            // Each actual file write is timed inside the owner's writer.
+            let timer = WriterTimer()
+            let owner = HistoryOwner(file: file, writer: { data in
+                let start = ProcessInfo.processInfo.systemUptime
+                try storage.write(data)
+                timer.last = ProcessInfo.processInfo.systemUptime - start
+            })
             let primary = file.assistant.primarySessionID
             guard let root = file.sessions[0].messages.last.flatMap({ file.assistant.scopeIndex.root(of: $0.id) }) else {
                 throw Failure(detail: "缺少根")
@@ -102,12 +108,25 @@ enum LongHistoryBenchmark {
             let firstRecord = seconds {
                 owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "预热"), to: primary, root: root) }
             }
-            var events: [Double] = []
+            // 20 events back to back (the baseline), then 20 more with the
+            // autorelease pool drained around each event (a separate method).
+            var events: [Double] = [], writers: [Double] = []
             for index in 0..<20 {
                 let event = AgentTranscriptMessage(role: .assistant, text: "事件 \(index)")
                 events.append(seconds { owner.record { try $0.appendEvent(event, to: primary, root: root) } })
+                writers.append(timer.last)
+            }
+            var drained: [Double] = [], drainedWriters: [Double] = []
+            for index in 0..<20 {
+                let event = AgentTranscriptMessage(role: .assistant, text: "排空后事件 \(index)")
+                autoreleasepool {
+                    drained.append(seconds { owner.record { try $0.appendEvent(event, to: primary, root: root) } })
+                    drainedWriters.append(timer.last)
+                }
             }
             guard owner.health == .ready else { throw Failure(detail: "写入失败") }
+            let rest = zip(events, writers).map { $0 - $1 }
+            let drainedRest = zip(drained, drainedWriters).map { $0 - $1 }
             // Read registration of a request whose context holds the chain of
             // every earlier root; then a forget preview whose closure spans it.
             let allRoots = file.sessions[0].messages.compactMap { message in
@@ -129,10 +148,23 @@ enum LongHistoryBenchmark {
                             "decodeSeconds": decode, "roots": allRoots.count, "registerReadsSeconds": register,
                             "forgetPreviewSeconds": preview, "forgetClosureRoots": closure, "validateGraphSeconds": validate,
                             "recordP50Seconds": percentile(events, 0.5), "recordP95Seconds": percentile(events, 0.95),
+                            "recordSamples": events, "writerSamples": writers, "encodeAndValidateSamples": rest,
+                            "writerP50Seconds": percentile(writers, 0.5), "writerP95Seconds": percentile(writers, 0.95),
+                            "encodeAndValidateP50Seconds": percentile(rest, 0.5),
+                            "encodeAndValidateP95Seconds": percentile(rest, 0.95),
+                            "drainedRecordSamples": drained, "drainedWriterSamples": drainedWriters,
+                            "drainedRecordP50Seconds": percentile(drained, 0.5), "drainedRecordP95Seconds": percentile(drained, 0.95),
+                            "drainedEncodeAndValidateP95Seconds": percentile(drainedRest, 0.95),
                             "firstRecordSeconds": firstRecord, "fullDisplayBuildSeconds": display,
                             "displayItems": items.count, "tail400DisplayBuildSeconds": tail])
         }
         return try JSONSerialization.data(withJSONObject: ["configuration": label, "results": results],
                                           options: [.prettyPrinted, .sortedKeys])
     }
+}
+
+/// The duration of the owner's most recent file write (main actor only).
+@MainActor
+private final class WriterTimer {
+    var last: Double = 0
 }
