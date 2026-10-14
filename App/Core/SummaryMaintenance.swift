@@ -32,6 +32,9 @@ enum SummaryMaintenance {
                     deadline: MaintenanceDeadline, progress: ProgressCoalescer? = nil) async throws {
         var predecessor = plan.predecessor
         let forgetEpoch = owner.file.assistant.memory.forgetEpoch
+        if let tip = predecessor, plan.predecessorDepth + plan.folds.count > AssistantContext.maxChainDepth {
+            predecessor = try checkpoint(tip, turn: turn, owner: owner, forgetEpoch: forgetEpoch)
+        }
         for fold in plan.folds {
             let messages = fold.flatMap(\.messages)
             guard let last = messages.last else { continue }
@@ -70,6 +73,19 @@ enum SummaryMaintenance {
             catch { throw StorageCommitError.saveFailed(error.localizedDescription) }
             predecessor = candidate
         }
+    }
+
+    /// The chain would pass the depth limit: re-root the valid tip first, as
+    /// a host-only CAS commit with no model request (`AssistantContext.checkpoint`).
+    private static func checkpoint(_ tip: StoredCompaction, turn: Turn, owner: HistoryOwner,
+                                   forgetEpoch: UInt64) throws -> StoredCompaction {
+        try ensureStorage(owner)
+        try checkSources(owner.file, fold: [], predecessor: tip, turn: turn, forgetEpoch: forgetEpoch)
+        let checkpoint = try AssistantContext.checkpoint(of: tip, in: owner.file, forgetEpoch: forgetEpoch)
+        do { try owner.transact { try $0.commitSummary(checkpoint) } }
+        catch let error as SummaryPreparationError { throw error }
+        catch { throw StorageCommitError.saveFailed(error.localizedDescription) }
+        return checkpoint
     }
 
     private static func ensureStorage(_ owner: HistoryOwner) throws {

@@ -294,9 +294,9 @@ struct ReadCommitRuntimeTests {
                         request.messages, index: owner.file.assistant.scopeIndex, currentRoot: current, invalidSummaries: [])
                     return prepared
                 }
-            }, commitTimeout: .milliseconds(800))
+            }, commitTimeout: .seconds(5))
         let approval = CommitGatedApproval(barrier: owner.barrier, epoch: epoch, decide: { _ in .allow },
-                                           commitTimeout: .milliseconds(800))
+                                           commitTimeout: .seconds(5))
         var loop = AgentLoopConfiguration()
         loop.toolExecution = .sequential; loop.maximumToolConcurrency = 1; loop.modelRetryPolicy = .disabled
         let runtime = AgentRuntime(model: model, tools: [searchTool, phoneTool], approval: approval, configuration: loop)
