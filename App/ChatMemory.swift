@@ -77,6 +77,31 @@ extension ChatController {
         return true
     }
 
+    // MARK: Clear the conversation, keep memory
+
+    /// Why "清空对话，保留记忆" cannot run now, or nil. Covers this device's
+    /// accepted, queued or preparing primary job and steering being settled,
+    /// in addition to the history checks repeated in the transaction.
+    var clearPrimaryBlocker: String? {
+        guard storageReady else { return owner.health.message ?? "历史存储不可用，暂不能清空。" }
+        if jobs[primaryID] != nil || settlingSteers > 0 { return ClearPrimaryError.busy.localizedDescription }
+        return file.clearPrimaryBlocker()?.localizedDescription
+    }
+
+    /// One transaction: the assistant line becomes empty (see
+    /// `HistoryFile.clearPrimaryConversation`); a failed write changes nothing.
+    /// Memory stays; files no longer referenced are removed afterwards.
+    func clearPrimaryConversation() {
+        if let blocker = clearPrimaryBlocker { notice = blocker; return }
+        let old = primaryID
+        guard transact({ try $0.clearPrimaryConversation() }) else { return }
+        referenceDrafts[old] = nil; visibleLimit[old] = nil; draftRevisions[old] = nil
+        if old != primaryID { statuses[old] = nil }
+        cancelImports(for: old)
+        cleanupAttachments()
+        memoryNotice = "已清空“你的助理”的对话；记忆已保留（\(assistant.memory.active.count) 条）。"
+    }
+
     // MARK: Primary recovery (explicit only)
 
     func choosePrimary(_ id: UUID) {
