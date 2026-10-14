@@ -296,10 +296,12 @@ private struct SessionDrawer: View {
             }
             Button("取消", role: .cancel) { pendingDelete = nil }
         } message: { _ in Text("会话及其本机图片将从这台设备删除；已开启同步时其他设备也会删除。") }
-        .confirmationDialog("清空“你的助理”的对话？", isPresented: $confirmClear, titleVisibility: .visible) {
+        // An alert keeps both choices visible (a popover dialog hides Cancel).
+        .alert("清空“你的助理”的对话？", isPresented: $confirmClear) {
             Button("清空对话，保留记忆", role: .destructive) { withAnimation { chat.clearPrimaryConversation() } }
                 .accessibilityIdentifier("confirmClearAssistant")
             Button("取消", role: .cancel) {}
+                .accessibilityIdentifier("cancelClearAssistant")
         } message: {
             Text("将删除助理主线的全部对话、草稿、引用、对话摘要和只属于这些对话的图片，不能撤销；已开启同步时其他设备也会删除。"
                  + "已保存的记忆、遗忘记录、当前模型与项目、模型服务和其他任务都会保留。")
