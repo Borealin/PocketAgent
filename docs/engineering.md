@@ -385,6 +385,11 @@ Confirmed problems found during implementation review and fixed:
 - Per-request memory relevance used the last user message, which on phone turns
   is the appended screenshot caption. It now uses the latest recorded real user
   message.
+- Portable messages and sessions still omitted nullable keys (tool call ID/name,
+  model text, attribution, selection, conflict parent) and defaulted missing
+  attachments, preserving pre-assistant-v1 canonical bytes. They are now strict:
+  explicit nulls, required keys, attachments always present; canonical bytes and
+  the derived conflict-copy IDs are pinned (independently recomputed).
 - Repeated, alternating or empty summary snapshots counted as maintenance
   progress and refreshed the idle timer; only new non-empty content counts now,
   deduplicated across the whole response rather than a recent window.
