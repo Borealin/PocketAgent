@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：设计中，推荐路线尚未实现
+> 状态：公开资料与固定版本源码调研已完成；实现方案仍在设计中
 >
 > 最后核对：2026-10-14
 >
@@ -23,32 +23,90 @@
 | Muse | [Meta 官方介绍](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) | 记住偏好与目标、长期协助的产品方向 |
 | Grok Bot | [Grok Bot 101](https://x.ai/bot/guides/grok-bot-101) | 持续使用的助理、持久执行环境与 routines |
 | OpenAI dot | [OpenAI Docs：Tasks and memory](https://learn.chatgpt.com/docs/dots/tasks-and-memory) | 一个助理协调多项责任；对话上下文与持久笔记分开 |
+| OpenClaw | [Home 主会话](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/docs/concepts/main-session.md) | 固定版本文档与 TypeScript 源码核验 |
+| Hermes Agent | [Persistent Memory](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/website/docs/user-guide/features/memory.md) | 固定版本文档与 Python 源码核验 |
 | iOS 生命周期 | [Apple：BGContinuedProcessingTaskRequest](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtaskrequest) | 用户在前台发起、可继续到后台的工作 |
 
-本次交付是源码调研与可实施方案，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
+用户最新要求是“先做好调研”。本次交付是公开资料与固定版本源码调研；下文的实现建议保留为待讨论设计，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
 
-## 2. 技术调研结论
+## 2. 公开项目调研与结论
 
-推荐采用“固定主会话＋完整历史＋独立长期记忆＋有预算的模型上下文”，保留当前 SwiftUI、AgentKit 和 PhoneExecutor。优先补齐宿主集成，无须先替换 AgentKit、引入向量数据库或搭建云端 agent。
+调研确认这些项目都把持续使用的助理、当前工作上下文、持久记忆和历史记录分层管理。OpenClaw 当前直接提供 Home 主会话；Hermes 则更强调小容量个人记忆、按需历史检索和会话边界。Muse、Grok Bot、OpenAI dot 的公开信息能支持产品与部分运行架构判断，本次未取得三者完整的会话/记忆 harness 源码，不能据此声称复刻其内部算法。
 
-1. 单入口先改变导航与默认落点；已有会话原样保留在历史入口，避免为了表面统一而拼接不同任务的工具转录。
-2. 完整历史用于回看与检索，模型只接收相关记忆、压缩摘要和近期消息。不能无限重发整条历史，也不能用摘要覆盖原始消息。
-3. 当前锁定的 AgentKit 已具备记忆和压缩原语，PocketAgent 尚未接入。核心工作是持久化、能力注册、预算控制和用户可见的记忆管理。
-4. 首版仍按单轮串行执行。运行中输入要能表达“补充这件事”与“下一件事”，防止所有新话题都被当成 steering。
-5. 单设备先交付体验；现有同步可继续保留历史，但“双设备共享同一个可并发编辑主线”需要额外定义，不能靠隐藏冲突副本实现。
+1. 产品上的连续性可以由稳定助理身份和一个聊天入口承接。工作上下文可以原位压缩或在明确边界重建；后台 session ID 的生命周期不是产品入口的定义。
+2. OpenClaw 是单入口交互的直接参考；Hermes 的小型偏好记忆＋历史按需检索更适合作为 PocketAgent 本机实现的参考。两者都保留压缩前记录供历史访问。
+3. 当前两个固定版本都支持原位压缩；Hermes 当前默认 `in_place=true`。没有依据要求 PocketAgent 在每次压缩时建立新 session，也不应按旧教程默认每日清空。
+4. 记忆学习、历史检索和压缩分别有触发与预算。保存事实由实际工具写入完成；记忆文件、摘要或模型声称“已记住”不能互相替代。
+5. PocketAgent 已有固定 AgentKit 的记忆/压缩原语。下文保留适配建议供后续讨论；按用户“先做好调研”的要求，当前不开始实现，不引入新的后台服务。
 
 <details>
-<summary>调研详情、源码落点与拒绝方案</summary>
+<summary>公开资料、固定版本源码与差异核验</summary>
 
-### 参照产品的可借鉴部分
+### 核验方法与证据范围
 
-| 产品 | 官方资料支持的特征 | 本项目采纳的部分 |
-|---|---|---|
-| Muse | 记住个人偏好；目标可以持续推进，后台工作依赖其云端环境 | 同一助理的长期连续性与可删除记忆 |
-| Grok Bot | 持久云端电脑；聊天、routines、事件触发；可组合多个 bot | 对话入口与执行工作的分离，不要求首版复刻其后台服务 |
-| OpenAI dot | 同一对话可切换任务；任务有各自上下文；持久笔记不同于完整转录 | 主线对话、任务状态、长期记忆分别管理 |
+- 商业产品只采用官方产品文档、研究文章与官方仓库；不把泄露提示词、同名社区项目或模型的自述当作内部实现证据。
+- OpenClaw 核验固定提交 [`ddaa0bd2b0dd077c946ace62a4b87383f032e26e`](https://github.com/openclaw/openclaw/commit/ddaa0bd2b0dd077c946ace62a4b87383f032e26e)，提交日期 2026-10-13。
+- Hermes Agent 指 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)，核验固定提交 [`d97007c32d6340f7ba79ac1dfb5773cc00846448`](https://github.com/NousResearch/hermes-agent/commit/d97007c32d6340f7ba79ac1dfb5773cc00846448)，提交日期 2026-10-13；与同名模型、其他 Hermes 项目区分。
+- 两个开源清单初稿来源：peer；主会话复核路由/reset、默认压缩、记忆快照刷新和搜索等决定性源码。未安装、执行或连接用户部署，结论属于静态实现核验。
 
-以上是对官方公开产品行为的归纳，不是这些产品内部实现的审计。推荐架构是根据 PocketAgent 源码作出的设计判断。
+### 公开程度与共同思路
+
+| 项目 | 本次获得的公开信息 | 连续性来自什么 | 尚未核实的边界 |
+|---|---|---|---|
+| Muse | 官方产品说明、安全运行架构、模型与硬件 SDK 公开资料 | 同一用户的 VM、文件/记忆、持久应用状态、子任务 | 具体记忆提炼、检索与压缩算法；完整个人助理 harness |
+| Grok Bot | 官方 Bot 管理、聊天、电脑/任务文档 | 命名 Bot 的角色、偏好和工作摘要；持久云端电脑 | 记忆 schema、压缩触发、历史合并源码 |
+| OpenAI dot | OpenAI Docs 的任务、记忆和跨渠道行为说明 | 同一 dot 的持久笔记；工作任务各自有上下文 | 笔记生成/召回和内部 session 生命周期源码 |
+| OpenClaw | 官方文档与本次固定版本 TypeScript 源码 | Home 主会话、SQLite transcript、Markdown 记忆、检索和压缩 | 实际部署参数、长期召回质量与运行可靠性 |
+| Hermes Agent | 官方文档与本次固定版本 Python 源码 | 稳定聊天路由、SQLite 历史、小容量个人记忆、原位压缩 | 用户部署行为、记忆学习及中文检索实际质量 |
+
+### Muse：公开了真实运行架构，记忆算法披露仍有限
+
+[Meta 的安全架构文章](https://research.meta.ai/blog/security-and-safety-for-ai-agents-our-approach-with-muse)说明客户端连接用户专属 VM；Hatch harness 与用户工作区位于 runtime container，持久应用状态位于独立 Postgres，凭证与外部动作控制在另外的服务中。文章也说明用户可查看、编辑、下载自己的文件与记忆，VM 可承载并发子 agent 和 cron。这里“机器内存/RAM”与“助理记忆”需要分别理解。
+
+[Muse Wonder 官方介绍](https://about.fb.com/news/2026/10/introducing-muse-wonder-models/)于 2026-10-12 将 Active Memory 描述为跨对话保留重要信息并取回相关细节。这是公开能力描述，未说明记忆库 schema、召回索引、摘要边界或写入策略；不能据此认定记忆通过模型权重在线学习。
+
+存在可核实的官方开放材料：[Muse Glimmer 开放模型权重](https://research.meta.ai/blog/introducing-muse-glimmer-open-agentic-model)与 [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk)。后者是 ESP32/Linux 硬件接入 SDK 和固件。它们分别提供模型或设备接入能力；本次没有在这些资料中拿到 Muse 个人助理完整的会话/长期记忆实现。
+
+### Grok Bot：长期身份以 Bot 为单位，可有多个角色
+
+[官方 overview](https://docs.x.ai/grok-bot/overview)说明同一账户的 Bots 共享云端电脑与文件/浏览器登录状态，但每个 Bot 的会话和学习上下文独立，记忆内容包括稳定偏好、角色信息和过往工作摘要。[Bot 管理文档](https://docs.x.ai/grok-bot/bots)把持久描述和任务消息区分，也明确复制 Bot 配置不复制其聊天历史与学习记忆。
+
+因此可借鉴的是“固定助理身份拥有记忆，具体任务有范围”；该产品本身允许多个 Bot 和群聊，公开资料并没有要求一个账户只能有一条永久对话。[聊天文档](https://docs.x.ai/grok-bot/chat-and-collaboration)支持执行中继续发送指令、按消息回应和调整优先级。公开文档未给出其内部记忆更新和压缩实现。
+
+### OpenAI dot：持久笔记与工作上下文明确分开
+
+[OpenAI Docs：Tasks and memory](https://learn.chatgpt.com/docs/dots/tasks-and-memory)说明 dot 使用当前对话、相关 ChatGPT memory 和自己的持久笔记；笔记包含偏好、决定与进行中的工作，属于选取的信息，不是完整转录。它可以在同一对话中协调多项工作，任务有自己的上下文，不自动接收用户全部历史。跨渠道访问同一个 dot 会延续笔记，但不同渠道的可见消息仍分别保留。
+
+这直接支持“一个助理入口＋按需上下文”的产品方向。公开说明不足以确认其内部如何做 token 预算、记忆写入、摘要持久化和冲突处理。
+
+### OpenClaw：Home 长期主会话是当前直接参考
+
+1. **稳定入口。** [main-session 文档](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/docs/concepts/main-session.md#L10-L28)把 Home 定义为个人助理默认入口，默认 DMs 汇入 `agent:<agentId>:main`，其他任务可在独立 threads 中工作并返回结果。源码 [DM routing](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/routing/session-key.ts#L215-L252)的默认 scope 是 main；[reset-policy.ts](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/config/sessions/reset-policy.ts#L26-L28)的默认 reset mode 为 none，daily/idle 是配置选择。
+2. **当前存储。** [官方 store 文档](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/docs/reference/session-management-compaction/store.md#L9-L12)说明 session rows 与 transcript events 均位于每 agent 的 SQLite；历史有边界/树结构，包含原消息、工具结果和摘要。[SQLite 路径解析](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/config/sessions/session-sqlite-target-paths.ts#L17-L46)与此一致。旧 JSONL/`sessions.json` 是迁移或归档材料，不能用旧教程代替当前运行时说明。
+3. **分层记忆。** [memory 文档](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/docs/concepts/memory.md#L20-L58)区分小型 USER.md、策展后的 MEMORY.md 和详细 daily notes。日记用于按需检索，近期日记可在 reset 后重新加载；完整日记不在每轮全量注入。
+4. **检索能力。** 默认 plugin slot 是 [memory-core](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/plugins/slots.ts#L17-L20)。[搜索实现](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/extensions/memory-core/src/memory/manager-search-orchestration.ts#L398-L430)具备 keyword-only 分支；后续 [vector 与 hybrid 排序](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/extensions/memory-core/src/memory/manager-search-orchestration.ts#L512-L568)按配置与实际 provider 可用性工作。可选 LanceDB plugin 是另一种 memory provider，不能据此称默认实现必须依赖 LanceDB。
+5. **学习与压缩。** [flush-plan 源码](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/extensions/memory-core/src/flush-plan.ts#L12-L28)给 pre-compaction flush 设定当天 daily note 的追加目标，并将 bootstrap 文件设为只读。Flush 是阈值维护；[dreaming consolidation](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/docs/concepts/memory.md#L51-L58)另行整理有用信息。写日记、整理长期记忆和摘要当前上下文是不同流程。
+
+**本版文档差异：** main-session 文档称 reset 分配新的 live session ID；但 [session 初始化源码](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/auto-reply/reply/session.ts#L570-L583)对普通 durable session 沿用 transcript identity，并 [建立 reset boundary](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/src/auto-reply/reply/session.ts#L746-L753)。ACP 等路径可轮转。因此此研究采用“工作上下文重置、历史保留”的语义，不声称每次 reset 必换物理 ID。未运行重置复现，这属于源码与文档的范围差异核验。
+
+### Hermes Agent：小型个人记忆与真实历史检索
+
+1. **连续入口。** [gateway session key](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/gateway/session.py#L685-L720)包含 profile、平台和聊天/thread 维度，每个稳定路由指向活跃工作 session。[显式 reset](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/gateway/session.py#L1134-L1155)产生新 ID，并保留旧 parent。[用户文档](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/website/docs/user-guide/features/memory.md#L59-L65)说明消息平台会话可跨重启持续，建议在自然任务边界 `/new`。
+2. **小容量策展记忆。** [初始化代码](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/agent/agent_init.py#L1297-L1334)的内置默认预算为 MEMORY.md 2,200 字符、USER.md 1,375 字符，可配置。超预算更新会拒绝，由模型整理条目。[memory tool](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/tools/memory_tool.py#L374-L397)当前提供 add/patch/remove，而不是无边界堆积全部历史。
+3. **更新触发。** 默认 nudge interval 为 10 个用户 turn；[turn 计数](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/agent/turn_context.py#L753-L762)达到间隔后可启动后台 review，由模型决定是否实际调用 memory tool。公开的“学习”在这些已核验路径里体现为数据/工具操作，不代表每条消息都保存或模型权重持续训练。
+4. **历史检索。** [`session_search` schema](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/tools/session_search_tool.py#L651-L666)明确返回实际 SQLite 消息，无额外 LLM 摘要；[FTS5 结果处理](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/tools/session_search_tool.py#L389-L431)允许按消息锚点继续读取。自动学习、历史搜索和上下文摘要不应合并为一个组件。
+5. **当前默认原位压缩。** [`compression.in_place` 默认 true](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/agent/agent_init.py#L1575-L1577)；[提交实现](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/agent/conversation_compression.py#L3736-L3743)将旧消息 soft-archive，仍可检索，同时保存缩减后的活跃上下文。显式关闭 in_place 才使用可选的 parent→child 轮转路径；不能将旧版轮转描述为当前默认。
+
+**本版记忆刷新边界：** [MemoryStore](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/tools/memory_tool_store.py#L618-L621)在普通 turn 中使用冻结的 prompt snapshot，以保持缓存前缀。memory 文档说新写入在新 session 才注入；[prompt invalidation 源码](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/agent/system_prompt.py#L808-L826)还在压缩边界重新加载记忆。因此“只能新 session 生效”范围不完整，普通 turn、成功压缩重建和新 session 应分别描述。PocketAgent 每轮创建 runtime，适合冻结当前轮并在下一轮重新取有效记忆。
+
+### 相似性、差异与 PocketAgent 的取舍
+
+共同模式可以归纳为四层：长期助理身份、有限工作上下文、持久事实/偏好、可追溯历史。原位压缩和切换工作段都是可能实现，连续 UI 不要求固定采用其中一个。主动调度依赖运行生命周期，应与记忆管理分开设计。
+
+推荐借鉴 OpenClaw 的 Home 入口与历史窗口语义，借鉴 Hermes 的小型策展记忆＋按需取回原文，继续用现有 AgentKit 实现模型侧接口。先不复制 daily notes、dreaming、外部 memory provider 和多渠道 gateway 的全部复杂度，也不因为 OpenClaw 使用向量检索就把 embeddings 设为首版依赖。中文 FTS/文本与语义检索的实际召回需在实现阶段对照评估。
+
+根许可证方面，本次固定版本的 [OpenClaw](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/LICENSE)与 [Hermes](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/LICENSE)均为 MIT。此处只确认仓库文件；本次不复制代码，若后续直接复用需核对具体文件、第三方依赖与 notice。
+
 
 ### 当前能力与具体缺口
 
@@ -113,6 +171,7 @@ flowchart TD
 - 首屏直接打开稳定的主会话，标题使用助理名称；删除主界面的新会话按钮。
 - 原会话侧栏改成“历史 / 记忆 / 设置”。旧会话可阅读、检索和显式继续，不自动拼入主线；冲突副本有可见入口。
 - 在 HistoryFile 内保存 `assistantProfile` 与 `primarySessionID`，将主线身份和原始记录一起原子写入；不要把它仅存为临时 selectedID。
+- 助理身份与入口指针分开：`primarySessionID` 表示当前主线落点，不要求所有内部运行永远共用一个工作上下文。首版可原位压缩；若以后增加 reset boundary 或工作段，仍保留助理身份、原始历史和可见连续性。
 - 当前设备的一次升级默认继续升级前有效的选中会话，并固化为主线；没有历史时只创建一次新主线。selectedID 仍可用于临时浏览旧记录，重启回主线。
 - 单设备 MVP 的主线选择是本地状态，不声明它已实现多设备统一身份。需跨设备共享时再定义 portable assistant identity 与选择规则。
 - 保留现有会话/消息 ID、顺序、内容、草稿、附件引用、归属和 provider 配置。迁移只针对当前安装数据的一次升级；不扩大已被用户取消的一般多版本兼容工程。
@@ -150,6 +209,7 @@ flowchart TD
 - 记忆区分全局个人偏好、项目决定、暂时任务信息；跨项目检索过滤作用域。来源、时间和有效性必须可查看、可编辑、可删除。
 - 手机 node、snapshot_id、前台状态、坐标和暂时登录状态留在执行上下文中，每轮重新观察；不把它们记为长期可执行事实。
 - 摘要记录短期进展，记忆保存长期事实；不能把“模型曾声称成功”提升为实际完成结果。决策和当前请求以用户最新表达为准。
+- 记忆版本在接受一轮时冻结；用户纠正或工具实际更新的有效记忆由下一轮重新获取。不能把显示层一条长期对话等同于永久冻结同一份个人记忆提示。
 - “忘记这条记忆”删除条目并保留删除标记，同时失效相关摘要/索引并抑制自动重新学习；“删除历史”是独立数据操作。单纯删除一条记忆而继续原样注入旧摘要不足以实现遗忘。
 - 记忆默认本地，不把 Keychain、配对记录、设备配置或本地照片字节加入 portable snapshot。用户手动清理和忘记操作应能阻止 stale snapshot 将内容重新带回。
 
@@ -188,7 +248,7 @@ Apple 将当前后台 API 定义为前台用户动作发起的工作延续；本
 
 ### 验证范围
 
-本次已完成源码与固定 AgentKit revision 的静态核对，未运行新的 App 构建、安装、iCloud 或实机验收；上表均是设计，不能描述为已交付功能。
+本次已完成官方公开资料、两个开源固定提交及固定 AgentKit revision 的静态核对，未运行新的 App 构建、安装、iCloud 或实机验收；上表均是设计，不能描述为已交付功能。
 
 实现时需覆盖：当前安装数据的一次升级保留；重启回到主线；模型切换不丢记忆；跨天偏好/决定检索；中文关键词；忘记后不被摘要重新注入；一轮内与跨轮压缩不破坏工具邻接；摘要失败不重放；新请求和 steering 分流；长历史滚动/落盘性能；同步分叉仍可见。交付沿用 core tests、iOS build、IPA inspection 和指定真实设备 exercise。新增 portable 语义再增加真实 iCloud/双设备验证，不为只读设计运行无关构建。
 
@@ -196,7 +256,7 @@ Apple 将当前后台 API 定义为前台用户动作发起的工作延续；本
 
 ## 4. 资源与交付计划
 
-推荐顺序为主线与迁移 → 上下文预算/压缩 → 记忆/历史检索 → 执行期输入分流与整体验证。四项组成单设备 MVP；多设备统一身份与主动后台工作单独规划。
+实现方案确认后，推荐顺序为主线与迁移 → 上下文预算/压缩 → 记忆/历史检索 → 执行期输入分流与整体验证。四项组成单设备 MVP；多设备统一身份与主动后台工作单独规划。
 
 | 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
