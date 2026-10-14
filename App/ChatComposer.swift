@@ -113,8 +113,10 @@ struct ChatComposer: View {
     private var running: Bool { chat.isRunning(session.id) }
     private var primary: Bool { chat.isPrimary(session.id) }
     private var target: InputTarget { chat.inputTarget(session.id) }
+    private var remembering: Bool { primary && chat.rememberMode }
     private var placeholder: String {
-        switch target {
+        if remembering { return "输入要记住的内容，确认后才保存…" }
+        return switch target {
         case .steer: "追加到本轮…"
         case .next: "下一件事（本轮结束后开始）…"
         case .send: primary ? "输入消息，或“记住：…”保存记忆" : "输入消息"
@@ -156,6 +158,10 @@ struct ChatComposer: View {
                       systemImage: "photo.badge.exclamationmark")
                     .font(.caption).foregroundStyle(.orange)
             }
+            if remembering {
+                Label("记住模式：发送会打开记忆编辑，确认后才保存；不会发给模型，也不会操作手机。", systemImage: "bookmark")
+                    .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("rememberModeHint")
+            }
             if !session.draftAttachments.isEmpty || chat.isImporting(session.id) { draftImages }
             HStack(spacing: 8) {
                 // Model first. On a narrow row the provider name goes, then the
@@ -167,6 +173,13 @@ struct ChatComposer: View {
                 }
                 .layoutPriority(1)
                 Spacer(minLength: 4)
+                if primary {
+                    Button { chat.rememberMode.toggle() } label: {
+                        Image(systemName: chat.rememberMode ? "bookmark.fill" : "bookmark")
+                    }
+                    .accessibilityLabel(chat.rememberMode ? "记住模式：开" : "记住模式")
+                    .accessibilityIdentifier("rememberMode")
+                }
                 Button { showPhotos = true } label: { Image(systemName: "photo.on.rectangle") }
                     .disabled(remaining == 0).accessibilityLabel("照片图库").accessibilityIdentifier("addPhoto")
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -186,17 +199,34 @@ struct ChatComposer: View {
                     .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .focused(inputFocused)
                     .accessibilityIdentifier("chatInput")
-                Button { chat.send() } label: {
-                    Image(systemName: target == .steer ? "arrow.turn.down.right" : (target == .next ? "text.badge.plus" : "arrow.up"))
-                        .font(.body.weight(.bold)).frame(width: 36, height: 36)
-                        .background(chat.canSend ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
-                        .foregroundStyle(.white)
+                if remembering {
+                    Button { chat.beginRemember() } label: {
+                        Image(systemName: "bookmark").font(.body.weight(.bold)).frame(width: 36, height: 36)
+                            .background(chat.canRemember ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain).disabled(!chat.canRemember)
+                    .accessibilityLabel("保存为记忆…").accessibilityIdentifier("rememberMessage")
+                } else {
+                    Button { chat.send() } label: {
+                        Image(systemName: target == .steer ? "arrow.turn.down.right" : (target == .next ? "text.badge.plus" : "arrow.up"))
+                            .font(.body.weight(.bold)).frame(width: 36, height: 36)
+                            .background(chat.canSend ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain).disabled(!chat.canSend)
+                    .accessibilityLabel(target == .steer ? "追加指令" : (target == .next ? "加入下一件事" : "发送")).accessibilityIdentifier("sendMessage")
                 }
-                .buttonStyle(.plain).disabled(!chat.canSend)
-                .accessibilityLabel(target == .steer ? "追加指令" : (target == .next ? "加入下一件事" : "发送")).accessibilityIdentifier("sendMessage")
             }
         }
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
+        .sheet(item: $chat.rememberRequest) { request in
+            MemoryEditorView(chat: chat, workspaces: workspaces,
+                             draft: MemoryDraft(scope: chat.defaultMemoryScope,
+                                                content: request.text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                             commit: { chat.saveRemember($0, request: request) },
+                             done: { chat.rememberRequest = nil })
+        }
         .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: max(1, remaining),
                       selectionBehavior: .ordered, matching: .images)
         .onChange(of: photoItems) { _, items in loadPhotos(items) }
