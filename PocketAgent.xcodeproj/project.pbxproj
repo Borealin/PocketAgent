@@ -31,6 +31,7 @@
 		58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */; };
 		6310CDFC25B8F19D1BAE638E /* AgentContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2149D605EB4681C28AA432 /* AgentContextBuilder.swift */; };
 		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
+		675D3CF2870105A39B860779 /* LongHistoryBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */; };
 		68FF19DDFDD6EF2DCBBD408A /* CanonicalDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */; };
 		6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */; };
 		70E1558DD60DD52607A32538 /* HistoryOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FA7F23F4F43343D30E3D16A /* HistoryOwner.swift */; };
@@ -103,6 +104,7 @@
 		21C75A8C07B02E84366B00D3 /* PocketISH.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PocketISH.m; sourceTree = "<group>"; };
 		288C5CC7122C0F08F9B29C94 /* TurnGates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnGates.swift; sourceTree = "<group>"; };
 		2A30E3059701B9B77BA06A7D /* PhoneControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneControl.swift; sourceTree = "<group>"; };
+		32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongHistoryBenchmark.swift; sourceTree = "<group>"; };
 		383A79C611AE1573F3276AA9 /* ish-root.tar.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; path = "ish-root.tar.gz"; sourceTree = "<group>"; };
 		38833AB31402CD8F11B2F334 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
@@ -237,6 +239,7 @@
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */,
 				B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */,
+				32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */,
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B223C0E5700F2D9CA4EF175E /* MemoryIntent.swift */,
 				B5507EA1F8D4F7602AAC5689 /* MemoryLedger.swift */,
@@ -444,6 +447,7 @@
 				F887E531FDE10E1EFD4C5B72 /* HistoryStorage.swift in Sources */,
 				EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */,
 				CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */,
+				675D3CF2870105A39B860779 /* LongHistoryBenchmark.swift in Sources */,
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				995617D04781DEA5D74A43BB /* MemoryIntent.swift in Sources */,
 				D7451BC0E1117C33E4C6FF9B /* MemoryLedger.swift in Sources */,

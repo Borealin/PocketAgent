@@ -45,6 +45,24 @@ enum DeviceSettings {
     /// argument, system task submission fails before any dispatch permit.
     /// Absent by default; it cannot be enabled from the app UI.
     static var injectStartFailure: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentInjectStartFailure") }
+    /// Local launch argument only (not reachable from the UI): measure the long-
+    /// history write path on a synthetic file in a temporary directory and write
+    /// `Documents/long-history-benchmark.json`. The real history is not touched.
+    static var longHistoryBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentLongHistoryBenchmark") }
+
+    @MainActor
+    static func runLongHistoryBenchmarkIfRequested() {
+        guard longHistoryBenchmark else { return }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-bench-\(UUID().uuidString)")
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let output = documents.appendingPathComponent("long-history-benchmark.json")
+        do {
+            try LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: "device release build")
+                .write(to: output, options: .atomic)
+        } catch {
+            try? Data(#"{"error":"\#(error.localizedDescription)"}"#.utf8).write(to: output, options: .atomic)
+        }
+    }
 
     static func tunnelEndpoint() throws -> (host: String, port: UInt16) {
         try parseEndpoint(tunnelEndpointText)
