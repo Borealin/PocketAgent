@@ -284,6 +284,8 @@ final class PhoneExecutor {
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
     private var compactedTaskTitle: String?
+    /// Effects of the phone call in progress (calls are serial).
+    private var callEffects = PhoneCallEffects()
     init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool,
          deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
@@ -408,6 +410,7 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
+        callEffects.preparationSent()
         try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
         try proceed()
         try await Task.sleep(for: .milliseconds(300))
@@ -539,7 +542,8 @@ final class PhoneExecutor {
     /// revoked or cancelled action never issues a new effect. An effect that
     /// was already sent is reported as unconfirmed and never repeated.
     private func perform(_ call: AgentToolCall, lease: ScriptLease? = nil) async throws -> (content: String, isError: Bool) {
-        var issued = false
+        callEffects = PhoneCallEffects()
+        var issued: Bool { callEffects.issued }
         var openedBundle: String?
         var expectedInput: (identity: String, text: String)?
         var submittedInput = false
@@ -554,14 +558,15 @@ final class PhoneExecutor {
         }
         func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
-            let earlierEffect = issued
-            issued = true
+            let before = callEffects.beginAction()
             do { try await operation() } catch PhoneObservationIssue.targetCovered {
-                // The native preflight refused before any touch was sent.
-                issued = earlierEffect
+                // The native preflight refused before any touch was sent; an
+                // executor preparation gesture already sent stays reported.
+                callEffects.refusedBeforeTouch(restoring: before)
                 throw PhoneObservationIssue.targetCovered
             } catch let failure as DDIOperationFailure {
-                issued = failure.actionWasIssued(after: earlierEffect)
+                // Earlier primitives and preparation gestures stay reported.
+                if !failure.actionIssued { callEffects.refusedBeforeTouch(restoring: before) }
                 throw failure
             }
             try proceed()
@@ -811,12 +816,12 @@ final class PhoneExecutor {
             if let failure = error as? DDIOperationFailure {
                 // Observation/node preparation can itself issue a system-surface
                 // gesture outside effect {}; retain its native effect metadata.
-                issued = failure.actionWasIssued(after: issued)
+                let actionIssued = failure.actionWasIssued(after: issued)
                 var result: [String: Any] = ["ok": false, "code": failure.code,
                     "message": failure.message + (failure.requiresNewTurn
                         ? " 本轮输入已停用，请结束本轮并在新回合重新观察；不要重试或切换输入方式。"
                         : " 请读取新屏幕后重新规划；本工具不会重放或自动切换输入方式。"),
-                    "action_issued": issued, "action_outcome": issued ? "unconfirmed" : "not_started",
+                    "action_issued": actionIssued, "action_outcome": actionIssued ? "unconfirmed" : "not_started",
                     "requires_new_turn": failure.requiresNewTurn, "requires_replan": !failure.requiresNewTurn,
                     "replay_allowed": false]
                 if let textInput { result["input_method"] = textInput.method.rawValue; result["input_verified"] = false }
@@ -824,7 +829,7 @@ final class PhoneExecutor {
                 do { result["screen"] = try await observe(proceed: proceed, prepareSurface: false) }
                 catch {
                     if error is ActionStopped || error is CancellationError || Task.isCancelled || model.pendingAgentCancellation {
-                        throw ActionStopped(issued: issued, reason: "本轮已取消。")
+                        throw ActionStopped(issued: actionIssued, reason: "本轮已取消。")
                     }
                     result["recovery"] = "observe_screen_required"
                 }
