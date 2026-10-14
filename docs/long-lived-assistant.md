@@ -556,7 +556,8 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - 写失败后，后续事件写成功会自动解除 saveDirty。改为只有显式 flush 解除，已失败的 epoch 不复用。
 - 源历史删除后 prune 删掉仍被其他 root 读取的源 root，丢失传递遗忘边。改为保留身份与边（unverified），解码校验边存在且无环。
 - 每请求记忆相关度取最后一条 user 消息，在手机轮实际是追加的截图说明。改为取已记录的最新真实用户消息。
-- 摘要重复/交替/空 snapshot 被计为真实进度并刷新 idle。改为只计新的非空内容。
+- 摘要重复/交替/空 snapshot 被计为真实进度并刷新 idle。改为只计新的非空内容，并在整个响应内去重。
+- portable 消息/会话仍沿用旧格式字节：可空键省略、缺失 attachments 回填。改为严格当前格式（显式 null、必需键、attachments 必有），规范字节与冲突副本 ID 已固定并独立复算。
 
 ### 拒绝方案
 

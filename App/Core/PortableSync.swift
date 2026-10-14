@@ -36,8 +36,8 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         self.attachments = attachments
     }
 
-    // Omits `attachments` when empty so attachment-free messages keep their
-    // canonical bytes and therefore their derived conflict-copy IDs.
+    // assistant-v1 portable message: every key is required; nullable values
+    // are written as explicit null and `attachments` is always present.
     private enum CodingKeys: String, CodingKey {
         case id, role, text, toolCalls, toolCallID, toolName, isError, modelText, createdAtMs, attribution, attachments
     }
@@ -47,13 +47,13 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         role = try c.decode(AgentTranscriptRole.self, forKey: .role)
         text = try c.decode(String.self, forKey: .text)
         toolCalls = try c.decode([PortableToolCall].self, forKey: .toolCalls)
-        toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
-        toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+        toolCallID = try c.nullable(String.self, .toolCallID)
+        toolName = try c.nullable(String.self, .toolName)
         isError = try c.decode(Bool.self, forKey: .isError)
-        modelText = try c.decodeIfPresent(String.self, forKey: .modelText)
+        modelText = try c.nullable(String.self, .modelText)
         createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
-        attribution = try c.decodeIfPresent(String.self, forKey: .attribution)
-        attachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
+        attribution = try c.nullable(String.self, .attribution)
+        attachments = try c.decode([ChatAttachment].self, forKey: .attachments)
     }
     func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -61,13 +61,13 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         try c.encode(role, forKey: .role)
         try c.encode(text, forKey: .text)
         try c.encode(toolCalls, forKey: .toolCalls)
-        try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
-        try c.encodeIfPresent(toolName, forKey: .toolName)
+        try c.encode(toolCallID, forKey: .toolCallID)
+        try c.encode(toolName, forKey: .toolName)
         try c.encode(isError, forKey: .isError)
-        try c.encodeIfPresent(modelText, forKey: .modelText)
+        try c.encode(modelText, forKey: .modelText)
         try c.encode(createdAtMs, forKey: .createdAtMs)
-        try c.encodeIfPresent(attribution, forKey: .attribution)
-        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
+        try c.encode(attribution, forKey: .attribution)
+        try c.encode(attachments, forKey: .attachments)
     }
 
     var transcript: AgentTranscriptMessage {
@@ -103,6 +103,24 @@ nonisolated struct PortableSession: Hashable, Codable, Sendable, Identifiable {
          conflictOf: UUID? = nil) {
         self.id = id; self.title = title; self.selection = selection
         self.metadataUpdatedMs = metadataUpdatedMs; self.messages = messages; self.conflictOf = conflictOf
+    }
+
+    // Required keys; `selection` and `conflictOf` are explicit nulls when absent.
+    private enum CodingKeys: String, CodingKey { case id, title, selection, metadataUpdatedMs, messages, conflictOf }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        selection = try c.nullable(ModelSelection.self, .selection)
+        metadataUpdatedMs = try c.decode(Int64.self, forKey: .metadataUpdatedMs)
+        messages = try c.decode([PortableMessage].self, forKey: .messages)
+        conflictOf = try c.nullable(UUID.self, .conflictOf)
+    }
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(title, forKey: .title); try c.encode(selection, forKey: .selection)
+        try c.encode(metadataUpdatedMs, forKey: .metadataUpdatedMs); try c.encode(messages, forKey: .messages)
+        try c.encode(conflictOf, forKey: .conflictOf)
     }
 }
 
