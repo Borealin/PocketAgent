@@ -155,10 +155,11 @@ restart, the waiting request shows **继续 / 移回草稿 / 放弃** and never 
 itself. In a task conversation, **引用到你的助理** (long press a message) lets the
 assistant read that exact finished part of history once.
 
-This release stores data in a new `assistant-v1` format: it starts with an
-empty assistant and does not read or convert earlier conversations or provider
-settings, which stay untouched on the device. Set up the model service again;
-pairing and phone settings are kept.
+This release stores conversation history in a new `assistant-v1` format: it
+starts with an empty assistant and does not read or convert earlier
+conversations, which stay untouched on the device. Model services, API keys,
+pairing and phone settings are kept: the assistant uses the models already
+configured in Settings, and starts with the default model when it has none.
 
 ## Conversations and providers
 
@@ -206,8 +207,10 @@ Each model has an optional local **本机上下文预算** in the provider edito
 confirmed context window or an input ceiling becomes a hard limit for the
 assistant's requests; without one the assistant only keeps to a soft target of
 about 24k estimated tokens. Older finished work is summarized as a streamed,
-size-bounded maintenance step of at most 150 seconds per turn; if it does not
-finish, that turn continues without a new summary.
+size-bounded maintenance step of at most 150 seconds per turn. A summary request
+whose estimate exceeds that limit is not sent; if summarizing does not finish,
+that turn continues without a new summary. Forgetting something the turn is
+reading, or a storage failure, stops the turn instead.
 
 Choose a provider and model for each conversation. Accepted turns capture
 their selection and credential before joining the serial phone action queue.

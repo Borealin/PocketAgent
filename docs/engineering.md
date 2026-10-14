@@ -20,9 +20,11 @@ conversation (the primary line and independent tasks alike), iCloud Drive
 synchronization of portable data, reproducible IPA
 builds and AltStore Classic/SideStore source publication. Borealin/PocketAgent is
 public following the user's authorization on 2026-10-11. The assistant
-release uses an empty assistant-v1 namespace with mandatory current-schema
-fields. Old history and provider settings are not automatically adopted; new
-provider IDs use current Keychain references without legacy-ID migration. Siri
+release uses an empty assistant-v1 history namespace with mandatory
+current-schema fields; old history is not adopted. Provider settings are not
+part of that namespace: the app's common Settings file is reused in place with
+its provider IDs, default model, Keychain references and key origin bindings,
+so no reconfiguration is needed. Siri
 and arbitrary on-phone XCTest compilation remain outside this iteration.
 
 Setup must use one Base URL for standard model services, with Sub2API and protocol
@@ -95,9 +97,11 @@ did not include this UI rewrite.
 The assistant release is an explicitly authorized breaking change. It supersedes
 prior preserve-on-upgrade requirements: no historical decoder, field backfill,
 legacy deduplication/import, upgrade backup or multi-version migration matrix.
-Use an assistant-v1 local namespace and separate assistant-v1 portable cloud
-folder/envelope; prior client formats are rejected rather than converted. Old
-folders are not active data sources and are not automatically removed. New
+Use an assistant-v1 local history namespace and separate assistant-v1 portable
+cloud folder/envelope; prior client history formats are rejected rather than
+converted. Old folders are not active data sources and are not automatically
+removed. The break covers history only: provider settings keep the current
+version-1 Settings file (see below). New
 current-format messages keep their IDs, order and call/result adjacency; crash
 recovery and storage failure handling remain required.
 
@@ -310,11 +314,20 @@ Core tests and the iOS Release build/IPA inspection pass; device acceptance
 is partial (see below). Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
 
 - Data: one strict `assistant-v1/history.json` (explicit nulls, no legacy
-  decoder), `assistant-v1/providers.json` with local per-model context budgets,
-  `assistant-v1/Attachments`, and an `assistant-v1/` subfolder in the sync
-  location with a generation-tagged portable envelope. Earlier files and folders
-  are never read, converted or removed. An unreadable current file blocks
-  writes until an explicit reset moves it aside.
+  decoder), `assistant-v1/Attachments`, and an `assistant-v1/` subfolder in the
+  sync location with a generation-tagged portable envelope. Earlier history
+  files and folders are never read, converted or removed. An unreadable current
+  file blocks writes until an explicit reset moves it aside.
+- Settings: the common `providers.json` (version 1) is shared by Settings, the
+  assistant and independent tasks and read with the earlier version-1 rules;
+  provider IDs, default selection, tombstones, Keychain items (account =
+  provider ID) and key origin bindings apply unchanged. Local per-model context
+  budgets are an additive `budgetOverrides` key that earlier version-1 readers
+  ignore; `legacySecretPending` is written back as found and never acted on (no
+  legacy endpoint/model/Keychain migration). Loading never writes; another
+  version or an invalid file is reported, left untouched and not overwritten.
+  A primary line without a model takes the Settings default (at launch and when
+  the default is assigned); an existing selection is kept.
 - Owner: transactions publish only after a successful write; run events stay
   visible when their write fails, storage becomes dirty, every gate fails and
   only an explicit retry restores storage (never the stopped run). The writer
@@ -331,11 +344,18 @@ is partial (see below). Design and file map: [long-lived-assistant.md](long-live
   (CAS commit), fresh memory block per request, forget filtering, stale phone
   screens projected, one estimator with bounded per-model usage calibration;
   known windows/explicit ceilings are hard guards, unknown windows only a soft
-  target.
+  target. Before each summary fold is sent, `SummaryMaintenance` checks storage,
+  explicit forgets (current root, fold sources, the extended summary), current
+  eligibility and the complete request estimate against the frozen target, then
+  durably registers the fold's and parent summary's roots as reads of the turn's
+  root; storage failures, forgets and the turn deadline stop the turn, while an
+  over-budget or changed fold only skips the new summary.
 - Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`), model
   read-only (`memory_search`/`session_search` through AgentKit's protocol),
   correction by ID/revision CAS, forgetting through a recomputed preview over
-  the known read graph (iterative, linear).
+  the known read graph (iterative, linear). A forget can stop only the primary
+  turn the engine is executing (preparing or running), never a queued primary
+  request or another task.
 - Pending: one detached → promoted request with fair ordinals, Stop epoch,
   held/needsResume states, explicit same-ID continuation only before the permit,
   abandon-unstarted, sync deferral and attachment retention.
