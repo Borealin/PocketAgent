@@ -387,51 +387,59 @@ struct ForgetPreviewView: View {
 // MARK: Natural-language edit/forget
 
 /// Candidates for a recognised "更正/遗忘…记忆" request, from the current
-/// scope's ledger. The user picks one; the prefilled editor (CAS by
-/// revision) or the final forget preview decides. Nothing changes otherwise.
-struct MemoryIntentCards: View {
+/// scope's ledger, in a scrollable sheet (five long entries, the keyboard or
+/// a larger text size never squeeze the composer). The user picks one; the
+/// prefilled editor (CAS by revision) or the final forget preview decides.
+/// Closing the sheet is 取消: nothing changes and the draft stays.
+struct MemoryIntentSheet: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var workspaces: WorkspaceStore
+    let request: MemoryIntentRequest
+    @Environment(\.dismiss) private var dismiss
     @State private var editing: MemoryDraft?
     @State private var forgetting: MemoryRecord?
     @State private var preview: ForgetPreview?
 
     var body: some View {
-        if let request = chat.memoryIntent {
-            let candidates = chat.intentCandidates
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title(request, count: candidates.count)).font(.caption.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("intentTitle")
-                if candidates.isEmpty {
-                    Text("当前范围没有找到与“\(request.intent.subject)”匹配的记忆；可以打开记忆面板查看全部。")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("intentNoMatch")
-                }
-                ForEach(candidates) { entry in
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.content).font(.footnote).lineLimit(3)
-                            Text("\(scopeName(entry.scope)) · 版本 \(entry.revision)").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 4)
-                        Button(request.intent.action == .edit ? "更正…" : "遗忘…") { choose(entry, request) }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            .accessibilityIdentifier("intentChoose-\(entry.id.uuidString)")
+        let candidates = chat.intentCandidates
+        NavigationStack {
+            List {
+                Section {
+                    if candidates.isEmpty {
+                        Text("当前范围没有找到与“\(request.intent.subject)”匹配的记忆；可以打开记忆面板查看全部。")
+                            .foregroundStyle(.secondary).accessibilityIdentifier("intentNoMatch")
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("intentCandidate-\(entry.id.uuidString)")
+                    ForEach(candidates) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.content).font(.callout)
+                                Text("\(scopeName(entry.scope)) · 版本 \(entry.revision)").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            Button(request.intent.action == .edit ? "更正…" : "遗忘…") { choose(entry) }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .accessibilityIdentifier("intentChoose-\(entry.id.uuidString)")
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("intentCandidate-\(entry.id.uuidString)")
+                    }
+                } header: {
+                    Text(title(request, count: candidates.count)).textCase(nil).accessibilityIdentifier("intentTitle")
+                } footer: {
+                    Text("只列出当前范围中与这些词匹配的记忆（最多 5 条）；选择后仍需在编辑或遗忘页确认。")
                 }
-                HStack {
-                    Button("取消") { chat.memoryIntent = nil }.accessibilityIdentifier("intentCancel")
-                    Spacer()
+                Section {
                     Button("作为普通消息发送") { chat.sendIntentAsMessage() }
                         .disabled(!chat.canSendMessage).accessibilityIdentifier("intentSendAnyway")
                 }
-                .font(.caption).buttonStyle(.borderless)
             }
-            .padding(10)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .accessibilityElement(children: .contain)
+            .navigationTitle(request.intent.action == .edit ? "更正记忆" : "遗忘记忆")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { chat.memoryIntent = nil; dismiss() }.accessibilityIdentifier("intentCancel")
+                }
+            }
             .accessibilityIdentifier("memoryIntentCards")
             .sheet(item: $editing) { draft in
                 MemoryEditorView(chat: chat, workspaces: workspaces, draft: draft,
@@ -442,6 +450,7 @@ struct MemoryIntentCards: View {
                                   done: { forgetting = nil; preview = nil })
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     private func title(_ request: MemoryIntentRequest, count: Int) -> String {
@@ -457,7 +466,7 @@ struct MemoryIntentCards: View {
         }
     }
 
-    private func choose(_ entry: MemoryRecord, _ request: MemoryIntentRequest) {
+    private func choose(_ entry: MemoryRecord) {
         switch request.intent.action {
         case .edit:
             var draft = MemoryDraft(editing: entry)

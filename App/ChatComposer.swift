@@ -128,7 +128,6 @@ struct ChatComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             PendingCard(chat: chat)
-            if primary { MemoryIntentCards(chat: chat, workspaces: workspaces) }
             if primary, running {
                 Picker("输入目标", selection: $chat.steerPrimary) {
                     Text("下一件事").tag(false)
@@ -221,6 +220,10 @@ struct ChatComposer: View {
             }
         }
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
+        .sheet(item: $chat.memoryIntent) { request in
+            // Dismissing the sheet sets the request to nil: 取消, the draft stays.
+            MemoryIntentSheet(chat: chat, workspaces: workspaces, request: request)
+        }
         .sheet(item: $chat.rememberRequest) { request in
             MemoryEditorView(chat: chat, workspaces: workspaces,
                              draft: MemoryDraft(scope: chat.defaultMemoryScope,
