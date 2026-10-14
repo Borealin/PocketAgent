@@ -336,7 +336,9 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   one JSON value in one atomic file, laid out with whitespace capacity after the
   file fields, after each session's fields and after each message array
   (`HistoryLayout`; same value as the codec, key order and whitespace differ),
-  so an unchanged byte keeps its offset. While the file still has the identity
+  so an unchanged byte keeps its offset. Each region's spare comes from its own
+  length only (message arrays an eighth, at least 16 KiB; session fields half,
+  at least 1 KiB; file fields an eighth, at least 64 KiB). While the file still has the identity
   the writer last published (device, inode, size, modification and change
   time, checked before and after cloning), `PatchingHistoryWriter` clones it,
   writes only the changed ranges, fsyncs and renames the clone over it; the
@@ -525,6 +527,11 @@ Confirmed problems found during implementation review and fixed:
   writer above bring a patched event to p95 0.10–0.11 s. Verifying every byte
   of the clone instead of the identity guard was measured and rejected: reading
   the fresh clone's cold pages costs at least 0.17 s on the device.
+- Layout capacity first used a floor derived from the whole history for every
+  session: next to a 110 MB primary, 1,000 small tasks would each have received
+  1 MiB of spaces (about 1 GB). Capacity now follows each region's own length;
+  a regression with 400 small and 50 empty tasks next to a large primary checks
+  every region's spare, the bound and the JSON value.
 - JSONEncoder's default key order changes on every encode (200 of 200
   re-encodes of an unchanged session differed), which made unchanged regions
   look changed. The layout's shells encode with sorted keys; a regression

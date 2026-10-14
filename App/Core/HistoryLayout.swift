@@ -60,16 +60,22 @@ nonisolated struct HistoryLayout: Sendable {
         return ends
     }
 
+    /// Spare bytes for a region from its own length only, so the whole
+    /// capacity stays within 1/8 (content), 1/2 (headers) and 1/8 (file
+    /// fields) of the data plus a small constant per region, however many
+    /// sessions there are.
+    static func contentSpare(_ length: Int) -> Int { max(16 << 10, length / 8) }
+    static func headerSpare(_ length: Int) -> Int { max(1 << 10, length / 2) }
+    static func prefixSpare(_ length: Int) -> Int { max(64 << 10, length / 8) }
+
     /// Assigns fresh capacities and offsets.
     static func fresh(prefix: Data, sessions: [Session]) -> HistoryLayout {
-        let total = prefix.count + sessions.reduce(0) { $0 + $1.header.count + $1.contentLength }
-        let floor = min(1 << 20, max(16 << 10, total / 64))
-        var layout = HistoryLayout(prefixCapacity: prefix.count + max(64 << 10, prefix.count / 8), prefix: prefix, sessions: [])
+        var layout = HistoryLayout(prefixCapacity: prefix.count + prefixSpare(prefix.count), prefix: prefix, sessions: [])
         var start = layout.sessionsStart
         for var session in sessions {
             session.start = start
-            session.headerCapacity = session.header.count + max(1 << 10, session.header.count / 2)
-            session.contentCapacity = session.contentLength + max(floor, session.contentLength / 8)
+            session.headerCapacity = session.header.count + headerSpare(session.header.count)
+            session.contentCapacity = session.contentLength + contentSpare(session.contentLength)
             start += session.length + 1
             layout.sessions.append(session)
         }

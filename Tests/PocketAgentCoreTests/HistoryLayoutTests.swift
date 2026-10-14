@@ -117,6 +117,52 @@ struct HistoryLayoutTests {
         #expect(patched > 150 && rebuilt > 5)
     }
 
+    /// Review finding: capacity came from a floor of the whole history
+    /// applied to every session (a 110 MB primary would give each of 1,000
+    /// small tasks 1 MiB, about 1 GB of spaces). Capacity now comes from each
+    /// region's own size: a small task's spare does not change when the rest
+    /// of the history grows, and the primary keeps an eighth.
+    @Test func capacityFollowsEachSessionsOwnSize() async throws {
+        let small = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 60) }
+        var large = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 3_000) }
+        var tasks: [ChatSession] = []
+        for index in 0..<400 {
+            var task = ChatSession(selection: nil, title: "小任务 \(index)")
+            task.messages = (0..<20).map { AgentTranscriptMessage(role: $0 % 2 == 0 ? .user : .assistant,
+                                                                   text: String(repeating: "任务内容\(index)", count: 30)) }
+            tasks.append(task)
+        }
+        tasks += (0..<50).map { ChatSession(selection: nil, title: "空任务 \($0)") }
+        large.sessions += tasks
+        var lone = small
+        lone.sessions.append(tasks[0])
+        let layout = try HistoryLayoutEncoder().plan(large, baseline: nil).layout
+        let alone = try HistoryLayoutEncoder().plan(lone, baseline: nil).layout
+        for session in layout.sessions {
+            #expect(session.contentCapacity - session.contentLength == HistoryLayout.contentSpare(session.contentLength))
+            #expect(session.headerCapacity - session.header.count == HistoryLayout.headerSpare(session.header.count))
+        }
+        let primary = layout.sessions[0]
+        #expect(primary.contentLength / 8 > 16 << 10)
+        #expect(primary.contentCapacity - primary.contentLength == primary.contentLength / 8)
+        // The same task gets the same capacity next to a 60- or a 3,000-message primary.
+        let task = try #require(layout.sessions.first { $0.id == tasks[0].id })
+        let taskAlone = try #require(alone.sessions.first { $0.id == tasks[0].id })
+        #expect(task.contentCapacity == taskAlone.contentCapacity && task.contentCapacity - task.contentLength == 16 << 10)
+        // Bounded: spaces stay within an eighth of the content, half the
+        // headers and the per-region constants.
+        let data = layout.prefix.count + layout.sessions.reduce(0) { $0 + $1.header.count + $1.contentLength }
+        let bound = layout.prefix.count / 8 + (64 << 10)
+            + layout.sessions.reduce(0) { $0 + $1.contentLength / 8 + (16 << 10) + $1.header.count / 2 + (1 << 10) }
+        let structure = 1 + HistoryLayout.sessionsKey.count + 2 + layout.sessions.count * (2 + HistoryLayout.messagesKey.count + 1)
+        #expect(layout.size - data - structure <= bound)
+        // The same JSON value as the codec, and it decodes to the file.
+        let image = layout.image()
+        #expect(image.count == layout.size)
+        #expect(try jsonValue(image) == jsonValue(HistoryCodec.encode(large)))
+        #expect(try HistoryCodec.decode(image) == large)
+    }
+
     @Test func unchangedFileProducesNoChunks() async throws {
         let file = try await MainActor.run { try Self.sample() }
         let encoder = HistoryLayoutEncoder()
