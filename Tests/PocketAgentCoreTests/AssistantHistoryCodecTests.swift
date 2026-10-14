@@ -114,7 +114,7 @@ struct AssistantHistoryCodecTests {
         let primary = file.assistant.primarySessionID
         let prompt = AgentTranscriptMessage(role: .user, text: "打开设置")
         try file.acceptRoot(prompt, attachments: [], in: primary, scope: .general)
-        try file.commitDispatchPermit(root: prompt.id, sessionID: primary)
+        try file.commitDispatchPermit(root: prompt.id, sessionID: primary, scope: .general)
         file.assistant.pendingNext = PendingNext(sessionID: primary,
             prompt: .detached(message: AgentTranscriptMessage(role: .user, text: "然后"), attachments: []),
             selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: nil, backend: .wda,

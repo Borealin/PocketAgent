@@ -101,11 +101,13 @@ nonisolated extension HistoryFile {
 
     /// The startup permit: from this commit on, the run may dispatch model
     /// and phone requests; restart treats it as possibly interrupted work.
-    mutating func commitDispatchPermit(root: UUID, sessionID: UUID) throws {
+    /// The run's frozen scope must be the root's recorded scope.
+    mutating func commitDispatchPermit(root: UUID, sessionID: UUID, scope: WorkScope) throws {
         guard let scoped = assistant.scopeIndex.scopedRoot(root), scoped.sourceSessionID == sessionID else {
             throw HistoryEditError.missingRoot
         }
         guard !scoped.abandonedUnstarted else { throw HistoryEditError.invalid("该请求已放弃，不能启动。") }
+        guard scoped.scope == scope else { throw HistoryEditError.invalid("请求记录的项目与本次执行的项目不一致，任务未开始。") }
         try assistant.scopeIndex.updateRoot(root) { $0.dispatchAuthorized = true }
         if case .promoted(let id)? = assistant.pendingNext?.prompt, id == root { assistant.pendingNext = nil }
         try editSession(sessionID) { $0.state = .running; $0.detail = "" }

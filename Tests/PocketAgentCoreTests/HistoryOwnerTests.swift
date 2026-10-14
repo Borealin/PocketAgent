@@ -233,7 +233,7 @@ struct HistoryOwnerTests {
             selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: nil, backend: .ddi,
             clipboardAllowed: true, acceptedOrdinal: 2, state: .queued, references: [], acceptedAt: Date())
         _ = try HistoryCodec.encode(file)
-        try file.commitDispatchPermit(root: prompt.id, sessionID: primary)
+        try file.commitDispatchPermit(root: prompt.id, sessionID: primary, scope: .general)
         #expect(file.assistant.pendingNext == nil && file.primary?.state == .running)
         #expect(file.assistant.scopeIndex.scopedRoot(prompt.id)?.dispatchAuthorized == true)
         _ = try HistoryCodec.encode(file)

@@ -13,7 +13,7 @@ struct ContextBuilderTests {
                            tool: Bool = false) throws -> UUID {
             let prompt = AgentTranscriptMessage(role: .user, text: text)
             try file.acceptRoot(prompt, attachments: [], in: primary, scope: scope)
-            try file.commitDispatchPermit(root: prompt.id, sessionID: primary)
+            try file.commitDispatchPermit(root: prompt.id, sessionID: primary, scope: scope)
             if tool {
                 let call = AgentToolCall(id: "call-\(prompt.id.uuidString.prefix(6))", name: "observe_screen", arguments: .object([:]))
                 try file.appendEvent(AgentTranscriptMessage(role: .assistant, toolCalls: [call]), to: primary, root: prompt.id)
