@@ -331,6 +331,8 @@ struct ForgetPreviewView: View {
     @ObservedObject var chat: ChatController
     let entry: MemoryRecord
     @Binding var preview: ForgetPreview?
+    /// Called once the forget is committed (not on cancel).
+    var forgotten: () -> Void = {}
     let done: () -> Void
 
     var body: some View {
@@ -363,8 +365,95 @@ struct ForgetPreviewView: View {
 
     private func confirm() {
         guard let current = preview else { return }
-        if chat.commitForget(current) { done() }
+        if chat.commitForget(current) { forgotten(); done() }
         else { preview = chat.forgetPreview([entry.id]) } // changed: refreshed numbers, confirm again
+    }
+}
+
+// MARK: Natural-language edit/forget
+
+/// Candidates for a recognised "更正/遗忘…记忆" request, from the current
+/// scope's ledger. The user picks one; the prefilled editor (CAS by
+/// revision) or the final forget preview decides. Nothing changes otherwise.
+struct MemoryIntentCards: View {
+    @ObservedObject var chat: ChatController
+    @ObservedObject var workspaces: WorkspaceStore
+    @State private var editing: MemoryDraft?
+    @State private var forgetting: MemoryRecord?
+    @State private var preview: ForgetPreview?
+
+    var body: some View {
+        if let request = chat.memoryIntent {
+            let candidates = chat.intentCandidates
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title(request, count: candidates.count)).font(.caption.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("intentTitle")
+                if candidates.isEmpty {
+                    Text("当前范围没有找到与“\(request.intent.subject)”匹配的记忆；可以打开记忆面板查看全部。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("intentNoMatch")
+                }
+                ForEach(candidates) { entry in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.content).font(.footnote).lineLimit(3)
+                            Text("\(scopeName(entry.scope)) · 版本 \(entry.revision)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Button(request.intent.action == .edit ? "更正…" : "遗忘…") { choose(entry, request) }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .accessibilityIdentifier("intentChoose-\(entry.id.uuidString)")
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("intentCandidate-\(entry.id.uuidString)")
+                }
+                HStack {
+                    Button("取消") { chat.memoryIntent = nil }.accessibilityIdentifier("intentCancel")
+                    Spacer()
+                    Button("作为普通消息发送") { chat.sendIntentAsMessage() }
+                        .disabled(!chat.canSendMessage).accessibilityIdentifier("intentSendAnyway")
+                }
+                .font(.caption).buttonStyle(.borderless)
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("memoryIntentCards")
+            .sheet(item: $editing) { draft in
+                MemoryEditorView(chat: chat, workspaces: workspaces, draft: draft,
+                                 commit: { chat.saveIntentEdit($0, request: request) }, done: { editing = nil })
+            }
+            .sheet(item: Binding(get: { forgetting }, set: { if $0 == nil { forgetting = nil; preview = nil } })) { entry in
+                ForgetPreviewView(chat: chat, entry: entry, preview: $preview, forgotten: { chat.settleIntent(request) },
+                                  done: { forgetting = nil; preview = nil })
+            }
+        }
+    }
+
+    private func title(_ request: MemoryIntentRequest, count: Int) -> String {
+        let action = request.intent.action == .edit ? "更正" : "遗忘"
+        let found = count == 0 ? "" : "找到 \(count) 条，请选择要\(action)的一条（不会自动修改）"
+        return "\(action)记忆：“\(request.intent.subject)”" + (found.isEmpty ? "" : " · " + found)
+    }
+
+    private func scopeName(_ scope: MemoryScope) -> String {
+        switch scope {
+        case .global: "全局"
+        case .workspace(let id): "项目「\(workspaces.record(id)?.name ?? "已删除")」"
+        }
+    }
+
+    private func choose(_ entry: MemoryRecord, _ request: MemoryIntentRequest) {
+        switch request.intent.action {
+        case .edit:
+            var draft = MemoryDraft(editing: entry)
+            if let replacement = request.intent.replacement { draft.content = replacement }
+            editing = draft
+        case .forget:
+            guard let computed = chat.forgetPreview([entry.id]) else { return }
+            preview = computed
+            forgetting = entry
+        }
     }
 }
 

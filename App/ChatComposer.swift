@@ -128,6 +128,7 @@ struct ChatComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             PendingCard(chat: chat)
+            if primary { MemoryIntentCards(chat: chat, workspaces: workspaces) }
             if primary, running {
                 Picker("输入目标", selection: $chat.steerPrimary) {
                     Text("下一件事").tag(false)
