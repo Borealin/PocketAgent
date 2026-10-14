@@ -6,7 +6,9 @@ Native Swift iOS 26+ multi-session phone assistant with AgentKit and an idevice/
 - No API keys, pairing records, local endpoints, Apple teams/certificates, device IDs,
   transcripts, screenshots, provisioning profiles or success-only evidence in Git.
 - Secrets stay in local Keychain; pairing data stays local and excluded from backup/sync.
-- One atomic local history file; migrations preserve IDs and real messages.
+- One atomic local history file. The planned assistant release is an authorized
+  breaking data format: no legacy compatibility, migration or automatic adoption.
+  Preserve IDs, real messages and order within the current format.
 - Never replay interrupted phone actions. Keep event order and call/result adjacency.
 - One serial phone action queue. Freeze provider/model/credential when a turn is queued.
 - Sync only explicit portable data, preserve conflicts, and retain deletion tombstones.
