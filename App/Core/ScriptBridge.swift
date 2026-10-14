@@ -158,6 +158,22 @@ nonisolated struct ScriptOutcome: Sendable {
     }
 }
 
+/// Whether a running script's phone request may start: the tool must be
+/// allowed for scripts, the script's lease active and the turn's shared
+/// effect gate open (`TurnEffectPolicy`: storage, ownership, cancellation,
+/// revocation). Checked for every helper request before anything is sent;
+/// an action that starts re-checks the same gate before each effect.
+nonisolated enum ScriptPhoneAdmission {
+    static let revoked = "脚本的手机授权已撤销，动作未执行。"
+
+    static func refusal(decision: ToolDecision, leaseActive: Bool, effectsBlocked: String?) -> String? {
+        if case .deny(let reason) = decision { return reason }
+        guard leaseActive else { return revoked }
+        if let effectsBlocked { return effectsBlocked + "动作未执行。" }
+        return nil
+    }
+}
+
 /// Phone request handler supplied by the turn (PhoneExecutor.executeScript).
 typealias ScriptPhoneHandler = @Sendable (AgentToolCall) async -> (content: String, isError: Bool, denied: Bool)
 

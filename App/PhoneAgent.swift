@@ -336,8 +336,10 @@ final class PhoneExecutor {
     /// limit) no further effect is issued, including one that was waiting
     /// for the action lock or for the runner to start.
     func executeScript(_ call: AgentToolCall, lease: ScriptLease) async -> (content: String, isError: Bool, denied: Bool) {
-        if case .deny(let reason) = ToolCatalog.scriptDecision(for: call.name, capabilities: inputCapabilities) { return (reason, true, true) }
-        guard lease.isActive else { return ("脚本的手机授权已撤销，动作未执行。", true, true) }
+        if let refusal = ScriptPhoneAdmission.refusal(decision: ToolCatalog.scriptDecision(for: call.name, capabilities: inputCapabilities),
+                                                      leaseActive: lease.isActive, effectsBlocked: effectsBlocked()) {
+            return (refusal, true, true)
+        }
         await acquire()
         defer { release() }
         do {
