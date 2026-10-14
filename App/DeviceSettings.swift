@@ -56,11 +56,20 @@ enum DeviceSettings {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-bench-\(UUID().uuidString)")
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let output = documents.appendingPathComponent("long-history-benchmark.json")
+        #if DEBUG
+        let configuration = "Debug"
+        #else
+        let configuration = "Release"
+        #endif
+        let info = Bundle.main.infoDictionary ?? [:]
+        let label = "device \(configuration) \(info["CFBundleShortVersionString"] as? String ?? "?")"
+            + " (\(info["CFBundleVersion"] as? String ?? "?"))"
         do {
-            try LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: "device release build")
+            try LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: label)
                 .write(to: output, options: .atomic)
         } catch {
-            try? Data(#"{"error":"\#(error.localizedDescription)"}"#.utf8).write(to: output, options: .atomic)
+            let failure = ["configuration": label, "error": error.localizedDescription]
+            try? JSONSerialization.data(withJSONObject: failure, options: [.sortedKeys]).write(to: output, options: .atomic)
         }
     }
 
