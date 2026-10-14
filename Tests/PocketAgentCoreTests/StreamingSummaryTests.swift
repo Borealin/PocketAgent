@@ -55,6 +55,40 @@ struct StreamingSummaryTests {
         #expect(after.count == 0)
     }
 
+    /// Review finding: repeated or empty snapshots are not real work; they must
+    /// neither keep an idle attempt alive nor inflate progress.
+    @Test func repeatedOrEmptySnapshotsDoNotRefreshIdleOrCountProgress() async throws {
+        let deliveries = Deliveries()
+        let progress = ProgressCoalescer { count in Task { await deliveries.add(count) } }
+        await #expect(throws: SummaryPreparationError.self) {
+            try await StreamingSummary.run(request, producer: { _, onEvent in
+                try onEvent(.textSnapshot("## Goal"))
+                try onEvent(.textSnapshot("## Goal\n旧"))
+                try onEvent(.reasoningSnapshot("思考中"))
+                for index in 0..<30 {
+                    try onEvent(.textSnapshot(index % 2 == 0 ? "## Goal" : "## Goal\n旧"))
+                    try onEvent(.textSnapshot("## Goal"))
+                    try onEvent(.textSnapshot(""))
+                    try onEvent(.reasoningSnapshot("思考中"))
+                    try onEvent(.reasoningSnapshot(""))
+                    try onEvent(.textDelta(""))
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                try onEvent(.finished(.completed))
+            }, idleSeconds: 0.6, progress: progress)
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        let delivered = await deliveries.total
+        #expect(delivered == 3) // the two distinct texts and the first reasoning only
+        let collector = SummaryCollector()
+        try collector.accept(.textSnapshot("a"))
+        try collector.accept(.textSnapshot("a"))
+        try collector.accept(.reasoningSnapshot("r"))
+        try collector.accept(.reasoningSnapshot("r"))
+        try collector.accept(.reasoningSnapshot("r2"))
+        #expect(collector.work == 3)
+    }
+
     @Test func idleAndTotalDeadlinesEndTheAttempt() async throws {
         await #expect(throws: SummaryPreparationError.self) {
             try await StreamingSummary.run(request, producer: { _, onEvent in

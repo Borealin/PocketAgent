@@ -30,11 +30,22 @@ nonisolated final class ProgressCoalescer: @unchecked Sendable {
 
 /// Accumulates one maintenance response delivered event by event in the
 /// producer's task: only text is kept (≤ 64 KiB; delta appends, snapshot
-/// replaces), reasoning counts as work but is not kept, tool calls and
+/// replaces), new non-empty text or reasoning counts as work (reasoning is
+/// never kept; repeated or empty snapshots do not count), tool calls and
 /// oversize text fail immediately, and only `finished(.completed)` succeeds.
 nonisolated final class SummaryCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var text = ""
+    /// Digests of snapshots already seen (bounded; no reasoning text kept), so a
+    /// repeated or alternating snapshot is not counted as new work again.
+    private var seenSnapshots: [String] = []
+    private func isNew(_ kind: String, _ snapshot: String) -> Bool {
+        let digest = kind + CanonicalDigest.hex(Data(snapshot.utf8))
+        guard !seenSnapshots.contains(digest) else { return false }
+        seenSnapshots.append(digest)
+        if seenSnapshots.count > 64 { seenSnapshots.removeFirst() }
+        return true
+    }
     private var finished: AgentStopReason?
     private var lastWork = ProcessInfo.processInfo.systemUptime
     private(set) var work = 0
@@ -57,9 +68,16 @@ nonisolated final class SummaryCollector: @unchecked Sendable {
                 guard snapshot.utf8.count <= SummaryResponse.maximumBytes else {
                     throw SummaryPreparationError(detail: "摘要超过 64 KiB 上限")
                 }
-                text = snapshot; counted = true
+                // Only new, non-empty content is real work; a repeated or empty
+                // snapshot neither refreshes idle nor counts as progress. An
+                // empty snapshot does not erase received text.
+                guard !snapshot.isEmpty else { break }
+                counted = snapshot != text && isNew("t", snapshot)
+                text = snapshot
             case .reasoningDelta(let delta): counted = !delta.isEmpty
-            case .reasoningSnapshot: counted = true
+            case .reasoningSnapshot(let snapshot):
+                guard !snapshot.isEmpty else { break }
+                counted = isNew("r", snapshot)
             case .toolCallDelta, .toolCallSnapshot: throw SummaryPreparationError(detail: "摘要响应包含工具调用")
             case .finished(let reason): finished = reason
             case .providerItem, .usage, .webSearch: break
