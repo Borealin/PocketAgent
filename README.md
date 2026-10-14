@@ -152,8 +152,10 @@ While the assistant is working, the input queues one **下一件事** that start
 after the current turn completes in the foreground; switch the picker to
 **追加到本轮** to steer the running turn instead. After Stop, a failure or an app
 restart, the waiting request shows **继续 / 移回草稿 / 放弃** and never starts by
-itself. In a task conversation, **引用到你的助理** (long press a message) lets the
-assistant read that exact finished part of history once.
+itself. A request that fails before it starts returns its text to the input;
+the original stays visible, marked as not started, and the assistant does not
+read it as context. In a task conversation, **引用到你的助理** (long press a
+message) lets the assistant read that exact finished part of history once.
 
 This release stores conversation history in a new `assistant-v1` format: it
 starts with an empty assistant and does not read or convert earlier
