@@ -96,20 +96,41 @@ struct ScriptPhoneGateTests {
         #expect(refusals.contains { $0.contains("\"denied\":true") && $0.contains("动作未执行") })
     }
 
-    @Test func aRevokedJobOrLeaseRefusesTheNextActionWithoutExecutingIt() async throws {
+    /// The causal chain: the run registered a read of A; forgetting an
+    /// unrelated entry B does not stop it, forgetting A does (its preview
+    /// stops the active root, which is how the app revokes the running job),
+    /// and a revoked lease refuses as well. Nothing refused is executed.
+    @Test func onlyAForgetOfWhatTheRunReadRevokesItsScript() async throws {
         let run = try Run()
-        let owner = HistoryOwner(file: HistoryFile.initial(selection: nil), writer: { _ in })
+        var file = HistoryFile.initial(selection: nil)
+        let a = try #require(try file.applyMemoryEdit(.add(target: .memory, scope: .global, content: "PKATEST_GAPS_A", origin: .panel,
+                                                            sourceRootPromptIDs: [], sourceMessageIDs: [])).entryIDs.first)
+        let b = try #require(try file.applyMemoryEdit(.add(target: .memory, scope: .global, content: "PKATEST_GAPS_B", origin: .panel,
+                                                            sourceRootPromptIDs: [], sourceMessageIDs: [])).entryIDs.first)
+        let root = try file.acceptCurrent("PKATEST_GAPS 脚本", in: file.assistant.primarySessionID, scope: .general)
+        try file.registerReads(root: root, memory: [MemoryReadRevision(entryID: a, revision: file.assistant.memory.entry(a)!.revision)],
+                               roots: [], messages: [])
+        let owner = HistoryOwner(file: file, writer: { _ in })
         let lease = ScriptLease(), job = Job(), executed = Executed()
         let bridge = bridge(run, lease: lease, owner: owner, job: job, executed: executed)
         let started = Date()
+        func forget(_ entry: UUID) throws {
+            let preview = try owner.file.forgetPreview([entry], activeRoot: root)
+            try owner.transact { _ = try $0.commitForget(preview, activeRoot: root) }
+            // ChatController.commitForget: only a preview that stops the running root revokes the job.
+            if preview.stopsActiveRoot { job.revoked = true }
+        }
         #expect(try await run.call(bridge, lease: lease, ["press_home"]) == 0)
-        // A forget hit the running turn (revoked) between the script's calls.
-        job.revoked = true
+        try forget(b)
+        #expect(!job.revoked && !owner.file.assistant.scopeIndex.isMasked(root: root))
+        #expect(try await run.call(bridge, lease: lease, ["press_home"]) == 0)
+        try forget(a)
+        #expect(job.revoked && owner.file.assistant.scopeIndex.isMasked(root: root))
         #expect(try await run.call(bridge, lease: lease, ["press_home"]) != 0)
         job.revoked = false
         lease.revoke()
         #expect(try await run.call(bridge, lease: lease, ["press_home"]) != 0)
-        #expect(executed.all == ["press_home"])
+        #expect(executed.all == ["press_home", "press_home"])
         #expect(Date().timeIntervalSince(started) < 8)
         #expect(ScriptPhoneAdmission.refusal(decision: .allow, leaseActive: false, effectsBlocked: nil) == ScriptPhoneAdmission.revoked)
     }
