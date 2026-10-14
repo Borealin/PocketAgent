@@ -113,7 +113,8 @@ final class ChatController: ObservableObject {
         self.workspaces = workspaces
         let storage = HistoryStorage(url: assistantNamespace.history)
         self.storage = storage
-        let writer: (Data) throws -> Void = { try storage.write($0) }
+        // One writer for the process: it alone knows the file it last published.
+        let store = PatchingHistoryWriter(storage: storage)
         var recovery: HistoryFile?
         let created: HistoryOwner
         do {
@@ -121,25 +122,25 @@ final class ChatController: ObservableObject {
             case .absent:
                 // One atomic initialization of the empty primary line.
                 let initial = HistoryFile.initial(selection: providers.defaultSelection)
-                let fresh = HistoryOwner(file: initial, writer: writer)
+                let fresh = HistoryOwner(file: initial, store: store)
                 do { try fresh.reset(to: initial); created = fresh } catch {
-                    created = HistoryOwner(file: initial, health: .saveDirty(error.localizedDescription), writer: writer)
+                    created = HistoryOwner(file: initial, health: .saveDirty(error.localizedDescription), store: store)
                 }
             case .loaded(let file):
                 var recovered = file
                 recovered.recoverAfterLaunch()
-                let loaded = HistoryOwner(file: file, writer: writer)
+                let loaded = HistoryOwner(file: file, store: store)
                 if recovered == file { created = loaded } else {
                     // Interrupted/needsResume states are published only once saved.
                     do { try loaded.transact { $0 = recovered }; created = loaded } catch {
                         recovery = recovered
                         created = HistoryOwner(file: file, health: .saveDirty("启动恢复状态未保存：\(error.localizedDescription)"),
-                                               writer: writer)
+                                               store: store)
                     }
                 }
             }
         } catch {
-            created = HistoryOwner(file: .initial(selection: nil), health: .loadBlocked(error.localizedDescription), writer: writer)
+            created = HistoryOwner(file: .initial(selection: nil), health: .loadBlocked(error.localizedDescription), store: store)
         }
         owner = created
         unsavedRecovery = recovery

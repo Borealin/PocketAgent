@@ -3,7 +3,9 @@ import Foundation
 
 /// Long-history measurement of the single-file write path with realistic
 /// message shapes: encode/write/decode of the whole file, per-event record
-/// p50/p95, read registration and forget preview over the full root chain,
+/// p50/p95 through the production `PatchingHistoryWriter` (plan and file
+/// write split, write mode, and a final check that the file is exactly the
+/// published layout image), read registration and forget preview over the full root chain,
 /// and transcript item building (full and the 400-message page). It runs on
 /// a synthetic file in `directory` only; the app's history, owner and sync are
 /// never touched. Used by the opt-in host test and, on a device, by the local
@@ -96,49 +98,38 @@ enum LongHistoryBenchmark {
             var decoded: HistoryFile?
             let decode = try seconds { decoded = try HistoryCodec.decode(data) }
             guard decoded?.sessions[0].messages.count == size else { throw Failure(detail: "解码后消息数不符") }
-            // Each actual file write is timed inside the owner's writer.
-            let timer = WriterTimer()
-            let owner = HistoryOwner(file: file, writer: { data in
-                let start = ProcessInfo.processInfo.systemUptime
-                try storage.write(data)
-                timer.last = ProcessInfo.processInfo.systemUptime - start
-                timer.count += 1
-            })
+            // The production writer: stable layout, changed ranges patched
+            // into a clone of the published file.
+            let store = PatchingHistoryWriter(storage: storage)
+            let owner = HistoryOwner(file: file, store: store)
             let primary = file.assistant.primarySessionID
             guard let root = file.sessions[0].messages.last.flatMap({ file.assistant.scopeIndex.root(of: $0.id) }) else {
                 throw Failure(detail: "缺少根")
             }
-            // The first write after launch encodes every message once.
+            // The first write after launch writes the whole file in the layout.
             let firstRecord = seconds {
                 owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "预热"), to: primary, root: root) }
             }
-            // 20 events back to back (the baseline), then 20 more with the
-            // autorelease pool drained around each event (a separate method).
-            var events: [Double] = [], writers: [Double] = [], written: [Bool] = []
-            for index in 0..<20 {
+            let firstMode = store.lastMode?.rawValue ?? "none"
+            var events: [Double] = [], plans: [Double] = [], writes: [Double] = [], changed: [Int] = []
+            var modes: [String: Int] = [:]
+            var durable = true
+            for index in 0..<40 {
                 await Task.yield()
                 let event = AgentTranscriptMessage(role: .assistant, text: "事件 \(index)")
-                let before = timer.count
-                var durable = false
-                events.append(seconds { durable = owner.record { try $0.appendEvent(event, to: primary, root: root) } })
-                writers.append(timer.last)
-                written.append(durable && timer.count == before + 1 && owner.health == .ready)
+                var ok = false
+                events.append(seconds { ok = owner.record { try $0.appendEvent(event, to: primary, root: root) } })
+                durable = durable && ok && owner.health == .ready
+                plans.append(store.lastPlanSeconds); writes.append(store.lastWriteSeconds); changed.append(store.lastChangedBytes)
+                modes[store.lastMode?.rawValue ?? "none", default: 0] += 1
             }
-            // Runs after the baseline (warm caches, a file 20 events longer);
-            // the stopwatch includes the pool's teardown.
-            var drained: [Double] = [], drainedWriters: [Double] = []
-            for index in 0..<20 {
-                await Task.yield()
-                let event = AgentTranscriptMessage(role: .assistant, text: "排空后事件 \(index)")
-                let before = timer.count
-                var durable = false
-                drained.append(seconds { autoreleasepool { durable = owner.record { try $0.appendEvent(event, to: primary, root: root) } } })
-                drainedWriters.append(timer.last)
-                written.append(durable && timer.count == before + 1 && owner.health == .ready)
-            }
-            guard owner.health == .ready, written.allSatisfy({ $0 }) else { throw Failure(detail: "写入失败") }
-            let rest = zip(events, writers).map { $0 - $1 }
-            let drainedRest = zip(drained, drainedWriters).map { $0 - $1 }
+            guard durable else { throw Failure(detail: "写入失败") }
+            // Complete bytes: the file is exactly the published layout's whole
+            // image, and decodes to the owner's state.
+            let onDisk = try Data(contentsOf: storage.url)
+            let bytesMatch = onDisk == store.published?.layout.image()
+            let decodesToState = try HistoryCodec.decode(onDisk) == owner.file
+            guard bytesMatch, decodesToState else { throw Failure(detail: "补丁后的文件与期望不一致") }
             // Read registration of a request whose context holds the chain of
             // every earlier root; then a forget preview whose closure spans it.
             let allRoots = file.sessions[0].messages.compactMap { message in
@@ -156,30 +147,23 @@ enum LongHistoryBenchmark {
             var items: [TranscriptItem] = []
             let display = seconds { items = TranscriptItem.build(file.sessions[0].messages) }
             let tail = seconds { _ = TranscriptItem.build(Array(file.sessions[0].messages.suffix(400))) }
-            results.append(["messages": size, "fileBytes": data.count, "encodeSeconds": encode, "writeSeconds": write,
+            results.append(["messages": size, "fileBytes": data.count, "layoutFileBytes": onDisk.count,
+                            "encodeSeconds": encode, "writeSeconds": write,
                             "decodeSeconds": decode, "roots": allRoots.count, "registerReadsSeconds": register,
                             "forgetPreviewSeconds": preview, "forgetClosureRoots": closure, "validateGraphSeconds": validate,
+                            "firstRecordSeconds": firstRecord, "firstRecordMode": firstMode,
                             "recordP50Seconds": percentile(events, 0.5), "recordP95Seconds": percentile(events, 0.95),
-                            "recordSamples": events, "writerSamples": writers, "encodeAndValidateSamples": rest,
-                            "writerP50Seconds": percentile(writers, 0.5), "writerP95Seconds": percentile(writers, 0.95),
-                            "encodeAndValidateP50Seconds": percentile(rest, 0.5),
-                            "encodeAndValidateP95Seconds": percentile(rest, 0.95),
-                            "drainedRecordSamples": drained, "drainedWriterSamples": drainedWriters,
-                            "writesCounted": timer.count, "everySampleWrittenAndReady": written.allSatisfy { $0 },
-                            "drainedOrder": "after the 20 baseline events; pool teardown inside the stopwatch",
-                            "drainedRecordP50Seconds": percentile(drained, 0.5), "drainedRecordP95Seconds": percentile(drained, 0.95),
-                            "drainedEncodeAndValidateP95Seconds": percentile(drainedRest, 0.95),
-                            "firstRecordSeconds": firstRecord, "fullDisplayBuildSeconds": display,
+                            "recordMaxSeconds": events.max() ?? 0,
+                            "planP50Seconds": percentile(plans, 0.5), "planP95Seconds": percentile(plans, 0.95),
+                            "fileWriteP50Seconds": percentile(writes, 0.5), "fileWriteP95Seconds": percentile(writes, 0.95),
+                            "recordSamples": events, "planSamples": plans, "fileWriteSamples": writes,
+                            "changedBytesSamples": changed, "modes": modes,
+                            "everyEventDurableAndReady": durable, "fileBytesEqualPublishedImage": bytesMatch,
+                            "fileDecodesToOwnerState": decodesToState,
+                            "fullDisplayBuildSeconds": display,
                             "displayItems": items.count, "tail400DisplayBuildSeconds": tail])
         }
         return try JSONSerialization.data(withJSONObject: ["configuration": label, "results": results],
                                           options: [.prettyPrinted, .sortedKeys])
     }
-}
-
-/// The duration of the owner's most recent file write (main actor only).
-@MainActor
-private final class WriterTimer {
-    var last: Double = 0
-    var count = 0
 }
