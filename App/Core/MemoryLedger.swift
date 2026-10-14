@@ -50,18 +50,6 @@ nonisolated struct MemoryCommand: Equatable, Sendable {
     }
 }
 
-/// Remember mode: the primary composer's plain text, opened in the prefilled
-/// memory editor. Identifies the draft it came from; nothing is saved until
-/// the editor's explicit confirmation.
-nonisolated struct RememberRequest: Identifiable, Equatable, Sendable {
-    let id = UUID()
-    let sessionID: UUID
-    /// The draft exactly as it was when the editor opened.
-    let text: String
-    /// The session's local draft edit count at that moment.
-    let draftRevision: Int
-}
-
 /// One explicit user edit from the panel, command or chat chip.
 nonisolated enum UserMemoryEdit: Equatable, Sendable {
     case add(target: AgentMemoryTarget, scope: MemoryScope, content: String, origin: MemoryOrigin,
@@ -99,16 +87,15 @@ nonisolated extension MemoryLedger {
 }
 
 nonisolated extension HistoryFile {
-    /// The remember-mode save, in one write: the confirmed entry, and an empty
-    /// composer draft only if the draft it came from is unchanged (text and
-    /// edit count) and its session still exists. A later edit, another
-    /// session's draft or a cleared conversation is left alone; a failed
-    /// write keeps everything.
-    mutating func commitRemember(_ edit: UserMemoryEdit, request: RememberRequest, draftRevision: Int) throws -> MemoryReceipt {
+    /// A composer-started save (remember mode, a natural-language
+    /// correction), in one write: the confirmed edit, and an empty composer
+    /// draft only if the draft it came from is unchanged (text and edit
+    /// count) and its session still exists. A later edit, another session's
+    /// draft or a cleared conversation is left alone; a failed write keeps
+    /// everything.
+    mutating func commitComposerMemory(_ edit: UserMemoryEdit, from draft: ComposerDraft, draftRevision: Int) throws -> MemoryReceipt {
         let receipt = try applyMemoryEdit(edit)
-        if draftRevision == request.draftRevision, session(request.sessionID)?.draft == request.text {
-            try editSession(request.sessionID) { $0.draft = "" }
-        }
+        try settleComposerDraft(draft, draftRevision: draftRevision)
         return receipt
     }
 

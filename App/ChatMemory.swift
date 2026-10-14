@@ -48,19 +48,69 @@ extension ChatController {
         guard canRemember, let session = selected else { return }
         notice = ""
         if let command = MemoryCommand.parse(session.draft) { rememberCommand(command, sessionID: session.id); return }
-        rememberRequest = RememberRequest(sessionID: session.id, text: session.draft,
-                                          draftRevision: draftRevisions[session.id, default: 0])
+        rememberRequest = composerDraft(session)
     }
 
-    /// The editor's explicit save (see `HistoryFile.commitRemember`). A
-    /// failure keeps the draft, the editor and its target/scope choice.
-    func saveRemember(_ edit: UserMemoryEdit, request: RememberRequest) -> MemoryReceipt? {
-        var receipt: MemoryReceipt?
-        let revision = draftRevisions[request.sessionID, default: 0]
-        guard transact({ receipt = try $0.commitRemember(edit, request: request, draftRevision: revision) }) else { return nil }
-        memoryNotice = receipt?.result ?? ""
+    private func composerDraft(_ session: ChatSession) -> ComposerDraft {
+        ComposerDraft(sessionID: session.id, text: session.draft, draftRevision: draftRevisions[session.id, default: 0])
+    }
+
+    /// The editor's explicit save (see `HistoryFile.commitComposerMemory`).
+    /// A failure keeps the draft, the editor and its target/scope choice.
+    func saveRemember(_ edit: UserMemoryEdit, request: ComposerDraft) -> MemoryReceipt? {
+        guard let receipt = commitComposerMemory(edit, from: request) else { return nil }
         rememberMode = false
         return receipt
+    }
+
+    private func commitComposerMemory(_ edit: UserMemoryEdit, from draft: ComposerDraft) -> MemoryReceipt? {
+        var receipt: MemoryReceipt?
+        let revision = draftRevisions[draft.sessionID, default: 0]
+        guard transact({ receipt = try $0.commitComposerMemory(edit, from: draft, draftRevision: revision) }) else { return nil }
+        memoryNotice = receipt?.result ?? ""
+        return receipt
+    }
+
+    // MARK: Natural-language edit/forget (host only)
+
+    /// The primary line's current scope, for candidate lookup.
+    private var primaryWorkScope: WorkScope { file.primary?.workspaceID.map(WorkScope.workspace) ?? .general }
+
+    /// Recognises an explicit edit/forget request in the primary composer and
+    /// shows candidates instead of sending. Nil when the text is not one.
+    func beginMemoryIntent() -> Bool {
+        guard let session = selected, isPrimary(session.id), storageReady,
+              let intent = MemoryIntent.parse(session.draft) else { return false }
+        notice = ""
+        memoryIntent = MemoryIntentRequest(intent: intent, draft: composerDraft(session))
+        return true
+    }
+
+    /// Recomputed from the latest ledger and the current scope on every read,
+    /// so a correction, a forget or a scope switch shows at once.
+    var intentCandidates: [MemoryRecord] {
+        memoryIntent.map { $0.intent.candidates(in: assistant.memory, scope: primaryWorkScope) } ?? []
+    }
+
+    /// The prefilled editor's save for a picked candidate (CAS by the
+    /// revision it was opened with).
+    func saveIntentEdit(_ edit: UserMemoryEdit, request: MemoryIntentRequest) -> MemoryReceipt? {
+        guard let receipt = commitComposerMemory(edit, from: request.draft) else { return nil }
+        memoryIntent = nil
+        return receipt
+    }
+
+    /// After the forget panel committed: the request's draft, if unchanged, is emptied.
+    func settleIntent(_ request: MemoryIntentRequest) {
+        let revision = draftRevisions[request.draft.sessionID, default: 0]
+        transact { try $0.settleComposerDraft(request.draft, draftRevision: revision) }
+        memoryIntent = nil
+    }
+
+    /// The user's choice: the text was not a memory request after all.
+    func sendIntentAsMessage() {
+        memoryIntent = nil
+        send(asMessage: true)
     }
 
     /// One explicit panel or chip edit, CAS-checked against the shown revision.

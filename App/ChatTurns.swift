@@ -83,12 +83,19 @@ extension ChatController {
     }
 
     var canSend: Bool {
+        guard let selected else { return false }
+        // An exact memory command or an edit/forget request never starts a run, so it is always allowed.
+        if storageReady, isPrimary(selected.id),
+           MemoryCommand.parse(selected.draft) != nil || MemoryIntent.parse(selected.draft) != nil { return true }
+        return canSendMessage
+    }
+
+    /// Whether the draft can be sent to the model as a message.
+    var canSendMessage: Bool {
         guard storageReady, let selected, !isImporting(selected.id),
               !selected.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selected.draftAttachments.isEmpty
         else { return false }
         if isPrimary(selected.id) {
-            // An exact memory command never starts a run, so it is always allowed.
-            if MemoryCommand.parse(selected.draft) != nil { return true }
             guard assistant.primaryNotice == nil else { return false }
             // One pending request occupies the slot; new input stays in the draft.
             switch inputTarget(selected.id) {
@@ -101,8 +108,9 @@ extension ChatController {
 
     /// `textOnly` is the user's explicit choice after a text-only model
     /// warning: the text is sent and the images stay in the draft.
-    func send(textOnly: Bool = false) {
-        guard canSend, let session = selected else { return }
+    /// `asMessage` sends text that looked like an edit/forget request.
+    func send(textOnly: Bool = false, asMessage: Bool = false) {
+        guard asMessage ? canSendMessage : canSend, let session = selected else { return }
         let text = session.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let images = textOnly ? [] : session.draftAttachments
         if textOnly, text.isEmpty { return }
@@ -110,6 +118,7 @@ extension ChatController {
         if let command = MemoryCommand.parse(session.draft), isPrimary(session.id) {
             rememberCommand(command, sessionID: session.id); return
         }
+        if !asMessage, beginMemoryIntent() { return }
         switch inputTarget(session.id) {
         case .steer: if let job = jobs[session.id] { steer(job, session: session, text: text, images: images) }
         case .next: acceptNext(session: session, text: text, images: images, textOnly: textOnly)

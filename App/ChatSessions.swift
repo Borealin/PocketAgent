@@ -50,7 +50,9 @@ final class ChatController: ObservableObject {
     /// Primary composer's remember mode: plain text opens the prefilled memory editor.
     @Published var rememberMode = false
     /// The editor opened from remember mode, if any.
-    @Published var rememberRequest: RememberRequest?
+    @Published var rememberRequest: ComposerDraft?
+    /// A recognised natural-language edit/forget waiting for the user's pick.
+    @Published var memoryIntent: MemoryIntentRequest?
     @Published var imageWarning: ImageWarning?
     /// Outstanding image imports by ticket ID; reads and preparation both count.
     @Published var imports: [UUID: ImportTicket] = [:]
