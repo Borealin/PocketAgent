@@ -175,8 +175,7 @@ def main():
     settings = [f'MARKETING_VERSION={version}', f'CURRENT_PROJECT_VERSION={number}', 'CODE_SIGNING_ALLOWED=NO']
     if signing:
         settings += [f'PRODUCT_BUNDLE_IDENTIFIER={signing["bundleID"]}',
-                     f'POCKETAGENT_RUNNER_BUNDLE_ID={signing["runnerBundleID"]}',
-                     f'POCKETAGENT_LEGACY_KEYCHAIN_SERVICE={signing.get("legacyKeychainService", "")}']
+                     f'POCKETAGENT_RUNNER_BUNDLE_ID={signing["runnerBundleID"]}']
     env = os.environ.copy()
     env.pop('SDKROOT', None)
     run(['xcodebuild', '-resolvePackageDependencies', '-project', ROOT / 'PocketAgent.xcodeproj',
