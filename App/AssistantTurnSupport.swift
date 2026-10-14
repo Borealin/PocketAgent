@@ -21,6 +21,10 @@ final class AssistantTurnSupport {
     let scope: WorkScope
     let references: [HistoryReference]
     let config: RunConfiguration
+    /// The run's commit epoch; a failed read registration fails it.
+    let epoch: UInt64
+    /// Whether this run still owns its session (not replaced, cancelled, revoked or finished).
+    let isActive: @MainActor () -> Bool
     private let synthetic = SyntheticIDs()
     private var rawRoots: [UUID] = []
     private var summaryRoots: [UUID] = []
@@ -34,9 +38,9 @@ final class AssistantTurnSupport {
     }
 
     init(owner: HistoryOwner, sessionID: UUID, promptID: UUID, scope: WorkScope, references: [HistoryReference],
-         config: RunConfiguration) {
+         config: RunConfiguration, epoch: UInt64, isActive: @escaping @MainActor () -> Bool) {
         self.owner = owner; self.sessionID = sessionID; self.promptID = promptID; self.scope = scope
-        self.references = references; self.config = config
+        self.references = references; self.config = config; self.epoch = epoch; self.isActive = isActive
     }
 
     nonisolated var syntheticIDs: Set<UUID> { synthetic.value }
@@ -138,14 +142,12 @@ final class AssistantTurnSupport {
     // MARK: Read-only tools
 
     func readTools() -> [AnyAgentTool] {
-        let owner = owner, root = promptID
+        let owner = owner, root = promptID, scope = scope, references = references, epoch = epoch, isActive = isActive
         let adapter = PocketMemoryAdapter(scope: scope, currentRoot: root, references: references,
             snapshot: { await MainActor.run { owner.file } },
-            register: { memory, roots, messages in
-                try await MainActor.run {
-                    do { try owner.transact { try $0.registerReads(root: root, memory: memory, roots: roots, messages: messages) } }
-                    catch { throw StorageCommitError.saveFailed(error.localizedDescription) }
-                }
+            commit: { plan in
+                try await MainActor.run { try ReadCommitGate.commit(plan, owner: owner, root: root, scope: scope,
+                                                                    references: references, epoch: epoch, isActive: isActive) }
             })
         return [AnyAgentTool(MemorySearchTool(store: adapter)), AnyAgentTool(SessionSearchTool(store: adapter))]
     }

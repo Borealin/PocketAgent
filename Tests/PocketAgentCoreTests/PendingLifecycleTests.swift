@@ -91,9 +91,11 @@ struct PendingLifecycleTests {
             #expect(AssistantContext.eligibleSegments(file, sessionID: primary, before: next.id, scope: target).map(\.root)
                     == [promptID])
             let snapshot = file
+            // Each search runs from a started root of the scope it searches.
             func search(_ scope: WorkScope) async throws -> Int {
-                let adapter = PocketMemoryAdapter(scope: scope, currentRoot: next.id, references: [],
-                                                  snapshot: { snapshot }, register: { _, _, _ in })
+                var copy = snapshot
+                let current = try copy.acceptCurrent("查找", in: primary, scope: scope)
+                let adapter = PocketMemoryAdapter.testing(FileBox(copy), scope: scope, currentRoot: current)
                 let result = try await adapter.searchSessions(AgentSessionSearchRequest(query: "报销"))
                 return result.objectValue?["segments"]?.arrayValue?.count ?? 0
             }

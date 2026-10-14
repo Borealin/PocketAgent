@@ -21,9 +21,12 @@ nonisolated final class SearchPageCache: @unchecked Sendable {
 }
 
 /// AgentKit memory protocol for the primary line. Model writes are always
-/// refused (the host commits exact user edits); searches read the latest
-/// state, register what they return as this root's reads before returning
-/// it, and never cross the scope or explicit-reference boundary.
+/// refused (the host commits exact user edits). A search plans its page by
+/// identity from a snapshot; `commit` then verifies that page against the
+/// latest history, registers it as this root's reads and returns its content
+/// in one owner transaction. Only that content is returned; a page that
+/// changed meanwhile is `stale_search`. Never crosses the scope or the
+/// explicit-reference boundary.
 nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
     static let sessionSegments = 5
     static let sessionScalars = 8_000
@@ -31,16 +34,14 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
     let scope: WorkScope
     let currentRoot: UUID
     let references: [HistoryReference]
+    /// Planning only: candidate identities and sizes, never returned content.
     let snapshot: @Sendable () async -> HistoryFile
-    let register: @Sendable (_ memory: [MemoryReadRevision], _ roots: [UUID], _ messages: [UUID]) async throws -> Void
+    let commit: @Sendable (ReadPlan) async throws -> ReadCommitResult
     let pages = SearchPageCache()
 
-    func memoryState() async throws -> AgentMemoryState {
-        let file = await snapshot()
-        return AgentMemoryState(entries: file.assistant.memory.visible(in: scope).map {
-            AgentMemoryEntry(id: $0.id, target: $0.target, content: $0.content, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
-        })
-    }
+    /// Content leaves only through committed searches (`searchMemories`
+    /// overrides the protocol's default that would read this state).
+    func memoryState() async throws -> AgentMemoryState { AgentMemoryState(entries: []) }
 
     func applyMemory(_ operations: [AgentMemoryOperation]) async throws -> AgentMemoryState {
         throw MemoryError.modelWriteRefused
@@ -61,24 +62,26 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
         let offset = min(candidates.count, max(0, request.offset))
         let limit = min(20, max(1, request.limit))
         let page = Array(candidates.dropFirst(offset).prefix(limit))
-        var entries: [AgentJSONValue] = []
-        var reads: [MemoryReadRevision] = []
-        for item in page {
-            guard let entry = ledger.entry(item.id), entry.revision == item.revision, entry.scope.visible(in: scope) else {
+        var records: [MemoryRecord] = []
+        if !page.isEmpty {
+            // Verified, registered and read in one transaction; failure returns no content.
+            do {
+                guard case .memory(let committed) = try await commit(.memory(page, target: request.target)) else { throw ReadStale() }
+                records = committed
+            } catch is ReadStale {
                 pages.forget(memory: key)
                 return .object(["status": .string("stale_search"),
                                 "message": .string("记忆在搜索后已更正或遗忘；请重新搜索，不要沿用旧结果。")])
             }
-            reads.append(MemoryReadRevision(entryID: entry.id, revision: entry.revision))
-            entries.append(.object([
+        }
+        let entries: [AgentJSONValue] = records.map { entry in
+            .object([
                 "id": .string(entry.id.uuidString), "target": .string(entry.target.rawValue),
                 "scope": .string(MemorySearch.scopeLabel(entry.scope)), "revision": .number(Double(entry.revision)),
                 "content": .string(entry.content),
                 "updated_at": .string(ISO8601DateFormatter().string(from: entry.updatedAt)),
-            ]))
+            ])
         }
-        // Registration failure returns no content.
-        if !reads.isEmpty { try await register(reads, [], []) }
         let next = offset + page.count
         var result: [String: AgentJSONValue] = [
             "entries": .array(entries), "next_offset": next < candidates.count ? .number(Double(next)) : .null,
@@ -108,8 +111,9 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
                             "message": .string("该会话不属于当前范围，也没有被用户明确引用；不能读取。请让用户在界面中选择要引用的历史。")])
         }
         let offset = min(candidates.count, max(0, request.offset))
-        var returned: [AgentJSONValue] = []
-        var roots: [UUID] = [], unknown: [UUID] = []
+        // Plan the page from the snapshot by identity and size only.
+        var planned: [SearchPageCache.Segment] = []
+        var tooLarge: SearchPageCache.Segment?
         var used = 0
         var consumed = 0
         for candidate in candidates.dropFirst(offset).prefix(min(Self.sessionSegments, max(1, request.limit))) {
@@ -118,29 +122,41 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
             guard messages.count == candidate.messageIDs.count,
                   (try? AssistantContext.referenceDigest(messages)) == candidate.digest,
                   !messages.contains(where: { index.isMasked(message: $0.id) }) else { pages.forget(segments: key); return Self.stale }
-            let rendered = AssistantContext.serialized(messages)
-            let size = rendered.unicodeScalars.count
+            let size = AssistantContext.serialized(messages).unicodeScalars.count
             if size > Self.sessionScalars {
-                if returned.isEmpty {
-                    consumed += 1
-                    returned.append(.object(["status": .string("too_large"), "session_id": .string(candidate.sessionID.uuidString),
-                        "root_prompt_id": candidate.root.map { .string($0.uuidString) } ?? .null,
-                        "message_ids": .array(candidate.messageIDs.map { .string($0.uuidString) }),
-                        "message": .string("这段历史超过单次返回上限，未截断返回；请让用户在界面中打开查看。")]))
-                }
+                if planned.isEmpty { consumed += 1; tooLarge = candidate }
                 break
             }
             guard used + size <= Self.sessionScalars else { break }
             used += size; consumed += 1
-            if let root = candidate.root { roots.append(root) } else { unknown += candidate.messageIDs }
-            returned.append(.object([
-                "session_id": .string(candidate.sessionID.uuidString), "session_title": .string(session.title),
+            planned.append(candidate)
+        }
+        var returned: [AgentJSONValue] = []
+        if let candidate = tooLarge {
+            returned.append(.object(["status": .string("too_large"), "session_id": .string(candidate.sessionID.uuidString),
                 "root_prompt_id": candidate.root.map { .string($0.uuidString) } ?? .null,
                 "message_ids": .array(candidate.messageIDs.map { .string($0.uuidString) }),
-                "transcript": .string(rendered),
-            ]))
+                "message": .string("这段历史超过单次返回上限，未截断返回；请让用户在界面中打开查看。")]))
         }
-        if !roots.isEmpty || !unknown.isEmpty { try await register([], roots, unknown) }
+        if !planned.isEmpty {
+            // Verified (latest digest, eligibility, masks), registered and read in one transaction.
+            let committed: [ReadCommitResult.Segment]
+            do {
+                guard case .segments(let segments) = try await commit(.segments(planned)) else { throw ReadStale() }
+                committed = segments
+            } catch is ReadStale {
+                pages.forget(segments: key)
+                return Self.stale
+            }
+            for segment in committed {
+                returned.append(.object([
+                    "session_id": .string(segment.plan.sessionID.uuidString), "session_title": .string(segment.title),
+                    "root_prompt_id": segment.plan.root.map { .string($0.uuidString) } ?? .null,
+                    "message_ids": .array(segment.plan.messageIDs.map { .string($0.uuidString) }),
+                    "transcript": .string(AssistantContext.serialized(segment.messages)),
+                ]))
+            }
+        }
         let next = offset + consumed
         return .object([
             "segments": .array(returned), "next_offset": next < candidates.count ? .number(Double(next)) : .null,
