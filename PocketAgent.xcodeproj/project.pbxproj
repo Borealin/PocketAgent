@@ -55,6 +55,7 @@
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
 		CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4597769ADE790DBCF5243A /* TextInputRequest.swift */; };
+		CE20ABAE4B66E96F070C260B /* AssistantViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */; };
 		CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */; };
 		D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9546B4615DB532FC42BF7335 /* Rules.swift */; };
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
@@ -123,6 +124,7 @@
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8B0353F740886263A926C60F /* AssistantRequestProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRequestProjection.swift; sourceTree = "<group>"; };
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
+		92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViews.swift; sourceTree = "<group>"; };
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
 		9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIOperationFailure.swift; sourceTree = "<group>"; };
@@ -274,6 +276,7 @@
 			children = (
 				5243D878A3E7F546CA6EF591 /* AgentRunner.swift */,
 				1064B279B527E66B105C75F2 /* AssistantTurnSupport.swift */,
+				92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */,
 				0A45359ABA3EE41F69474549 /* ChatComposer.swift */,
 				E7EA1370AD3A250D19122214 /* ChatMemory.swift */,
 				8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */,
@@ -401,6 +404,7 @@
 				F0EFCFE096DFF63344A2535B /* AssistantRequestProjection.swift in Sources */,
 				EFD714D2364181BB7EE72640 /* AssistantState.swift in Sources */,
 				FCD0F1007FC746B9806DAB48 /* AssistantTurnSupport.swift in Sources */,
+				CE20ABAE4B66E96F070C260B /* AssistantViews.swift in Sources */,
 				8886708D7E4580012E54CC6A /* Attachments.swift in Sources */,
 				68FF19DDFDD6EF2DCBBD408A /* CanonicalDigest.swift in Sources */,
 				19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */,

@@ -8,6 +8,11 @@ import UIKit
 struct ChatTranscriptView: View {
     @ObservedObject var chat: ChatController
     let dismissKeyboard: () -> Void
+    /// Opens the memory panel prefilled from a message (one explicit save).
+    var saveAsMemory: (MemoryDraft) -> Void = { _ in }
+    /// Messages rendered per page; long histories show the most recent page
+    /// first and load earlier pages on request (no full-history rebuild).
+    static let pageSize = 400
     @Environment(\.openURL) private var systemOpenURL
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var nearBottom = true
@@ -15,17 +20,28 @@ struct ChatTranscriptView: View {
     @State private var pendingLink: URL?
 
     var body: some View {
-        let messages = chat.displayedMessages
+        let all = chat.displayedMessages
+        let limit = chat.selectedID.flatMap { chat.visibleLimit[$0] } ?? Self.pageSize
+        let messages = Self.page(all, limit: limit)
+        let hidden = all.count - messages.count
         let items = TranscriptItem.build(messages)
         let running = chat.selectedID.map(chat.isRunning) ?? false
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                if messages.isEmpty {
-                    Text("开始一个新话题，也可以让助手打开 App、查找内容或操作手机。")
+                if all.isEmpty {
+                    Text(chat.isPrimary(chat.selectedID)
+                         ? "这是你的助理。换话题、换模型或隔天回来都在这里继续；用“记住：…”保存你希望它记住的事。"
+                         : "开始一个新话题，也可以让助手打开 App、查找内容或操作手机。")
                         .font(.callout).foregroundStyle(.secondary).padding(.vertical, 24)
                 }
+                if hidden > 0, let id = chat.selectedID {
+                    Button("显示更早的 \(min(hidden, Self.pageSize)) 条（共 \(all.count) 条）") {
+                        chat.visibleLimit[id] = limit + Self.pageSize
+                    }
+                    .font(.footnote).frame(maxWidth: .infinity).accessibilityIdentifier("loadEarlier")
+                }
                 ForEach(items) { item in
-                    TranscriptRow(chat: chat, item: item, running: running)
+                    TranscriptRow(chat: chat, item: item, running: running, saveAsMemory: saveAsMemory)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -47,7 +63,7 @@ struct ChatTranscriptView: View {
             nearBottom = near
             if near { unseen = false }
         }
-        .onChange(of: TranscriptProgress(messages)) { _, _ in
+        .onChange(of: TranscriptProgress(Array(messages.suffix(50)))) { _, _ in
             if nearBottom { position.scrollTo(edge: .bottom) } else { unseen = true }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -78,6 +94,14 @@ struct ChatTranscriptView: View {
         } message: { url in Text(url.absoluteString) }
     }
 
+
+    /// The most recent `limit` messages, never starting inside a call group.
+    static func page(_ messages: [AgentTranscriptMessage], limit: Int) -> [AgentTranscriptMessage] {
+        guard messages.count > limit else { return messages }
+        var start = messages.count - limit
+        while start > 0, messages[start].role == .tool { start -= 1 }
+        return Array(messages[start...])
+    }
 }
 
 private struct AnyLabelStyle: LabelStyle {
@@ -90,18 +114,65 @@ private struct TranscriptRow: View {
     @ObservedObject var chat: ChatController
     let item: TranscriptItem
     let running: Bool
+    let saveAsMemory: (MemoryDraft) -> Void
 
     var body: some View {
         switch item {
         case .message(let message):
             switch message.role {
-            case .user: UserBubble(message: message, attachments: chat.selected?.attachments(of: message) ?? [])
-            case .assistant: AssistantBody(message: message, author: chat.author(of: message), streaming: chat.isStreaming(message.id))
+            case .user:
+                VStack(alignment: .trailing, spacing: 4) {
+                    UserBubble(message: message, attachments: chat.selected?.attachments(of: message) ?? [])
+                    if let note = contextNote(message) {
+                        Text(note).font(.caption2).foregroundStyle(.secondary).accessibilityIdentifier("contextExclusion")
+                    }
+                    if chat.isPrimary(chat.selectedID), MemoryCommand.parse(message.text) == nil,
+                       message.text.contains("记住") || message.text.lowercased().contains("remember") {
+                        Button { saveAsMemory(draft(from: message)) } label: { Label("存为记忆", systemImage: "brain") }
+                            .font(.caption).buttonStyle(.bordered).controlSize(.mini)
+                            .accessibilityIdentifier("saveAsMemoryChip")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .contextMenu { actions(message) }
+            case .assistant:
+                AssistantBody(message: message, author: chat.author(of: message), streaming: chat.isStreaming(message.id))
+                    .contextMenu { actions(message) }
             case .tool: ToolResultRow(message: message)
             }
         case .tools(_, let steps): ToolTimeline(steps: steps, running: running)
         case .orphanResult(let message): ToolResultRow(message: message)
         }
+    }
+
+    @ViewBuilder private func actions(_ message: AgentTranscriptMessage) -> some View {
+        if !message.text.isEmpty {
+            Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
+        }
+        if chat.isPrimary(chat.selectedID), !message.text.isEmpty {
+            Button("存为记忆…", systemImage: "brain") { saveAsMemory(draft(from: message)) }
+        }
+        if let id = chat.selectedID, !chat.isPrimary(id) {
+            Button("引用到你的助理", systemImage: "quote.opening") { chat.referenceForAssistant(sessionID: id, messageID: message.id) }
+        }
+    }
+
+    /// The user's own text prefills the panel; saving is one explicit edit.
+    private func draft(from message: AgentTranscriptMessage) -> MemoryDraft {
+        let root = chat.file.assistant.scopeIndex.root(of: message.id)
+        return MemoryDraft(scope: chat.defaultMemoryScope, content: message.text, origin: .chatChip,
+                           roots: root.map { [$0] } ?? [], messages: [message.id])
+    }
+
+    /// Context status of a primary-line request; originals always stay visible.
+    private func contextNote(_ message: AgentTranscriptMessage) -> String? {
+        guard chat.isPrimary(chat.selectedID) else { return nil }
+        let index = chat.file.assistant.scopeIndex
+        guard let root = index.root(of: message.id), root == message.id, let scoped = index.scopedRoot(root) else { return nil }
+        if index.isMasked(root: root) { return "已排除出助理上下文（遗忘）" }
+        if scoped.abandonedUnstarted { return "未启动，已放弃" }
+        if !scoped.verified { return "来源已变化，不再自动用作上下文" }
+        return nil
     }
 }
 
