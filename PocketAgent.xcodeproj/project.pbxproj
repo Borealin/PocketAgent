@@ -44,6 +44,7 @@
 		839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5243D878A3E7F546CA6EF591 /* AgentRunner.swift */; };
 		88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAF33FE982E09F9E44343CC /* ProviderStore.swift */; };
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
+		89ECD0E2CE9A7E5C8422A5C2 /* ClearPrimary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */; };
 		8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A30E3059701B9B77BA06A7D /* PhoneControl.swift */; };
 		929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65594612732E3288F588504 /* WDARequestDiagnostics.swift */; };
 		954F84FD21FFD7D4A19C3375 /* ChatMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EA1370AD3A250D19122214 /* ChatMemory.swift */; };
@@ -144,6 +145,7 @@
 		CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalDigest.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
+		DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearPrimary.swift; sourceTree = "<group>"; };
 		E39E07338DA36C6016FB8828 /* PhoneBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneBackend.swift; sourceTree = "<group>"; };
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
@@ -216,6 +218,7 @@
 				CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */,
 				59F24A784103BF8F2532963F /* ChatHistory.swift */,
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
+				DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */,
 				71BBBC1966721F24A0B7C74B /* ContextBudget.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */,
@@ -415,6 +418,7 @@
 				6E6F55F20AE640203D512A13 /* ChatSessions.swift in Sources */,
 				166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */,
 				F1D7FBFC6CA27CD8489BF96B /* ChatTurns.swift in Sources */,
+				89ECD0E2CE9A7E5C8422A5C2 /* ClearPrimary.swift in Sources */,
 				72018019477198B62A047CE7 /* CloudSync.swift in Sources */,
 				EAC477D9DF67D43E10E429AA /* ContextBudget.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
