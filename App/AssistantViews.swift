@@ -226,7 +226,7 @@ struct MemoryPanelView: View {
                 MemoryEditorView(chat: chat, workspaces: workspaces, draft: draft) { editing = nil }
             }
             .sheet(item: Binding(get: { previewEntry }, set: { if $0 == nil { previewEntry = nil; preview = nil } })) { entry in
-                ForgetPreviewView(chat: chat, entry: entry, preview: $preview) { previewEntry = nil; preview = nil }
+                ForgetPreviewView(chat: chat, entryID: entry.id, preview: $preview) { previewEntry = nil; preview = nil }
             }
             .onAppear { if let prefill { editing = prefill } }
         }
@@ -243,7 +243,7 @@ struct MemoryPanelView: View {
     }
 
     private func startForget(_ entry: MemoryRecord) {
-        guard let computed = chat.forgetPreview([entry.id]) else { return }
+        guard let computed = chat.forgetPreview(for: entry) else { return }
         preview = computed
         previewEntry = entry
     }
@@ -324,23 +324,35 @@ struct MemoryEditorView: View {
     }
 }
 
-/// The final forget panel: the selected entry and revision, the known
-/// closure size, whether the current task stops, and that originals stay.
-/// Confirm recomputes; any change refuses and refreshes here.
+/// The final forget panel: the entry and revision this preview computed (the
+/// same snapshot the commit is checked against), the known closure size,
+/// whether the current task stops, and that originals stay. Confirm
+/// recomputes; any change refuses and shows the latest content, revision and
+/// numbers for a new confirmation; a missing entry cannot be confirmed.
 struct ForgetPreviewView: View {
     @ObservedObject var chat: ChatController
-    let entry: MemoryRecord
+    let entryID: UUID
     @Binding var preview: ForgetPreview?
     /// Called once the forget is committed (not on cancel).
     var forgotten: () -> Void = {}
     let done: () -> Void
+    @State private var refreshed = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("将遗忘") {
-                    Text(entry.content)
-                    Text("版本 \(entry.revision)，包括此前所有版本的已知读取").font(.caption).foregroundStyle(.secondary)
+                    if let entry = preview?.shown.first {
+                        Text(entry.content).accessibilityIdentifier("forgetContent")
+                        Text("版本 \(entry.revision)，包括此前所有版本的已知读取").font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("forgetRevision")
+                    } else {
+                        Text("这条记忆已不存在，无需遗忘。").foregroundStyle(.secondary).accessibilityIdentifier("forgetMissing")
+                    }
+                    if refreshed, preview != nil {
+                        Text("内容或影响范围已变化，以上是最新状态；请重新确认。").font(.caption).foregroundStyle(.orange)
+                            .accessibilityIdentifier("forgetRefreshed")
+                    }
                 }
                 if let preview {
                     Section("连带影响") {
@@ -357,7 +369,7 @@ struct ForgetPreviewView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { done() } }
                 ToolbarItem(placement: .destructiveAction) {
-                    Button("遗忘", role: .destructive) { confirm() }.accessibilityIdentifier("forgetConfirm")
+                    Button("遗忘", role: .destructive) { confirm() }.disabled(preview == nil).accessibilityIdentifier("forgetConfirm")
                 }
             }
         }
@@ -365,8 +377,10 @@ struct ForgetPreviewView: View {
 
     private func confirm() {
         guard let current = preview else { return }
-        if chat.commitForget(current) { forgotten(); done() }
-        else { preview = chat.forgetPreview([entry.id]) } // changed: refreshed numbers, confirm again
+        if chat.commitForget(current) { forgotten(); done(); return }
+        // Changed: the latest entry, revision and numbers (or none), confirmed again.
+        preview = chat.forgetPreview([entryID])
+        refreshed = true
     }
 }
 
@@ -424,7 +438,7 @@ struct MemoryIntentCards: View {
                                  commit: { chat.saveIntentEdit($0, request: request) }, done: { editing = nil })
             }
             .sheet(item: Binding(get: { forgetting }, set: { if $0 == nil { forgetting = nil; preview = nil } })) { entry in
-                ForgetPreviewView(chat: chat, entry: entry, preview: $preview, forgotten: { chat.settleIntent(request) },
+                ForgetPreviewView(chat: chat, entryID: entry.id, preview: $preview, forgotten: { chat.settleIntent(request) },
                                   done: { forgetting = nil; preview = nil })
             }
         }
@@ -450,7 +464,7 @@ struct MemoryIntentCards: View {
             if let replacement = request.intent.replacement { draft.content = replacement }
             editing = draft
         case .forget:
-            guard let computed = chat.forgetPreview([entry.id]) else { return }
+            guard let computed = chat.forgetPreview(for: entry) else { return }
             preview = computed
             forgetting = entry
         }
