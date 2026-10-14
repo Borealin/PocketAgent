@@ -104,9 +104,9 @@ struct ContextBuilderTests {
         #expect(AssistantContext.build(.init(file: withGood, sessionID: fixture.primary, promptID: prompt.id, scope: .general,
             references: [], budget: .unknown, estimator: ContextEstimator(), systemPrompt: "s", tools: [], prompt: [])).summaryID == good.id)
         // Automatic history search finds only the request that ran.
-        let snapshot = fixture.file
-        let adapter = PocketMemoryAdapter(scope: .general, currentRoot: prompt.id, references: [], snapshot: { snapshot },
-                                          register: { _, _, _ in })
+        var snapshot = fixture.file
+        try snapshot.commitDispatchPermit(root: prompt.id, sessionID: fixture.primary, scope: .general)
+        let adapter = PocketMemoryAdapter.testing(FileBox(snapshot), scope: .general, currentRoot: prompt.id)
         let found = try await adapter.searchSessions(AgentSessionSearchRequest(query: "章节的标题"))
         #expect(found.objectValue?["segments"]?.arrayValue?.compactMap { $0.objectValue?["root_prompt_id"]?.stringValue }
                 == [resent.uuidString])

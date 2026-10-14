@@ -63,6 +63,7 @@
 		D28989E23040463B42D8494C /* ProviderViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9EC154A7B819D774BFB985 /* ProviderViews.swift */; };
 		D7451BC0E1117C33E4C6FF9B /* MemoryLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5507EA1F8D4F7602AAC5689 /* MemoryLedger.swift */; };
 		D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08CD702C33D2019607205D8 /* DeviceSettings.swift */; };
+		D88232186F607B086CA09D84 /* ReadCommit.swift in Sources */ = {isa = PBXBuildFile; fileRef = E77E9C6F8013CA9CE24E63E2 /* ReadCommit.swift */; };
 		D970A71342760BB278CDAABC /* TurnGates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288C5CC7122C0F08F9B29C94 /* TurnGates.swift */; };
 		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
@@ -154,6 +155,7 @@
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
 		E65594612732E3288F588504 /* WDARequestDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WDARequestDiagnostics.swift; sourceTree = "<group>"; };
+		E77E9C6F8013CA9CE24E63E2 /* ReadCommit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadCommit.swift; sourceTree = "<group>"; };
 		E7EA1370AD3A250D19122214 /* ChatMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMemory.swift; sourceTree = "<group>"; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEndpoints.swift; sourceTree = "<group>"; };
@@ -244,6 +246,7 @@
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
 				AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */,
+				E77E9C6F8013CA9CE24E63E2 /* ReadCommit.swift */,
 				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
@@ -455,6 +458,7 @@
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				037E5381B669DED7A34CA611 /* ProviderToolSchema.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
+				D88232186F607B086CA09D84 /* ReadCommit.swift in Sources */,
 				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
 				D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */,
 				274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */,

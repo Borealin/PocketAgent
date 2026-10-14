@@ -256,54 +256,32 @@ struct MemoryLedgerTests {
 
 /// The read-only adapter used by memory_search/session_search.
 struct MemoryAdapterTests {
-    private actor Registry {
-        var memory: [MemoryReadRevision] = []
-        var roots: [UUID] = []
-        var fail = false
-        func record(_ m: [MemoryReadRevision], _ r: [UUID]) throws {
-            if fail { throw StorageCommitError.storageUnavailable }
-            memory += m; roots += r
-        }
-        func setFail() { fail = true }
-    }
-
-    private final class Box: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value: HistoryFile
-        init(_ value: HistoryFile) { self.value = value }
-        var file: HistoryFile { get { lock.withLock { value } } set { lock.withLock { value = newValue } } }
-    }
-
     @Test func modelWritesAreRefusedAndSearchRegistersReadsOrReturnsNothing() async throws {
         var history = HistoryFile.initial(selection: nil)
         let primary = history.assistant.primarySessionID
         let receipt = try history.applyMemoryEdit(.add(target: .memory, scope: .global, content: "我对花生过敏",
                                                        origin: .command, sourceRootPromptIDs: [], sourceMessageIDs: []))
-        let box = Box(history)
-        let registry = Registry()
-        let current = UUID()
-        let adapter = PocketMemoryAdapter(scope: .general, currentRoot: current, references: [],
-                                          snapshot: { box.file }, register: { m, r, _ in try await registry.record(m, r) })
+        let current = try history.acceptCurrent("今晚吃什么", in: primary, scope: .general)
+        let box = FileBox(history)
+        let adapter = PocketMemoryAdapter.testing(box, scope: .general, currentRoot: current)
         await #expect(throws: MemoryError.modelWriteRefused) {
             try await adapter.applyMemory([AgentMemoryOperation(action: .add, target: .memory, content: "x")])
         }
+        #expect(try await adapter.memoryState().entries.isEmpty)
         let hit = try await adapter.searchMemories(AgentMemorySearchRequest(query: "花生"))
         #expect(hit.objectValue?["entries"]?.arrayValue?.count == 1)
-        #expect(await registry.memory.map(\.entryID) == receipt.entryIDs)
+        #expect(box.file.assistant.scopeIndex.scopedRoot(current)?.dependencies.memoryReads.map(\.entryID) == receipt.entryIDs)
         let miss = try await adapter.searchMemories(AgentMemorySearchRequest(query: "咖啡"))
         #expect(miss.objectValue?["entries"]?.arrayValue?.isEmpty == true)
         // A later page of a list whose entry changed returns stale_search.
-        var edited = box.file
-        _ = try edited.applyMemoryEdit(.replace(entryID: receipt.entryIDs[0], expectedRevision: 1, content: "我对花生和芒果过敏"))
-        box.file = edited
+        box.edit { _ = try? $0.applyMemoryEdit(.replace(entryID: receipt.entryIDs[0], expectedRevision: 1, content: "我对花生和芒果过敏")) }
         let stale = try await adapter.searchMemories(AgentMemorySearchRequest(query: "花生", offset: 0))
         #expect(stale.objectValue?["status"]?.stringValue == "stale_search")
-        // Registration failure returns no content.
-        await registry.setFail()
-        let fresh = PocketMemoryAdapter(scope: .general, currentRoot: current, references: [],
-                                        snapshot: { box.file }, register: { m, r, _ in try await registry.record(m, r) })
-        await #expect(throws: StorageCommitError.self) { try await fresh.searchMemories(AgentMemorySearchRequest(query: "花生")) }
-        _ = primary
+        // A failed registration write returns no content and registers nothing.
+        let before = box.file
+        let failing = PocketMemoryAdapter.testing(box, scope: .general, currentRoot: current, writeFails: { true })
+        await #expect(throws: StorageCommitError.self) { try await failing.searchMemories(AgentMemorySearchRequest(query: "芒果")) }
+        #expect(box.file == before)
     }
 
     @Test func sessionSearchStaysInScopeAndNeedsExplicitReferenceForOtherHistory() async throws {
@@ -322,9 +300,9 @@ struct MemoryAdapterTests {
         try history.commitDispatchPermit(root: projectPrompt.id, sessionID: other.id, scope: .workspace(project))
         try history.appendEvent(AgentTranscriptMessage(role: .assistant, text: "预算三千"), to: other.id, root: projectPrompt.id)
         try history.editSession(other.id) { $0.state = .completed }
-        let box = Box(history)
-        let adapter = PocketMemoryAdapter(scope: .general, currentRoot: UUID(), references: [],
-                                          snapshot: { box.file }, register: { _, _, _ in })
+        let current = try history.acceptCurrent("再查一下", in: primary, scope: .general)
+        let box = FileBox(history)
+        let adapter = PocketMemoryAdapter.testing(box, scope: .general, currentRoot: current)
         let result = try await adapter.searchSessions(AgentSessionSearchRequest(query: "龙井"))
         let segments = result.objectValue?["segments"]?.arrayValue ?? []
         #expect(segments.count == 1)
@@ -335,8 +313,7 @@ struct MemoryAdapterTests {
         let window = try #require(history.session(other.id)?.messages)
         let reference = HistoryReference(sessionID: other.id, firstMessageID: window.first!.id, lastMessageID: window.last!.id,
                                          expectedContentDigest: try AssistantContext.referenceDigest(window))
-        let referenced = PocketMemoryAdapter(scope: .general, currentRoot: UUID(), references: [reference],
-                                             snapshot: { box.file }, register: { _, _, _ in })
+        let referenced = PocketMemoryAdapter.testing(box, scope: .general, currentRoot: current, references: [reference])
         let allowed = try await referenced.searchSessions(AgentSessionSearchRequest(query: "预算", conversationID: other.id))
         #expect(allowed.objectValue?["segments"]?.arrayValue?.count == 1)
     }

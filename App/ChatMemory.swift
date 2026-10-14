@@ -6,7 +6,11 @@ extension ChatController {
 
     func assistantSupport(for job: ChatJob) -> AssistantTurnSupport {
         AssistantTurnSupport(owner: owner, sessionID: job.sessionID, promptID: job.prompt.id, scope: job.scope,
-                             references: job.references, config: job.config)
+                             references: job.references, config: job.config, epoch: job.epoch,
+                             isActive: { [weak self, weak job] in
+                                 guard let self, let job else { return false }
+                                 return self.jobs[job.sessionID] === job && !job.cancelled && !job.revoked && !job.terminal
+                             })
     }
 
     /// Memory scope the composer's commands and the panel default to: the

@@ -96,9 +96,8 @@ struct ClearPrimaryTests {
         var withNext = b.file
         try withNext.acceptRoot(next, attachments: [], in: fresh, scope: .workspace(project))
         #expect(AssistantContext.eligibleSegments(withNext, sessionID: fresh, before: next.id, scope: .workspace(project)).isEmpty)
-        let snapshot = withNext
-        let adapter = PocketMemoryAdapter(scope: .workspace(project), currentRoot: next.id, references: [],
-                                          snapshot: { snapshot }, register: { _, _, _ in })
+        try withNext.commitDispatchPermit(root: next.id, sessionID: fresh, scope: .workspace(project))
+        let adapter = PocketMemoryAdapter.testing(FileBox(withNext), scope: .workspace(project), currentRoot: next.id)
         let history = try await adapter.searchSessions(AgentSessionSearchRequest(query: "PKATEST_CLEAR_对话标记"))
         #expect(history.objectValue?["segments"]?.arrayValue?.isEmpty ?? true)
         let memory = try await adapter.searchMemories(AgentMemorySearchRequest(query: "暗号"))
@@ -128,9 +127,10 @@ struct ClearPrimaryTests {
         copy.id = UUID(); copy.title = ChatSession.primaryTitle + PortableMerge.conflictSuffix; copy.conflictOf = b.primary
         copy.draft = ""; copy.draftAttachments = []
         b.file.sessions.append(copy)
-        func found(_ file: HistoryFile, current: UUID) async throws -> Int {
-            let adapter = PocketMemoryAdapter(scope: .workspace(project), currentRoot: current, references: [],
-                                              snapshot: { file }, register: { _, _, _ in })
+        func found(_ file: HistoryFile, current _: UUID) async throws -> Int {
+            var probe = file
+            let current = try probe.acceptCurrent("搜索", in: try #require(probe.primary).id, scope: .workspace(project))
+            let adapter = PocketMemoryAdapter.testing(FileBox(probe), scope: .workspace(project), currentRoot: current)
             let result = try await adapter.searchSessions(AgentSessionSearchRequest(query: "PKATEST_CLEAR_对话标记一"))
             return result.objectValue?["segments"]?.arrayValue?.count ?? 0
         }
