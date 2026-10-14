@@ -1,6 +1,7 @@
 # Third-party notices
 
-- AgentKit, AkinoKaede contributors, MIT. Pinned revision in dependencies.json.
+- AgentKit, AkinoKaede contributors, MIT. Pinned revision in dependencies.json: the Borealin/AgentKit fork branch
+  `codex/pocketagent-bounded-consume`, upstream plus a bounded provider response API.
   License bundled as AgentKit-LICENSE.txt.
 - AgentKit's Swift dependencies, ScrubberKit and SwiftSoup, MIT. Release builds
   include their original notices and a manifest of the pinned revisions from

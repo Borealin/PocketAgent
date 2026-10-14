@@ -1,6 +1,5 @@
 import AgentKit
 import Foundation
-import UIKit
 
 /// Thread-safe set read by the nonisolated request gate.
 final class SyntheticIDs: @unchecked Sendable {
@@ -33,10 +32,6 @@ final class AssistantTurnSupport {
     private var calibrationKey: EstimatorCalibration.Key {
         .init(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
     }
-    /// The bounded-streaming maintenance API is not available in the pinned
-    /// AgentKit; summaries use the buffered fallback for at most this long,
-    /// in the foreground only.
-    static let fallbackSummarySeconds: TimeInterval = 30
 
     init(owner: HistoryOwner, sessionID: UUID, promptID: UUID, scope: WorkScope, references: [HistoryReference],
          config: RunConfiguration) {
@@ -48,15 +43,21 @@ final class AssistantTurnSupport {
 
     // MARK: Before the first request
 
+    /// `onWork` receives coalesced counts of real summary text/reasoning
+    /// increments (at most one pending MainActor delivery).
     func prepareContext(prompt: AgentTranscriptMessage, systemPrompt: String, tools: [AgentToolDescriptor],
-                        provider: AgentProviderClient, deadline: TurnDeadline) async throws -> [AgentTranscriptMessage] {
+                        provider: AgentProviderClient, deadline: TurnDeadline,
+                        onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws -> [AgentTranscriptMessage] {
         var prepared = build(prompt: prompt, systemPrompt: systemPrompt, tools: tools)
         if let plan = prepared.plan {
             do {
-                try await summarize(plan, provider: provider, deadline: deadline)
+                try await summarize(plan, provider: provider, deadline: deadline, onWork: onWork)
                 prepared = build(prompt: prompt, systemPrompt: systemPrompt, tools: tools)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let error as TurnDeadlineReached {
+                // The turn's own deadline: stop the turn, no main request.
+                throw error
             } catch {
                 // No summary this turn and no automatic retry; a known or
                 // explicit ceiling is still enforced before every request.
@@ -80,9 +81,18 @@ final class AssistantTurnSupport {
                                      systemPrompt: systemPrompt, tools: tools, prompt: [prompt]))
     }
 
-    /// Tool-free summary folds, each committed by CAS against the latest
-    /// eligible history; a changed source discards the candidate.
-    private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline) async throws {
+    /// Tool-free summary folds over AgentKit's bounded `consume` (transport
+    /// bytes, SSE line and event count capped; terminal required), each
+    /// committed by CAS against the latest eligible history; a changed source
+    /// discards the candidate. All folds share one 150 s maintenance deadline
+    /// that never passes the turn deadline; idle is 45 s per attempt.
+    private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
+                           onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
+        let maintenance = MaintenanceDeadline(turnRemaining: deadline.remaining)
+        let progress = ProgressCoalescer(deliver: onWork)
+        let producer: StreamingSummary.Producer = { request, onEvent in
+            try await provider.consume(request, limits: .maintenance, onEvent: onEvent)
+        }
         var predecessor = plan.predecessor
         for fold in plan.folds {
             let messages = fold.flatMap(\.messages)
@@ -90,8 +100,9 @@ final class AssistantTurnSupport {
             let attachments = owner.file.session(sessionID)?.attachments ?? [:]
             let input = try AssistantContext.inputDigest(messages: messages, attachments: attachments, scope: scope,
                                                          parent: predecessor)
-            let text = try await Self.summaryText(messages: messages, previous: predecessor?.record.summary,
-                                                  provider: provider, deadline: deadline)
+            let text = try await StreamingSummary.run(
+                SummaryRequest.make(messages: messages, previous: predecessor?.record.summary),
+                producer: producer, deadline: maintenance, progress: progress)
             let ids = messages.map(\.id)
             let record = AgentCompactionRecord(summaryMessageID: UUID(), compactedThroughMessageID: last.id,
                                                sequence: (predecessor?.record.sequence ?? 0) + 1, summary: text,
@@ -108,39 +119,6 @@ final class AssistantTurnSupport {
             try owner.transact { try $0.commitSummary(candidate) }
             predecessor = candidate
         }
-    }
-
-    /// Buffered fallback: AgentKit's complete() (16 MiB cap, terminal event
-    /// required), at most 30 s, cancelled if the app leaves the foreground.
-    /// Accepts only `.completed` without tool calls and at most 64 KiB of
-    /// text; `.length` and empty answers are rejected.
-    static func summaryText(messages: [AgentTranscriptMessage], previous: String?, provider: AgentProviderClient,
-                            deadline: TurnDeadline) async throws -> String {
-        let limit = min(fallbackSummarySeconds, deadline.remaining)
-        guard limit > 1 else { throw SummaryPreparationError(detail: "本轮剩余时间不足") }
-        var body = ""
-        if let previous { body += "<previous-summary>\n\(previous)\n</previous-summary>\n" }
-        body += "<untrusted-data>\n\(AssistantContext.serialized(messages))\n</untrusted-data>"
-        let request = AgentModelRequest(
-            systemPrompt: AgentCompactionService.systemPrompt(
-                instructions: "使用对话所用的语言。合并 previous-summary 与新内容，保留用户明确的偏好、决定、未完成事项和未确认的动作结果。"),
-            messages: [AgentTranscriptMessage(role: .user, text: body)], tools: [])
-        let background = NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification)
-        let events: [AgentModelStreamEvent] = try await withThrowingTaskGroup(of: [AgentModelStreamEvent]?.self) { group in
-            group.addTask { try await provider.complete(request) }
-            group.addTask {
-                try await Task.sleep(for: .seconds(limit))
-                throw SummaryPreparationError(detail: "整理超过 \(Int(limit)) 秒，本轮不使用摘要")
-            }
-            group.addTask {
-                for await _ in background { throw SummaryPreparationError(detail: "App 离开前台，整理已取消") }
-                return nil
-            }
-            defer { group.cancelAll() }
-            while let result = try await group.next() { if let result { return result } }
-            throw SummaryPreparationError(detail: "整理没有结果")
-        }
-        return try SummaryResponse.validate(events)
     }
 
     // MARK: Every request

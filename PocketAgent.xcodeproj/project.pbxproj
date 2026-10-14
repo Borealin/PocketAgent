@@ -368,7 +368,7 @@
 			mainGroup = 5D695D0E583F9F4E6BC0201C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */,
+				31F9EF9C2026A627DDFE551A /* XCRemoteSwiftPackageReference "AgentKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BAC2CBC1659C78F25D37FF6F /* Products */;
@@ -665,12 +665,12 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */ = {
+		31F9EF9C2026A627DDFE551A /* XCRemoteSwiftPackageReference "AgentKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/AkinoKaede/AgentKit.git";
+			repositoryURL = "https://github.com/Borealin/AgentKit.git";
 			requirement = {
 				kind = revision;
-				revision = 8108c9bb87c546860cfc1769571e115af919fe8a;
+				revision = 22fc575009bde3a2097ac1a49908ffa239b9c029;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -678,7 +678,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		4E3CCB903EB2A196726DC963 /* AgentKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B7E531AFBC190CCA06ADE376 /* XCRemoteSwiftPackageReference "AgentKit" */;
+			package = 31F9EF9C2026A627DDFE551A /* XCRemoteSwiftPackageReference "AgentKit" */;
 			productName = AgentKit;
 		};
 /* End XCSwiftPackageProductDependency section */

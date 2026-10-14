@@ -7,6 +7,7 @@ import Testing
 /// their own task, as AgentKit's bounded `consume` does.
 struct StreamingSummaryTests {
     private let request = AgentModelRequest(systemPrompt: "s", messages: [], tools: [])
+    private var long: MaintenanceDeadline { MaintenanceDeadline(turnRemaining: 600) }
 
     private actor Deliveries {
         var calls = 0, total = 0
@@ -22,7 +23,7 @@ struct StreamingSummaryTests {
             }
             try onEvent(.usage(AgentTokenUsage(inputTokens: 10)))
             try onEvent(.finished(.completed))
-        }, progress: progress)
+        }, deadline: long, progress: progress)
         #expect(text == String(repeating: "a", count: 10_000))
         try await Task.sleep(for: .milliseconds(200))
         let calls = await deliveries.calls, total = await deliveries.total
@@ -33,24 +34,24 @@ struct StreamingSummaryTests {
         await #expect(throws: SummaryPreparationError.self) {
             try await StreamingSummary.run(request, producer: { _, onEvent in
                 try onEvent(.textDelta("x")); try onEvent(.finished(.length))
-            })
+            }, deadline: long)
         }
         await #expect(throws: SummaryPreparationError.self) {
-            try await StreamingSummary.run(request, producer: { _, onEvent in try onEvent(.textDelta("x")) })
+            try await StreamingSummary.run(request, producer: { _, onEvent in try onEvent(.textDelta("x")) }, deadline: long)
         }
         let after = CallCounter()
         await #expect(throws: SummaryPreparationError.self) {
             try await StreamingSummary.run(request, producer: { _, onEvent in
                 try onEvent(.toolCallSnapshot(id: "t", providerItemID: nil, name: "tap", arguments: "{}"))
                 after.increment()
-            })
+            }, deadline: long)
         }
         #expect(after.count == 0) // the producer stopped at the refusing callback
         await #expect(throws: SummaryPreparationError.self) {
             try await StreamingSummary.run(request, producer: { _, onEvent in
                 for _ in 0..<100 { try onEvent(.textDelta(String(repeating: "长", count: 1_000))) }
                 after.increment()
-            })
+            }, deadline: long)
         }
         #expect(after.count == 0)
     }
@@ -75,7 +76,7 @@ struct StreamingSummaryTests {
                     try await Task.sleep(for: .milliseconds(100))
                 }
                 try onEvent(.finished(.completed))
-            }, idleSeconds: 0.6, progress: progress)
+            }, deadline: long, idleSeconds: 0.6, progress: progress)
         }
         try await Task.sleep(for: .milliseconds(200))
         let delivered = await deliveries.total
@@ -89,19 +90,60 @@ struct StreamingSummaryTests {
         #expect(collector.work == 3)
     }
 
-    @Test func idleAndTotalDeadlinesEndTheAttempt() async throws {
+    @Test func idleAndSharedDeadlinesEndTheAttempt() async throws {
         await #expect(throws: SummaryPreparationError.self) {
             try await StreamingSummary.run(request, producer: { _, onEvent in
                 try onEvent(.textDelta("开始"))
                 try await Task.sleep(for: .seconds(5))
                 try onEvent(.finished(.completed))
-            }, idleSeconds: 0.5)
+            }, deadline: long, idleSeconds: 0.5)
         }
+        // One maintenance budget across folds: the second fold only gets what is left.
+        let shared = MaintenanceDeadline(turnRemaining: 600, total: 1)
+        let slow: StreamingSummary.Producer = { _, onEvent in
+            for _ in 0..<7 { try onEvent(.textDelta("…")); try await Task.sleep(for: .milliseconds(100)) }
+            try onEvent(.finished(.completed))
+        }
+        let first = try await StreamingSummary.run(request, producer: slow, deadline: shared, idleSeconds: 10)
+        #expect(!first.isEmpty)
+        let started = ProcessInfo.processInfo.systemUptime
         await #expect(throws: SummaryPreparationError.self) {
-            try await StreamingSummary.run(request, producer: { _, onEvent in
-                for _ in 0..<50 { try onEvent(.textDelta("…")); try await Task.sleep(for: .milliseconds(100)) }
-                try onEvent(.finished(.completed))
-            }, totalSeconds: 1, idleSeconds: 10)
+            try await StreamingSummary.run(request, producer: slow, deadline: shared, idleSeconds: 10)
         }
+        #expect(ProcessInfo.processInfo.systemUptime - started < 0.7)
+        // When the turn's own deadline is the bound, the whole turn stops.
+        let turnBound = MaintenanceDeadline(turnRemaining: 0.5)
+        #expect(turnBound.turnBound)
+        await #expect(throws: TurnDeadlineReached.self) {
+            try await StreamingSummary.run(request, producer: slow, deadline: turnBound, idleSeconds: 10)
+        }
+        #expect(!MaintenanceDeadline(turnRemaining: 600).turnBound)
+        #expect(MaintenanceDeadline(turnRemaining: 600).remaining <= 150)
+    }
+
+    /// Cancelling the preparing turn surfaces as cancellation even when the
+    /// transport reports its own error (URLSession cancellation).
+    @Test func cancellationPropagatesAsCancellation() async throws {
+        let task = Task {
+            try await StreamingSummary.run(request, producer: { _, onEvent in
+                try onEvent(.textDelta("部分"))
+                do { try await Task.sleep(for: .seconds(10)) } catch { throw URLError(.cancelled) }
+            }, deadline: long)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+    }
+
+    /// A cycle of more distinct snapshots than any small window (A B … 70
+    /// times round) is only new work the first time each appears.
+    @Test func cyclingSnapshotsCountOnlyOnce() throws {
+        let collector = SummaryCollector()
+        let cycle = (0..<70).map { "## Goal \($0)" }
+        for _ in 0..<3 { for text in cycle { try collector.accept(.textSnapshot(text)) } }
+        #expect(collector.work == 70)
+        let reasoning = (0..<70).map { "思考 \($0)" }
+        for _ in 0..<3 { for text in reasoning { try collector.accept(.reasoningSnapshot(text)) } }
+        #expect(collector.work == 140)
     }
 }
