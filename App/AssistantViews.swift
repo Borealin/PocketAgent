@@ -104,7 +104,7 @@ struct PendingCard: View {
                     }
                     .font(.caption).buttonStyle(.bordered).controlSize(.small)
                     if case .promoted = pending.prompt {
-                        Text("这条请求已在历史中但从未开始执行；继续会使用当前模型与项目设置，以同一请求开始。")
+                        Text("这条请求已在历史中但从未开始执行；继续会使用当前模型与\(projectLabel(pending.sessionID))，以同一请求开始并归入它。")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
@@ -112,6 +112,12 @@ struct PendingCard: View {
             .padding(10).background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             .accessibilityIdentifier("pendingCard")
         }
+    }
+
+    /// The project the conversation uses now, which a continued request runs in.
+    private func projectLabel(_ sessionID: UUID) -> String {
+        guard let id = chat.file.session(sessionID)?.workspaceID else { return "不使用项目" }
+        return "项目「\(chat.workspaces.record(id)?.name ?? "已删除")」"
     }
 
     private func stateTitle(_ pending: PendingNext) -> String {

@@ -47,9 +47,59 @@ struct PendingLifecycleTests {
         var resumed = restarted
         try resumed.requeuePending(selection: ModelSelection(providerID: UUID(), modelID: "n"), workspaceID: nil, backend: .wda,
                                    clipboardAllowed: false, ordinal: 9)
-        try resumed.commitDispatchPermit(root: activated.prompt.id, sessionID: primary)
+        try resumed.commitDispatchPermit(root: activated.prompt.id, sessionID: primary, scope: .general)
         #expect(resumed.primary?.messages.filter { $0.id == activated.prompt.id }.count == 1)
         #expect(resumed.assistant.pendingNext == nil)
+    }
+
+    /// A promoted request that never started in project A is continued after
+    /// the user switched to project B or to no project: its root moves to the
+    /// confirmed scope in the same write and keeps its ID once and its
+    /// registered reads; the run's results never become A's automatic context
+    /// or search results; the permit refuses a run whose scope differs.
+    @Test func continuingAnUnstartedRequestInAnotherScopeMovesItsRoot() async throws {
+        let a = UUID(), b = UUID()
+        for target in [WorkScope.workspace(b), .general] {
+            var file = HistoryFile.initial(selection: nil)
+            let primary = file.assistant.primarySessionID
+            let earlier = AgentTranscriptMessage(role: .user, text: "A项目里的旧任务")
+            try file.acceptRoot(earlier, attachments: [], in: primary, scope: .workspace(a))
+            try file.commitDispatchPermit(root: earlier.id, sessionID: primary, scope: .workspace(a))
+            try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "A的结果"), to: primary, root: earlier.id)
+            try file.acceptPending(pending(primary, "整理一下报销单"))
+            let promptID = try file.activatePending(scope: .workspace(a)).prompt.id
+            // Context maintenance read the earlier A turn before startup failed.
+            try file.registerReads(root: promptID, memory: [], roots: [earlier.id], messages: [])
+            try file.holdPending("启动失败")
+            let workspaceID: UUID? = { if case .workspace(let id) = target { return id }; return nil }()
+            try file.requeuePending(selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: workspaceID,
+                                    backend: .ddi, clipboardAllowed: true, ordinal: 5)
+            let root = try #require(file.assistant.scopeIndex.scopedRoot(promptID))
+            #expect(root.scope == target && root.dependencies.rootReads == [earlier.id] && !root.dispatchAuthorized)
+            var mismatch = file
+            #expect(throws: (any Error).self) {
+                try mismatch.commitDispatchPermit(root: promptID, sessionID: primary, scope: .workspace(a))
+            }
+            try file.commitDispatchPermit(root: promptID, sessionID: primary, scope: target)
+            try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "报销单已整理"), to: primary, root: promptID)
+            try file.editSession(primary) { $0.state = .completed }
+            #expect(file.primary?.messages.filter { $0.id == promptID }.count == 1)
+            let next = AgentTranscriptMessage(role: .user, text: "A项目继续")
+            try file.acceptRoot(next, attachments: [], in: primary, scope: .workspace(a))
+            #expect(AssistantContext.eligibleSegments(file, sessionID: primary, before: next.id, scope: .workspace(a)).map(\.root)
+                    == [earlier.id])
+            #expect(AssistantContext.eligibleSegments(file, sessionID: primary, before: next.id, scope: target).map(\.root)
+                    == [promptID])
+            let snapshot = file
+            func search(_ scope: WorkScope) async throws -> Int {
+                let adapter = PocketMemoryAdapter(scope: scope, currentRoot: next.id, references: [],
+                                                  snapshot: { snapshot }, register: { _, _, _ in })
+                let result = try await adapter.searchSessions(AgentSessionSearchRequest(query: "报销"))
+                return result.objectValue?["segments"]?.arrayValue?.count ?? 0
+            }
+            #expect(try await search(.workspace(a)) == 0)
+            #expect(try await search(target) == 1)
+        }
     }
 
     @Test func afterPermitRestartNeverOffersSameIDContinuation() throws {
@@ -57,7 +107,7 @@ struct PendingLifecycleTests {
         let primary = file.assistant.primarySessionID
         try file.acceptPending(pending(primary))
         let activated = try file.activatePending(scope: .general)
-        try file.commitDispatchPermit(root: activated.prompt.id, sessionID: primary)
+        try file.commitDispatchPermit(root: activated.prompt.id, sessionID: primary, scope: .general)
         let restarted = try restart(file)
         #expect(restarted.pendingResumeOption == .none && restarted.primary?.state == .interrupted)
         var again = restarted
@@ -73,7 +123,7 @@ struct PendingLifecycleTests {
         #expect(file.assistant.pendingNext == nil && file.primary?.messages.map(\.id) == [activated.prompt.id])
         #expect(file.assistant.scopeIndex.scopedRoot(activated.prompt.id)?.abandonedUnstarted == true)
         #expect(AssistantContext.eligibleSegments(file, sessionID: primary, before: UUID(), scope: .general).isEmpty)
-        #expect(throws: (any Error).self) { try file.commitDispatchPermit(root: activated.prompt.id, sessionID: primary) }
+        #expect(throws: (any Error).self) { try file.commitDispatchPermit(root: activated.prompt.id, sessionID: primary, scope: .general) }
         // A new request may be accepted again.
         try file.acceptPending(pending(primary, "新的请求"))
     }

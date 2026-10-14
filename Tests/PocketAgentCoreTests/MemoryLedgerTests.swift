@@ -14,7 +14,7 @@ struct MemoryLedgerTests {
     private func root(_ file: inout HistoryFile, in session: UUID, scope: WorkScope = .general, _ text: String) throws -> UUID {
         let prompt = AgentTranscriptMessage(role: .user, text: text)
         try file.acceptRoot(prompt, attachments: [], in: session, scope: scope)
-        try file.commitDispatchPermit(root: prompt.id, sessionID: session)
+        try file.commitDispatchPermit(root: prompt.id, sessionID: session, scope: scope)
         try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "好的：" + text), to: session, root: prompt.id)
         return prompt.id
     }

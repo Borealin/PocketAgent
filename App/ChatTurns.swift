@@ -429,7 +429,7 @@ extension ChatController {
     /// session running in one write. Failure means the turn never starts.
     func commitPermit(_ job: ChatJob) throws {
         guard jobs[job.sessionID] === job, runningJob === job, !job.cancelled, !job.terminal else { throw CancellationError() }
-        try owner.transact { try $0.commitDispatchPermit(root: job.prompt.id, sessionID: job.sessionID) }
+        try owner.transact { try $0.commitDispatchPermit(root: job.prompt.id, sessionID: job.sessionID, scope: job.scope) }
         job.permitted = true
     }
 

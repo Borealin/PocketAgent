@@ -79,13 +79,18 @@ nonisolated extension HistoryFile {
         return (message, attachments)
     }
 
-    /// Explicit continue: the request goes back to the queue. A promoted one
-    /// must still be unauthorized.
+    /// Explicit continue: the request goes back to the queue with the
+    /// configuration and project confirmed now. A promoted one must still be
+    /// unauthorized; its root moves to the confirmed scope in the same write
+    /// (registered reads, original ID/text and masks unchanged), so the run and
+    /// its results belong to the scope they actually use.
     mutating func requeuePending(selection: ModelSelection, workspaceID: UUID?, backend: PhoneBackendKind,
                                  clipboardAllowed: Bool, ordinal: UInt64) throws {
         guard var pending = assistant.pendingNext else { throw PendingError.noPending }
-        if case .promoted(let id) = pending.prompt,
-           assistant.scopeIndex.scopedRoot(id)?.dispatchAuthorized != false { throw PendingError.alreadyAuthorized }
+        if case .promoted(let id) = pending.prompt {
+            guard assistant.scopeIndex.scopedRoot(id)?.dispatchAuthorized == false else { throw PendingError.alreadyAuthorized }
+            try assistant.scopeIndex.updateRoot(id) { $0.scope = WorkScope(workspaceID: workspaceID) }
+        }
         pending.selection = selection; pending.workspaceID = workspaceID; pending.backend = backend
         pending.clipboardAllowed = clipboardAllowed; pending.acceptedOrdinal = ordinal; pending.state = .queued
         assistant.pendingNext = pending
