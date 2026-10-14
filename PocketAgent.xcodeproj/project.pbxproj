@@ -24,6 +24,7 @@
 		44F4187565D0FE5BDA5973E5 /* HistoryEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */; };
 		44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E51E4C8A00C974E4731352 /* PairingImport.swift */; };
 		4ADBAD378D69707EB9B638BC /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */; };
+		4F9D8C958D65133B7871FFA9 /* ProviderContextLimit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E05053CBE20D50CBF450D09 /* ProviderContextLimit.swift */; };
 		531747ABA296FFBD9252BB24 /* SyncApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F385985B41CF2BDD68B588A /* SyncApply.swift */; };
 		55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B9777F694312D830BE8C77 /* HTTPTool.swift */; };
 		568A57DD3305D84BA6EA0463 /* TranscriptCommitBarrier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5663978DEBD3F751D7210B1 /* TranscriptCommitBarrier.swift */; };
@@ -105,6 +106,7 @@
 		383A79C611AE1573F3276AA9 /* ish-root.tar.gz */ = {isa = PBXFileReference; lastKnownFileType = archive.gzip; path = "ish-root.tar.gz"; sourceTree = "<group>"; };
 		38833AB31402CD8F11B2F334 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
+		3E05053CBE20D50CBF450D09 /* ProviderContextLimit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderContextLimit.swift; sourceTree = "<group>"; };
 		3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryEdits.swift; sourceTree = "<group>"; };
 		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
 		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
@@ -244,6 +246,7 @@
 				7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
+				3E05053CBE20D50CBF450D09 /* ProviderContextLimit.swift */,
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
 				AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */,
 				E77E9C6F8013CA9CE24E63E2 /* ReadCommit.swift */,
@@ -454,6 +457,7 @@
 				EE2DB1A7602817A794DF95CA /* PocketMemoryAdapter.swift in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
+				4F9D8C958D65133B7871FFA9 /* ProviderContextLimit.swift in Sources */,
 				A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				037E5381B669DED7A34CA611 /* ProviderToolSchema.swift in Sources */,
