@@ -225,6 +225,22 @@ struct ProviderEditorView: View {
             } header: { Text("模型 · \(draft.models.count)") } footer: {
                 Text("图像开关可手动调整。刷新保留已有模型和开关；模型目录连接成功并不代表每个模型都支持当前 API 协议。保存后在会话中选择模型。")
             }
+            if let original, !original.models.isEmpty {
+                Section {
+                    ForEach(original.models) { model in
+                        NavigationLink {
+                            ModelBudgetView(store: store, providerID: original.id, modelID: model.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.id)
+                                Text(budgetLabel(original.id, model.id)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: { Text("本机上下文预算") } footer: {
+                    Text("只保存在这台设备、不同步。“你的助理”按这里的窗口或上限整理较早的对话；未设置时只按软目标整理。")
+                }
+            }
             if !message.isEmpty { Section { Text(message).font(.caption).foregroundStyle(.orange) } }
         }.navigationTitle(original == nil ? "添加模型服务" : (draft.name.isEmpty ? "编辑模型服务" : draft.name))
             .toolbar {
@@ -232,6 +248,11 @@ struct ProviderEditorView: View {
             }
             .onChange(of: catalogInput) { _, _ in invalidateCatalog() }
             .onDisappear { invalidateCatalog(showMessage: false) }
+    }
+
+    private func budgetLabel(_ provider: UUID, _ model: String) -> String {
+        let override = store.budgetOverride(ModelSelection(providerID: provider, modelID: model))
+        return ((try? ContextBudgetPolicy.resolve(override)) ?? .unknown).label
     }
 
     private func endpointPreview(_ title: String, value: String) -> some View {
