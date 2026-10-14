@@ -151,6 +151,27 @@ final class ChatController: ObservableObject {
         adoptDefaultSelection()
     }
 
+    /// Read-only viewer over a synthetic history, for the local viewport
+    /// benchmark only (`-PocketAgentViewportBenchmark`): the file lives in this
+    /// owner's memory with storage load-blocked, so transactions, run-event
+    /// records and drafts are refused before any change (and the writer, which
+    /// would fail, counts any call); no attachment cleanup,
+    /// default-model adoption or provider/workspace callbacks; the storage path
+    /// is an unused temporary file. The app's own controller, history and sync
+    /// are not involved.
+    init(viewing file: HistoryFile, engine: Model, providers: ProviderStore, workspaces: WorkspaceStore,
+         writerCalls: @escaping () -> Void) {
+        self.engine = engine
+        self.providers = providers
+        self.workspaces = workspaces
+        storage = HistoryStorage(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("pocketagent-viewport-\(UUID().uuidString).json"))
+        owner = HistoryOwner(file: file, health: .loadBlocked("只读量测视图，不写入"),
+                             writer: { _ in writerCalls(); throw CocoaError(.featureUnsupported) })
+        unsavedRecovery = nil
+        owner.onChange = { [weak self] in self?.revision &+= 1 }
+    }
+
     /// The primary line without a model uses the Settings default model;
     /// an existing selection is kept.
     func adoptDefaultSelection() {
