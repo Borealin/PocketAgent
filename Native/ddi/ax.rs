@@ -371,7 +371,7 @@ impl Ax {
         )
         .await
     }
-    pub async fn graph(&mut self, x: f64, y: f64) -> Result<(u64, Vec<Value>), String> {
+    pub async fn graph(&mut self, x: f64, y: f64) -> Result<Graph, String> {
         self.bytes = 0;
         let selected = self.hit(x, y).await?;
         let (pid, _) = identity(&selected)?;
@@ -388,10 +388,11 @@ impl Ax {
         let mut pending = VecDeque::from([(root.clone(), 0)]);
         let mut seen = HashSet::new();
         let mut nodes = vec![];
+        let mut outside = 0;
         while let Some((token, depth)) = pending.pop_front() {
             let key = identity(&token)?;
-            if key.0 != pid || !seen.insert(key) || depth > 32 || nodes.len() >= 512 {
-                return Err("AX graph identity/size/depth limit".into());
+            if admit(pid, key, depth, &mut seen, nodes.len(), &mut outside)? == Admit::Outside {
+                continue;
             }
             let mut attrs = self
                 .attributes(
@@ -430,7 +431,7 @@ impl Ax {
         {
             return Err("AX foreground or root changed".into());
         }
-        Ok((pid, nodes))
+        Ok(Graph { pid, nodes, outside })
     }
     pub async fn close(&mut self) -> Result<&'static str, String> {
         if !self.subscribed {
@@ -457,6 +458,53 @@ impl Ax {
         }
     }
 }
+/// One observed application: its own elements, plus the number of child
+/// elements hosted by another process (for example the keyboard's system paste
+/// suggestion) that were neither read nor returned.
+pub struct Graph {
+    pub pid: u64,
+    pub nodes: Vec<Value>,
+    pub outside: usize,
+}
+
+pub(crate) const MAX_NODES: usize = 512;
+pub(crate) const MAX_DEPTH: usize = 32;
+pub(crate) const MAX_OUTSIDE: usize = 32;
+
+#[derive(Debug, PartialEq)]
+enum Admit {
+    Read,
+    Outside,
+}
+
+/// Decides one dequeued child. An element of another process is counted and
+/// skipped: its attributes and descendants are never requested, so it cannot
+/// become an operable node of this app. Repeats, depth and size stay hard
+/// limits with distinct reasons; no partial graph is ever returned.
+fn admit(pid: u64, key: (u64, u64), depth: usize, seen: &mut HashSet<(u64, u64)>, nodes: usize,
+         outside: &mut usize) -> Result<Admit, String> {
+    if key.0 != pid {
+        if depth == 0 {
+            return Err("AX application mismatch".into());
+        }
+        *outside += 1;
+        if *outside > MAX_OUTSIDE {
+            return Err("AX graph limit: too many elements of another process".into());
+        }
+        return Ok(Admit::Outside);
+    }
+    if !seen.insert(key) {
+        return Err("AX graph limit: repeated element".into());
+    }
+    if depth > MAX_DEPTH {
+        return Err("AX graph limit: depth".into());
+    }
+    if nodes >= MAX_NODES {
+        return Err("AX graph limit: size".into());
+    }
+    Ok(Admit::Read)
+}
+
 pub fn identity(v: &Value) -> Result<(u64, u64), String> {
     let d = v.as_dictionary().ok_or("AX token missing")?;
     let pid = d
@@ -542,6 +590,27 @@ mod tests {
         let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
             closing: None, close_header_ended: false };
         assert_eq!(ax.ack(20).await.unwrap_err(), "Short AX DTX payload");
+    }
+    #[test]
+    fn graph_admission_skips_other_processes_and_keeps_distinct_hard_limits() {
+        let mut seen = HashSet::new();
+        let mut outside = 0;
+        assert_eq!(admit(7, (7, 1), 0, &mut seen, 0, &mut outside), Ok(Admit::Read));
+        // A child hosted by another process is counted, never read or remembered.
+        assert_eq!(admit(7, (9, 1), 1, &mut seen, 1, &mut outside), Ok(Admit::Outside));
+        assert_eq!(admit(7, (9, 1), 1, &mut seen, 1, &mut outside), Ok(Admit::Outside));
+        assert_eq!((outside, seen.len()), (2, 1));
+        assert_eq!(admit(7, (9, 2), 0, &mut seen, 1, &mut outside).unwrap_err(), "AX application mismatch");
+        assert_eq!(admit(7, (7, 1), 1, &mut seen, 1, &mut outside).unwrap_err(), "AX graph limit: repeated element");
+        assert_eq!(admit(7, (7, 2), MAX_DEPTH + 1, &mut seen, 1, &mut outside).unwrap_err(), "AX graph limit: depth");
+        assert_eq!(admit(7, (7, 3), 1, &mut seen, MAX_NODES, &mut outside).unwrap_err(), "AX graph limit: size");
+        let mut many = 0;
+        let mut fresh = HashSet::new();
+        for n in 0..MAX_OUTSIDE as u64 {
+            assert_eq!(admit(7, (8, n), 1, &mut fresh, 0, &mut many), Ok(Admit::Outside));
+        }
+        assert_eq!(admit(7, (8, 99), 1, &mut fresh, 0, &mut many).unwrap_err(),
+                   "AX graph limit: too many elements of another process");
     }
     #[test]
     fn rejects_truncated_aux_before_allocation() {

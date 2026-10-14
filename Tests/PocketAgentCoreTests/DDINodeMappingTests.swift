@@ -25,6 +25,24 @@ struct DDINodeMappingTests {
         let absent = try #require(try DDINodeMapping.attributes(node(["45": 2]).filter { $0.key != "27" }))
         #expect(absent["enabled"] == nil)
     }
+    /// Elements of another process are counted by the native graph, never
+    /// mapped to nodes; the count must be a present integer within the bound.
+    @Test func outsideAppCountIsRequiredAndStrictlyValidated() throws {
+        func decoded(_ json: String) throws -> [String: Any] {
+            try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        }
+        for valid in [0, 1, 32] {
+            #expect(try DDINodeMapping.outsideAppElements(decoded(#"{"outside_app_elements":\#(valid)}"#)) == valid)
+        }
+        for invalid in [#"{}"#, #"{"outside_app_elements":false}"#, #"{"outside_app_elements":true}"#,
+                        #"{"outside_app_elements":0.5}"#, #"{"outside_app_elements":-1}"#, #"{"outside_app_elements":33}"#,
+                        #"{"outside_app_elements":"1"}"#, #"{"outside_app_elements":null}"#] {
+            #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(decoded(invalid)) }
+        }
+        #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(["outside_app_elements": Double.nan]) }
+        #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(["outside_app_elements": false]) }
+        #expect(PhoneObservationIssue.targetCovered.code == "target_covered")
+    }
     @Test func rejectsInvisibleUnavailableAndNonfiniteFrames() throws {
         #expect(try DDINodeMapping.attributes(node(["32": false])) == nil)
         #expect(try DDINodeMapping.attributes(["21": ["unavailable": "CGRectNull"]]) == nil)

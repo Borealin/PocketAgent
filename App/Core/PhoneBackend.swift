@@ -6,6 +6,11 @@ nonisolated enum PhoneBackendKind: String, CaseIterable, Codable, Sendable {
     var label: String { self == .ddi ? "DDI" : "WDA" }
 }
 
+nonisolated enum DDIResultError: LocalizedError, Equatable {
+    case outsideCount
+    var errorDescription: String? { "DDI 观察结果格式无效：缺少有效的应用外元素计数。" }
+}
+
 /// Normalize only device-reported AX semantics. AX role codes differ from
 /// XCTest enums; unknown roles retain Other, and absent states stay absent.
 nonisolated enum DDINodeMapping {
@@ -45,6 +50,22 @@ nonisolated enum DDINodeMapping {
         if type == "SecureTextField" { a["ddi_value"] = a.removeValue(forKey: "value") }
         if a["visible"] == "false" { return nil }
         return a
+    }
+
+    /// Elements on screen hosted by another process that the observation did
+    /// not read (native limit 32). Every DDI snapshot reports it; a missing,
+    /// boolean, fractional, non-finite or out-of-range count is a malformed
+    /// observation, never guessed.
+    static let outsideLimit = 32
+    static func outsideAppElements(_ result: [String: Any]) throws -> Int {
+        guard let number = result["outside_app_elements"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            throw DDIResultError.outsideCount
+        }
+        let value = number.doubleValue
+        guard value.isFinite, value == value.rounded(), (0...Double(outsideLimit)).contains(value) else {
+            throw DDIResultError.outsideCount
+        }
+        return Int(value)
     }
 
     static func confirmsInput(_ node: [String: String], text: String) -> Bool {
