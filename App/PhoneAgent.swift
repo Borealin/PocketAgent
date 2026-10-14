@@ -407,7 +407,7 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
-        try await control.drag(geometry.bounds.width * 0.90, y, geometry.bounds.width * 0.55, y, seconds: 0.25)
+        try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
         try proceed()
         try await Task.sleep(for: .milliseconds(300))
         try proceed()

@@ -14,6 +14,9 @@ protocol PhoneControl: AnyObject {
     func activate(_ bundle: String) async throws
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws
+    /// Executor-internal swipe in the status band that compacts the system
+    /// task surface; never reachable from a model tool.
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws
     func input(_ node: [String: String]) async throws -> PhoneInput
     func click(_ input: PhoneInput) async throws
     func clear(_ input: PhoneInput) async throws
@@ -63,6 +66,9 @@ final class WDAControl: PhoneControl {
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws {
         try await effect("\(session)/wda/dragfromtoforduration", ["fromX": x, "fromY": y, "toX": toX, "toY": toY, "duration": seconds])
     }
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws {
+        try await drag(fromX, y, toX, y, seconds: seconds)
+    }
     func input(_ a: [String: String]) async throws -> PhoneInput {
         let name = a["name"].map { "@name=\(PhoneExecutor.xpathLiteral($0)) and " } ?? ""
         let xpath = "//\(a["type"]!)[\(name)@x=\(PhoneExecutor.xpathLiteral(a["x"] ?? "")) and @y=\(PhoneExecutor.xpathLiteral(a["y"] ?? ""))]"
@@ -108,7 +114,7 @@ final class DDIControl: PhoneControl {
         }
         defer { watcher.cancel() }
         var requestObject = object
-        if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace"].contains(object["op"] as? String ?? "") {
+        if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(object["op"] as? String ?? "") {
             if let observedApp { requestObject["expected_app"] = observedApp }
             if let frame = observedFrame { requestObject["expected_frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height] }
         }
@@ -167,6 +173,9 @@ final class DDIControl: PhoneControl {
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws { _ = try await call(["op": seconds == nil ? "tap" : "hold", "x": x, "y": y, "seconds": seconds ?? 0.05]) }
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws {
         _ = try await call(["op": "drag", "x": x, "y": y, "to_x": toX, "to_y": toY, "seconds": seconds])
+    }
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws {
+        _ = try await call(["op": "surface_drag", "x": fromX, "to_x": toX, "y": y, "seconds": seconds])
     }
     func input(_ node: [String: String]) async throws -> PhoneInput {
         guard let identity = node["ddi_identity"] else { throw PhoneObservationIssue.nodeChanged }
