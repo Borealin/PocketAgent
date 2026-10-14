@@ -418,7 +418,9 @@ foreground. Clearing the conversation (code f65aba9) was exercised on the
 while the line prepared context and while a held pending request existed, a
 confirmed clear left an empty line with the same model and project, unchanged
 tasks, memory and settings, the cleared marker was not found by the model's
-history search after a relaunch, and memory recall continued. Known gaps
+history search after a relaunch, and memory recall continued. The in-flight
+sync plan, same-ID remote refill, conflict-copy and failed-write boundaries are
+host-tested only. Known gaps
 against the plan (remember mode in the composer, multi-target candidate cards,
 rebuilding a 128-deep summary chain, provider context-limit mapping, per-turn
 estimate display, Chinese recall evaluation) are listed in the plan. Long-history numbers are host
