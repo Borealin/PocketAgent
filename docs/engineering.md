@@ -3,8 +3,9 @@
 ## Requirements and scope
 
 The [single-entry and long-term memory exploration](long-lived-assistant.md)
-records the user-confirmed 2026-10-14 direction and a proposed local-first
-implementation. It is design work only; the current multi-session behavior
+records the user-confirmed 2026-10-14 direction, public information about Muse,
+Grok Bot and OpenAI dots, and fixed-revision OpenClaw/Hermes source research.
+The local-first implementation remains a proposal. It is design work only; the current multi-session behavior
 and execution contracts below remain the implemented baseline.
 
 Native provider management on a dedicated page, provider/model selection per
