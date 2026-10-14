@@ -708,12 +708,12 @@ impl PocketDDISession {
         let expected = v["expected_app"].as_str();
         // Every screen effect consumes the observed scope; the next coordinate
         // effect needs a fresh successful snapshot.
-        let scope = if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace", "activate", "home"].contains(&op) {
+        let scope = if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace", "activate", "home"].contains(&op) {
             self.observed.take()
         } else {
             None
         };
-        if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace"].contains(&op) {
+        if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(&op) {
             if let Some(frame) = v["expected_frame"].as_object() {
                 let g = self.geometry().await?;
                 for (k, n) in [
@@ -852,6 +852,25 @@ impl PocketDDISession {
                 self.touch(from, to, seconds, op == "drag").await?;
                 Ok(json!({}))
             }
+            "surface_drag" => {
+                // Executor-internal compaction of the system task surface on
+                // Dynamic Island layouts (never a model action). The status band
+                // belongs to SpringBoard, so instead of point ownership it is
+                // bounded to a short leftward swipe inside that band while the
+                // observed app is still foreground.
+                let (pid, _) = scope.ok_or_else(|| error(POINT_UNOBSERVED))?;
+                let g = self.geometry().await?;
+                let (foreground, _, _) = self.active_hit(g).await?;
+                if foreground != pid {
+                    return Err(error(FOREGROUND_NOT_OBSERVED));
+                }
+                let num = |key: &str| v[key].as_f64().ok_or_else(|| error("DDI coordinate missing"));
+                let (x, to_x, y, seconds) = (num("x")?, num("to_x")?, num("y")?, num("seconds")?);
+                surface_gesture(&g, x, to_x, y, seconds).map_err(error)?;
+                self.proceed()?;
+                self.touch(g.point(x, y)?, g.point(to_x, y)?, seconds, true).await?;
+                Ok(json!({}))
+            }
             "home" => {
                 self.proceed()?;
                 self.effect_started = true;
@@ -907,6 +926,20 @@ const FOREGROUND_NOT_OBSERVED: &str = "DDI foreground is not the observed app; n
 const POINT_COVERED: &str = "DDI target is covered by another process's UI; not tapped";
 const POINT_UNCONFIRMED: &str = "DDI target owner cannot be confirmed while UI of another process is on screen; not tapped";
 const BLANK_POINT: &str = "AX request type 6 refused: 8";
+
+const SURFACE_OUTSIDE_BAND: &str = "DDI surface gesture outside the status band; not tapped";
+
+/// The internal task-surface gesture: a leftward swipe starting in the right
+/// half, ending no further left than 30% of the width, inside the top 5% of
+/// the display, lasting 0.1–0.5 s.
+fn surface_gesture(g: &Geometry, x: f64, to_x: f64, y: f64, seconds: f64) -> Result<(), String> {
+    let inside = [x, to_x, y, seconds].iter().all(|v| v.is_finite())
+        && y >= g.y && y <= g.y + g.height * 0.05
+        && x >= g.x + g.width * 0.5 && x < g.x + g.width
+        && to_x < x && to_x >= g.x + g.width * 0.3
+        && (0.1..=0.5).contains(&seconds);
+    if inside { Ok(()) } else { Err(SURFACE_OUTSIDE_BAND.into()) }
+}
 
 /// Ownership of the element at an effect point. The observed app's own element
 /// passes; another process's element refuses. A point without an AX element
@@ -1183,6 +1216,23 @@ mod tests {
         }
     }
     #[test]
+    fn task_surface_gesture_stays_in_the_status_band() {
+        let g = Geometry { x: 0.0, y: 0.0, width: 393.0, height: 852.0 };
+        // The executor's gesture: 90% → 55% of the width at 42% of a 59 pt inset.
+        assert_eq!(surface_gesture(&g, 353.7, 216.15, 24.78, 0.25), Ok(()));
+        for (x, to_x, y, seconds) in [
+            (353.7, 216.15, 60.0, 0.25),   // below the status band (content area)
+            (353.7, 216.15, -1.0, 0.25),   // above the display
+            (100.0, 50.0, 24.78, 0.25),    // starts in the left half
+            (216.15, 353.7, 24.78, 0.25),  // rightward
+            (353.7, 50.0, 24.78, 0.25),    // ends too far left
+            (353.7, 216.15, 24.78, 2.0),   // too long
+            (f64::NAN, 216.15, 24.78, 0.25),
+        ] {
+            assert_eq!(surface_gesture(&g, x, to_x, y, seconds).unwrap_err(), SURFACE_OUTSIDE_BAND);
+        }
+    }
+    #[test]
     fn effect_points_must_belong_to_the_observed_app() {
         assert_eq!(point_owner(7, 0, Ok(7)), Ok(()));
         assert_eq!(point_owner(7, 2, Ok(7)), Ok(()));
@@ -1193,7 +1243,7 @@ mod tests {
         assert_eq!(point_owner(7, 1, Err(BLANK_POINT.into())).unwrap_err(), POINT_UNCONFIRMED);
         assert_eq!(point_owner(7, 0, Err("AX semantic request timed out; session must close".into())).unwrap_err(),
                    "AX semantic request timed out; session must close");
-        for refusal in [POINT_UNOBSERVED, FOREGROUND_NOT_OBSERVED, POINT_COVERED, POINT_UNCONFIRMED] {
+        for refusal in [POINT_UNOBSERVED, FOREGROUND_NOT_OBSERVED, POINT_COVERED, POINT_UNCONFIRMED, SURFACE_OUTSIDE_BAND] {
             assert!(refusal.ends_with("; not tapped"));
         }
     }
