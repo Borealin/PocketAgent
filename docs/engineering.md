@@ -383,22 +383,25 @@ memory, did not recover a forgotten fact through Chinese memory/history search,
 kept state across relaunch, advanced and held the next request as specified,
 continued an unstarted promoted request in the project chosen afterwards,
 committed real summary folds through the bounded `consume` path, and answered a
-draft resent after a pre-permit failure once. On the final build, with the
-keyboard's paste suggestion on screen, observing the primary line and a new
-empty task succeeded (one outside-app element); a `tap_point` on the suggestion
-was refused before any touch and reported as not executed; a Settings
-navigation observed every result; a kill mid-turn and Stop during a phone turn
-left the turn interrupted with no further action, and a new request observed
-fresh. A test task kept calling `wait` (85 calls in 22 responses, below the
-per-turn caps) until the 600 s turn deadline stopped it at 600.2 s with nothing
-replayed; the watchdog now reports that deadline as the cause instead of a
-generic failure. Not verified on the device: recall after a model change (the
-configured provider has one model and no model catalog address, so the app
-cannot discover another without a newly entered endpoint), over-budget fold refusal, forgets during maintenance,
-the 150 s maintenance limit, and the Dynamic Island task-surface gesture (native
-bounds tests only). Weather's first-run welcome appears without a Weather app
-process: its launch returns CoreDevice 10004 (reported unconfirmed) and
-observation refuses the unidentified foreground. Long-history numbers are host
+draft resent after a pre-permit failure once. On the fixed builds (code 5250b2d,
+7169080 and the final 2c47dcf, one native library), with the keyboard's paste
+suggestion on screen, observing the primary line and a new empty task succeeded
+with one outside-app element (re-run on the final build); on 5250b2d a Settings
+navigation observed every result; on 7169080 a `tap_point` on the suggestion was
+refused before any touch and reported as not executed, a kill mid-turn and Stop
+during a phone turn left the turn interrupted with no further action, and a new
+request observed fresh. A test task kept calling `wait` until the 600 s turn
+deadline stopped it (7169080: 600.2 s, generic reason; final build: 600.6 s with
+the deadline reason), nothing replayed and below the per-turn caps. Not verified
+on the device: recall after a model change (the configured provider has one model
+and no model catalog address, so the app cannot discover another without a newly
+entered endpoint), over-budget fold refusal, forgets during maintenance, the
+150 s maintenance limit, the Dynamic Island task-surface gesture (native bounds
+tests only), and coordinate taps on a system overlay hosted by SpringBoard while
+an app is the observed foreground (now refused by the ownership check). Weather's
+first-run welcome appears without a Weather app process: its launch returns
+CoreDevice 10004 (reported unconfirmed) and observation refuses the unidentified
+foreground. Long-history numbers are host
 measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
 (110 MB file), transcript paging renders 400 messages per page.
 
