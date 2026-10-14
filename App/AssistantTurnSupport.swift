@@ -154,7 +154,8 @@ final class AssistantTurnSupport {
         prepared.messages = try AssistantRequestProjection.filterForgotten(request.messages, index: index, currentRoot: promptID,
                                                                            invalidSummaries: invalid)
         prepared.messages = AssistantRequestProjection.projectOldScreens(prepared.messages)
-        let query = prepared.messages.last { $0.role == .user && !syntheticIDs.contains($0.id) }?.text ?? ""
+        let real = Set(file.session(sessionID)?.messages.map(\.id) ?? [])
+        let query = AssistantRequestProjection.memoryQuery(prepared.messages, real: real)
         let block = MemoryBlock.build(file.assistant.memory, scope: scope, query: query)
         prepared.systemPrompt = MemoryBlock.apply(block, to: request.systemPrompt,
                                                   hasMemoryTools: request.tools.contains { $0.name == "memory_search" })

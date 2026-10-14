@@ -180,6 +180,23 @@ struct ContextBuilderTests {
         #expect(projected[1] == file && projected[2] == screens[1] && projected[3] == screens[2])
     }
 
+    /// Review finding: phone.prepare appends a synthetic screenshot caption as
+    /// the last user message; memory relevance must follow the real request.
+    @Test func memoryQueryIgnoresTheAppendedScreenshotCaption() {
+        let prompt = AgentTranscriptMessage(role: .user, text: "帮我订北京的酒店")
+        let reply = AgentTranscriptMessage(role: .assistant, text: "好")
+        let caption = AgentTranscriptMessage(role: .user, text: "最新工具屏幕截图；对应 snapshot_id=3",
+            images: [AgentImageAttachment(label: "s", mimeType: "image/png", data: Data([1]), pixelWidth: 1, pixelHeight: 1)])
+        let query = AssistantRequestProjection.memoryQuery([prompt, reply, caption], real: [prompt.id, reply.id])
+        #expect(query == "帮我订北京的酒店")
+        var ledger = MemoryLedger()
+        ledger.revision = 1
+        ledger.active = [MemoryRecord(id: UUID(), target: .memory, scope: .global, content: "出差常住北京国贸", revision: 1,
+                                      origin: .panel, sourceRootPromptIDs: [], sourceMessageIDs: [], createdAt: Date(), updatedAt: Date())]
+        #expect(MemoryBlock.build(ledger, scope: .general, query: query).reads.count == 1)
+        #expect(MemoryBlock.build(ledger, scope: .general, query: caption.text).reads.isEmpty)
+    }
+
     /// The primary pipeline strips replay snapshots and sends modelText, through the real runtime.
     @Test func primaryPipelineSendsModelTextWithoutSnapshotBlocks() async throws {
         let model = ScriptedModel(turns: [[.textDelta("ok"), .finished(.completed)]])
