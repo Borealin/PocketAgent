@@ -105,7 +105,13 @@ extension Model {
                     publish("context_preparation"); onStatus?(status.value)
                     prior = try await assistant.prepareContext(
                         prompt: AgentTranscriptMessage(id: promptID, role: .user, text: goal, images: images),
-                        systemPrompt: systemPrompt, tools: tools.map(\.descriptor), provider: provider, deadline: deadline)
+                        systemPrompt: systemPrompt, tools: tools.map(\.descriptor), provider: provider, deadline: deadline,
+                        onWork: { count in
+                            // Real summary text/reasoning increments only; no timer or synthetic heartbeat.
+                            guard !status.value.phase.isTerminal else { return }
+                            status.value.workObserved += count
+                            publish("context_work"); onStatus?(status.value)
+                        })
                     if let note = assistant.maintenanceNote { status.value.contextNote = note }
                     status.value.phase = .connecting
                     publish("context_ready"); onStatus?(status.value)
