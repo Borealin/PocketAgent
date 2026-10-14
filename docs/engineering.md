@@ -332,9 +332,20 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   the default is assigned); an existing selection is kept.
 - Owner: transactions publish only after a successful write; run events stay
   visible when their write fails, storage becomes dirty, every gate fails and
-  only an explicit retry restores storage (never the stopped run). The writer
-  re-encodes only changed messages and splices them at a unique per-write
-  sentinel.
+  only an explicit retry restores storage (never the stopped run). The file is
+  one JSON value in one atomic file, laid out with whitespace capacity after the
+  file fields, after each session's fields and after each message array
+  (`HistoryLayout`; same value as the codec, key order and whitespace differ),
+  so an unchanged byte keeps its offset. While the file still has the identity
+  the writer last published (device, inode, size, modification and change
+  time, checked before and after cloning), `PatchingHistoryWriter` clones it,
+  writes only the changed ranges, fsyncs and renames the clone over it; the
+  clone must be confirmed as protection class C on iOS. Otherwise (first write
+  after launch, a changed file, a region over capacity, no cloning, an
+  unconfirmed class, and at least every 512 patches) it writes the whole file
+  atomically. Failures before the rename leave the file and the baseline
+  untouched; the baseline moves only after publication. Changed messages are
+  found with ordinary equality against the last published layout.
 - Gates: a startup permit is committed before `runtime.start`; each model
   request waits for the saved request view (text/modelText, calls, provider
   items, image identity) of every real message since its prompt; each tool
@@ -477,18 +488,19 @@ after its read registration and before its request; a forget confirmed in that
 wait, with the preview saying the running task stops, stopped the preparing
 turn with no reply and no new summary. It does not exercise a live stream or
 the 150 s limit. Device long history (`-PocketAgentLongHistoryBenchmark`,
-sandbox file): after reusing unchanged scope-index rows, the 50k per-event
-write p95 is 0.48–0.89 s over three runs, mostly the whole 110 MB atomic file
-write (p50 0.16–0.23 s) with encoding about 0.14 s, so the 0.2 s target is not
-met without a storage-structure decision (10k meets it). The real transcript
+sandbox file, the owner through the production writer): a patched event at
+50k messages records in p95 0.10–0.11 s over four runs (10k: 0.02 s), and the
+file is exactly the published layout image. Whole writes stay slower: the first
+write after launch encodes every message (50k: about 1.2 s) and a warm whole
+write (overflow, every 512 patches, a changed file) takes 0.30–0.35 s at 50k.
+The capacity makes the 50k file 124 MB instead of 110 MB. The real transcript
 view over synthetic 10k/50k histories is timed with
 `-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
 load-blocked, real history unchanged). Memory search no longer counts single
 characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
 evaluation table). Remaining boundaries (bare SSE error objects at the pinned
 SDK, oversized single segments, model-change recall) are listed in the plan.
-Host per-event write p95 after the change is about 0.02 s at 10k and 0.12 s at
-50k messages (110 MB file); transcript paging renders 400 messages per page.
+Transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
@@ -506,6 +518,17 @@ tests drive the real `consume` through a URL protocol stub; real summary folds
 also ran on the iPhone 12 mini (see the verification scope above).
 
 Confirmed problems found during implementation review and fixed:
+
+- Every event rewrote the whole history file: at 50k messages (110 MB) the
+  12 mini recorded an event in p95 0.48–0.89 s, mostly the atomic whole-file
+  write, with encoding about 0.14 s. The stable layout and clone-and-patch
+  writer above bring a patched event to p95 0.10–0.11 s. Verifying every byte
+  of the clone instead of the identity guard was measured and rejected: reading
+  the fresh clone's cold pages costs at least 0.17 s on the device.
+- JSONEncoder's default key order changes on every encode (200 of 200
+  re-encodes of an unchanged session differed), which made unchanged regions
+  look changed. The layout's shells encode with sorted keys; a regression
+  requires an unchanged file to produce no ranges.
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a
