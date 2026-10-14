@@ -241,32 +241,26 @@ struct AttachmentHydrationTests {
     }
 }
 
-/// The installed store has no attachment fields; one upgrade keeps everything.
-struct CurrentStoreUpgradeTests {
-    @Test func storeWithoutAttachmentFieldsKeepsRecordsAndRoundTrips() throws {
-        var session = ChatSession(selection: ModelSelection(providerID: UUID(), modelID: "m"))
+/// assistant-v1 sessions carry attachment fields explicitly; files without them are rejected, not upgraded.
+struct CurrentStoreAttachmentTests {
+    @Test func attachmentFieldsRoundTripAndAreRequired() throws {
+        var file = HistoryFile.initial(selection: ModelSelection(providerID: UUID(), modelID: "m"))
         let reply = AgentTranscriptMessage(role: .assistant, text: "回复")
-        session.messages = [fixedMessage, reply]
-        session.draft = "未发送"
-        session.attributions = [reply.id.uuidString: "P · m"]
-        let tombstone = Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 5))
-        var root = try JSONSerialization.jsonObject(with: HistoryMigration.encode(
-            HistoryFile(selectedID: session.id, sessions: [session], deletedSessions: [tombstone]))) as! [String: Any]
+        file.sessions[0].messages = [fixedMessage, reply]
+        file.sessions[0].draft = "未发送"
+        file.sessions[0].attributions = [reply.id.uuidString: "P · m"]
+        file.sessions[0].attachments[fixedMessage.id.uuidString] = [attachment()]
+        file.sessions[0].draftAttachments = [attachment(3)]
+        file.deletedSessions = [Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 5))]
+        let data = try HistoryCodec.encode(file)
+        let again = try HistoryCodec.decode(data)
+        #expect(again.sessions[0].attachments == file.sessions[0].attachments)
+        #expect(again.sessions[0].draftAttachments == file.sessions[0].draftAttachments)
+        #expect(again.sessions[0].messages == file.sessions[0].messages && again.deletedSessions == file.deletedSessions)
+        var root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         var rows = root["sessions"] as! [[String: Any]]
         rows[0]["attachments"] = nil; rows[0]["draftAttachments"] = nil
         root["sessions"] = rows
-        let file = try HistoryMigration.decode(JSONSerialization.data(withJSONObject: root), legacySelection: nil)
-        let upgraded = file.sessions[0]
-        #expect(upgraded.id == session.id && upgraded.messages == session.messages)
-        #expect(upgraded.draft == "未发送" && upgraded.selection == session.selection)
-        #expect(upgraded.attributions == session.attributions && file.deletedSessions == [tombstone])
-        #expect(upgraded.attachments.isEmpty && upgraded.draftAttachments.isEmpty)
-        var withPhoto = upgraded
-        withPhoto.attachments[fixedMessage.id.uuidString] = [attachment()]
-        withPhoto.draftAttachments = [attachment(3)]
-        let again = try HistoryMigration.decode(HistoryMigration.encode(
-            HistoryFile(selectedID: nil, sessions: [withPhoto], deletedSessions: [])), legacySelection: nil)
-        #expect(again.sessions[0].attachments == withPhoto.attachments)
-        #expect(again.sessions[0].draftAttachments == withPhoto.draftAttachments)
+        #expect(throws: (any Error).self) { try HistoryCodec.decode(JSONSerialization.data(withJSONObject: root)) }
     }
 }

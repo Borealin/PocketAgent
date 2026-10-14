@@ -2,18 +2,39 @@ import AgentKit
 import BackgroundTasks
 import Foundation
 
+/// The host side of one accepted turn's safety boundary, handed to the engine.
+struct TurnGates {
+    let epoch: UInt64
+    let barrier: TranscriptCommitBarrier
+    let promptID: UUID
+    /// Startup permit: must be durably committed before `runtime.start`.
+    let permit: @MainActor () throws -> Void
+    /// Non-nil reason stops every new phone effect (storage dirty, Stop).
+    let effectsBlocked: @MainActor () -> String?
+    /// Primary-line context, memory and summary support; nil for independent tasks.
+    let assistant: AssistantTurnSupport?
+}
+
 // Host integration only: the pinned AgentKit package owns the agent loop.
 @MainActor
 extension Model {
     /// `config` was captured when the turn was enqueued and is used verbatim.
     /// `images` were hydrated from the turn's frozen attachment references.
+    /// Every refusal ends through `onFinished`, never silently.
     func beginAgent(goal: String, images: [AgentImageAttachment], config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind,
                     clipboardAllowed: Bool,
                     conversationID: UUID, promptID: UUID, priorMessages: [AgentTranscriptMessage],
+                    gates: TurnGates,
                     onEvent: (@MainActor (AgentEvent, ExecutionStatus) -> Void)?,
                     onStatus: (@MainActor (ExecutionStatus) -> Void)?,
                     onFinished: (@MainActor (Bool, String, ExecutionStatus) -> Void)?) {
-        guard !busy else { return }
+        guard !busy else {
+            var status = ExecutionStatus(modelLabel: config.label)
+            status.failure = "另一轮仍在运行，本轮未开始。"
+            status.finish(successful: false, cancelled: false)
+            onFinished?(false, "", status)
+            return
+        }
         do {
             guard !goal.isEmpty || !images.isEmpty else { throw failure("消息不能为空。") }
             runID = UUID().uuidString
@@ -42,7 +63,7 @@ extension Model {
                 Task { @MainActor in
                     self?.executePhoneAgent(config: config, workspace: workspace, backend: backend, clipboardAllowed: clipboardAllowed, goal: goal, images: images,
                         task: task, progress: progress, status: status,
-                        conversationID: conversationID, promptID: promptID, priorMessages: priorMessages,
+                        conversationID: conversationID, promptID: promptID, priorMessages: priorMessages, gates: gates,
                         onEvent: onEvent, onStatus: onStatus, onFinished: onFinished)
                 }
             }) else { throw failure("Background task registration failed") }
@@ -53,6 +74,7 @@ extension Model {
             log("agent_submitted", ["format": config.format.rawValue, "imageInput": config.supportsImages,
                 "promptImages": images.count,
                 "os": ProcessInfo.processInfo.operatingSystemVersionString])
+            if DeviceSettings.injectStartFailure { throw failure("开发注入：系统任务提交失败") }
             try BGTaskScheduler.shared.submit(request)
         } catch {
             busy = false; log("failed", Model.errorFields(error))

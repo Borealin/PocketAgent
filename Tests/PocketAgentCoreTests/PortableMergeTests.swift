@@ -106,8 +106,15 @@ struct PortableMergeTests {
     }
 
     @Test func unknownOrNewerSchemaFailsAndInvalidContentIsRejected() throws {
-        #expect(throws: SyncError.newerVersion(2)) { try PortableCodec.decode(Data(#"{"schemaVersion":2}"#.utf8)) }
-        #expect(throws: SyncError.unreadable("缺少 schemaVersion")) { try PortableCodec.decode(Data("{}".utf8)) }
+        #expect(throws: SyncError.newerVersion(2)) {
+            try PortableCodec.decode(Data(#"{"generation":"assistant-v1","schemaVersion":2}"#.utf8))
+        }
+        #expect(throws: SyncError.unreadable("缺少 schemaVersion")) { try PortableCodec.decode(Data(#"{"generation":"assistant-v1"}"#.utf8)) }
+        // Earlier client snapshots (no generation) and other generations are reported, not merged.
+        #expect(throws: SyncError.unsupportedGeneration("缺少 generation")) {
+            try PortableCodec.decode(Data(#"{"schemaVersion":1,"sessions":[],"providers":[],"deletedSessions":[],"deletedProviders":[]}"#.utf8))
+        }
+        #expect(throws: SyncError.unsupportedGeneration("v0")) { try PortableCodec.decode(Data(#"{"generation":"v0","schemaVersion":1}"#.utf8)) }
         #expect(throws: SyncError.unreadable("不是 JSON 对象")) { try PortableCodec.decode(Data("garbage".utf8)) }
         var bad = PortableProvider(ProviderRecord(name: "P", inferenceURL: "https://a.example.com/v1"))
         bad.inferenceURL = "http://plain.example.com"

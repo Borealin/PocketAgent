@@ -41,6 +41,10 @@ enum DeviceSettings {
     static var saveScreenshots: Bool { UserDefaults.standard.bool(forKey: screenshotsKey) }
     /// Off by default: no run log or native idevice log file is written.
     static var saveDiagnosticLogs: Bool { UserDefaults.standard.bool(forKey: logsKey) }
+    /// Acceptance-only fault injection: when the app is launched with this
+    /// argument, system task submission fails before any dispatch permit.
+    /// Absent by default; it cannot be enabled from the app UI.
+    static var injectStartFailure: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentInjectStartFailure") }
 
     static func tunnelEndpoint() throws -> (host: String, port: UInt16) {
         try parseEndpoint(tunnelEndpointText)

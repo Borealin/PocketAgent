@@ -136,7 +136,10 @@ nonisolated struct PortableTombstone: Hashable, Codable, Sendable {
 }
 
 nonisolated struct PortableSnapshot: Hashable, Codable, Sendable {
+    /// assistant-v1 envelope: other generations are reported, never converted or merged.
+    static let generationTag = HistoryFile.generationTag
     static let currentSchema = 1
+    var generation = PortableSnapshot.generationTag
     var schemaVersion = PortableSnapshot.currentSchema
     var sessions: [PortableSession] = []
     var providers: [PortableProvider] = []
@@ -168,12 +171,14 @@ nonisolated enum PortableTime {
 nonisolated enum SyncError: LocalizedError, Equatable {
     case unreadable(String)
     case newerVersion(Int)
+    case unsupportedGeneration(String)
     case invalidContent(String)
     case notDownloaded
     var errorDescription: String? {
         switch self {
         case .unreadable(let detail): "同步文件无法读取，未覆盖：\(detail)"
         case .newerVersion(let version): "同步文件版本 \(version) 较新，请先更新 App；未覆盖。"
+        case .unsupportedGeneration(let generation): "同步文件格式 \(generation) 不受本版本支持；未合并、未覆盖。"
         case .invalidContent(let detail): "同步文件内容无效，未覆盖：\(detail)"
         case .notDownloaded: "同步文件尚未从 iCloud 下载完成，请稍后重试；未覆盖。"
         }
@@ -187,6 +192,8 @@ nonisolated enum PortableCodec {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw SyncError.unreadable("不是 JSON 对象")
         }
+        guard let generation = root["generation"] as? String else { throw SyncError.unsupportedGeneration("缺少 generation") }
+        guard generation == PortableSnapshot.generationTag else { throw SyncError.unsupportedGeneration(generation) }
         guard let version = root["schemaVersion"] as? Int else { throw SyncError.unreadable("缺少 schemaVersion") }
         guard version <= PortableSnapshot.currentSchema else { throw SyncError.newerVersion(version) }
         guard version == PortableSnapshot.currentSchema else { throw SyncError.unreadable("未知版本 \(version)") }
