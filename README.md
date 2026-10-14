@@ -205,8 +205,9 @@ available for services with different inference and catalog routes.
 Each model has an optional local **本机上下文预算** in the provider editor: a
 confirmed context window or an input ceiling becomes a hard limit for the
 assistant's requests; without one the assistant only keeps to a soft target of
-about 24k estimated tokens. Older context is summarized in the foreground for
-at most 30 seconds in this version.
+about 24k estimated tokens. Older finished work is summarized as a streamed,
+size-bounded maintenance step of at most 150 seconds per turn; if it does not
+finish, that turn continues without a new summary.
 
 Choose a provider and model for each conversation. Accepted turns capture
 their selection and credential before joining the serial phone action queue.
