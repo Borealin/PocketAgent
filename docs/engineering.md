@@ -422,7 +422,9 @@ history search after a relaunch, and memory recall continued. The in-flight
 sync plan, same-ID remote refill, conflict-copy and failed-write boundaries are
 host-tested only. Known gaps
 against the plan (remember mode in the composer, multi-target candidate cards,
-rebuilding a 128-deep summary chain, provider context-limit mapping, per-turn
+rebuilding a 128-deep summary chain, revalidating read-only search results
+against a forget committed before their registration, provider context-limit
+mapping, per-turn
 estimate display, Chinese recall evaluation) are listed in the plan. Long-history numbers are host
 measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
 (110 MB file), transcript paging renders 400 messages per page.
