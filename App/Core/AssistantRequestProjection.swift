@@ -105,6 +105,13 @@ nonisolated enum AssistantRequestProjection {
         return output
     }
 
+    /// The text that selects relevant memory: the latest real user message
+    /// (prompt or delivered steering) recorded in history, never request-only
+    /// messages such as the appended screenshot caption, summaries or quotes.
+    static func memoryQuery(_ messages: [AgentTranscriptMessage], real: Set<UUID>) -> String {
+        messages.last { $0.role == .user && real.contains($0.id) }?.text ?? ""
+    }
+
     /// Older phone observations become compact status records; only the
     /// latest two complete screens stay. Other tools are never shortened.
     static func projectOldScreens(_ messages: [AgentTranscriptMessage]) -> [AgentTranscriptMessage] {

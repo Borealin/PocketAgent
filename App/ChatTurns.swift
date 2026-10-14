@@ -85,6 +85,8 @@ extension ChatController {
               !selected.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selected.draftAttachments.isEmpty
         else { return false }
         if isPrimary(selected.id) {
+            // An exact memory command never starts a run, so it is always allowed.
+            if MemoryCommand.parse(selected.draft) != nil { return true }
             guard assistant.primaryNotice == nil else { return false }
             // One pending request occupies the slot; new input stays in the draft.
             switch inputTarget(selected.id) {
