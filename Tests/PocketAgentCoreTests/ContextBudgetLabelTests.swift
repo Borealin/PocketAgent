@@ -33,4 +33,16 @@ struct ContextBudgetLabelTests {
         stopped.finish(successful: false, cancelled: true)
         #expect(stopped.phase == .cancelled && stopped.requestEstimate == 4_000)
     }
+
+    /// Device finding: the refusal read "超过本机输入上限 1000输入上限 1000".
+    @Test func theOverCeilingRefusalNamesTheCeilingOnce() throws {
+        let explicit = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "m", inputCeiling: 1_000))
+        let known = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "m", contextWindow: 32_768))
+        for budget in [explicit, known] {
+            let ceiling = try #require(budget.hardCeiling)
+            let text = ContextBudgetError.overHardCeiling(estimated: 23_582, ceiling: ceiling, source: budget.label).errorDescription ?? ""
+            #expect(text.hasPrefix("本次请求估计约 23582 token，超过输入上限 \(ceiling)（\(budget.label)）"))
+            #expect(!text.contains("输入上限 \(ceiling)输入上限"))
+        }
+    }
 }

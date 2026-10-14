@@ -37,7 +37,8 @@ nonisolated enum ContextBudgetError: LocalizedError, Equatable {
         switch self {
         case .invalidOverride(let detail): "上下文预算设置无效：\(detail)"
         case .overHardCeiling(let estimated, let ceiling, let source):
-            "本次请求估计约 \(estimated) token，超过\(source)输入上限 \(ceiling)；已停止且不重试。可在模型服务中调整本机上下文设置，或发送新消息让助理先整理。"
+            // `source` is the budget label, which already names its own ceiling.
+            "本次请求估计约 \(estimated) token，超过输入上限 \(ceiling)（\(source)）；已停止且不重试。可在模型服务中调整本机上下文设置，或发送新消息让助理先整理。"
         }
     }
 }
