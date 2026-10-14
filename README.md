@@ -143,13 +143,21 @@ the whole history. Independent conversations live under **任务 / 历史** in t
 list (new task, rename, delete); they keep their own history and model.
 
 Memory is only what you explicitly save: type `记住：<内容>` (or
-`/remember <内容>`) to save the exact text without starting a turn, tap
-**存为记忆** on a message, or use the brain icon (记忆) to add, correct or forget
-entries. Corrections apply from the next model request. Forgetting shows how
-many related conversations will be excluded from the assistant's context before
-you confirm; the original messages stay visible on this device. The assistant can
-search saved memory and same-project history but cannot write memory itself.
-Memory, summaries and the assistant's scope data stay on this device.
+`/remember <内容>`) to save the exact text without starting a turn, turn on the
+bookmark (记住) next to the photo buttons so that sending opens the memory editor
+with your text and saves only when you tap 保存, tap **存为记忆** on a message, or
+use the brain icon (记忆) to add, correct or forget entries. Writing
+`忘掉关于…的记忆`, `删除记忆：…` or `把…的记忆改成…` lists the matching entries of
+the current project in a sheet; you pick one and confirm in the editor or the
+forget panel, nothing changes otherwise (an ordinary sentence such as
+“我忘记带钥匙” is sent as a message). Corrections apply from the next model
+request. Forgetting shows the entry and how many related conversations will be
+excluded from the assistant's context before you confirm; the original messages
+stay visible on this device. The assistant can search saved memory and
+same-project history but cannot write memory itself. Memory, summaries and the
+assistant's scope data stay on this device. While the assistant works, the status
+line names the turn's model, its context limit (or the soft target when the
+window is unknown) and the size estimate of its latest request.
 
 While the assistant is working, the input queues one **下一件事** that starts
 after the current turn completes in the foreground; switch the picker to
