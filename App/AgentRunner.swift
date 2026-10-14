@@ -45,7 +45,7 @@ extension Model {
             // call back, so an expiration before or after the turn body runs is
             // attributed to this turn only.
             let acceptedRunID = runID
-            let status = TurnStatus(ExecutionStatus(modelLabel: config.label))
+            let status = TurnStatus(ExecutionStatus(modelLabel: config.label, budget: gates.assistant == nil ? nil : config.budget))
             let identifier = "\(Bundle.main.bundleIdentifier ?? "PocketAgent").run.\(runID)"
             guard BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil, launchHandler: { [weak self] task in
                 guard let task = task as? BGContinuedProcessingTask else { return }
@@ -78,7 +78,7 @@ extension Model {
             try BGTaskScheduler.shared.submit(request)
         } catch {
             busy = false; log("failed", Model.errorFields(error))
-            var status = ExecutionStatus(modelLabel: config.label)
+            var status = ExecutionStatus(modelLabel: config.label, budget: gates.assistant == nil ? nil : config.budget)
             status.failure = error.localizedDescription
             status.finish(successful: false, cancelled: false)
             onFinished?(false, "", status)

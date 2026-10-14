@@ -101,6 +101,12 @@ extension Model {
                     systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
                         capabilities: capabilities, workspaceName: workspace?.name, rules: rules,
                         memorySlot: AssistantContextPipeline.memorySlot)
+                    assistant.onEstimate = { estimate in
+                        // Shown in the chat strip only; not progress and not provider usage.
+                        guard !status.value.phase.isTerminal else { return }
+                        status.value.requestEstimate = estimate
+                        onStatus?(status.value)
+                    }
                     status.value.phase = .preparingContext
                     publish("context_preparation"); onStatus?(status.value)
                     prior = try await assistant.prepareContext(

@@ -200,10 +200,11 @@ final class ChatController: ObservableObject {
         if let job = jobs[id], let index = queuedPhone.firstIndex(where: { $0 === job }) {
             return ExecutionStatus(modelLabel: job.config.label,
                                    phase: .queued(rank: index + 1,
-                                                  waitingForForeground: !foreground && phoneSessionID == nil && index == 0))
+                                                  waitingForForeground: !foreground && phoneSessionID == nil && index == 0),
+                                   budget: job.statusBudget)
         }
         if let job = jobs[id], statuses[id] == nil || statuses[id]?.phase.isTerminal == true {
-            return ExecutionStatus(modelLabel: job.config.label)
+            return ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         }
         return statuses[id]
     }
