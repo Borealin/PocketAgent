@@ -142,6 +142,15 @@ extension ChatController {
         catch { notice = error.localizedDescription; return nil }
     }
 
+    /// Opens the forget panel for the entry as the user saw it; a changed or
+    /// missing entry is refused so the list shows the latest first.
+    func forgetPreview(for entry: MemoryRecord) -> ForgetPreview? {
+        do {
+            return try file.forgetPreview(selected: [MemoryReadRevision(entryID: entry.id, revision: entry.revision)],
+                                          activeRoot: activePrimaryRoot)
+        } catch { notice = error.localizedDescription; return nil }
+    }
+
     /// Commits the confirmed panel. A changed closure refuses and the panel
     /// refreshes. A hit active root stops that run's further effects; its
     /// original and already-happened results stay; a pending request is held.

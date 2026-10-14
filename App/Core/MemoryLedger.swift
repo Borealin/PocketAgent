@@ -63,6 +63,9 @@ nonisolated enum UserMemoryEdit: Equatable, Sendable {
 /// computed from. Commit recomputes and refuses any difference.
 nonisolated struct ForgetPreview: Equatable, Sendable {
     var entries: [MemoryReadRevision]
+    /// The entries exactly as this preview computed them (content and
+    /// revision); the panel shows these, never an earlier copy.
+    var shown: [MemoryRecord]
     var ledgerRevision: UInt64
     var dependencyRevision: UInt64
     var affectedRoots: Set<UUID>
@@ -169,13 +172,25 @@ nonisolated extension HistoryFile {
     /// Known dependency closure of forgetting `entries` through their current
     /// revision: roots that read them (any revision ≤ current), their source
     /// roots/messages, and every root that read an affected root or message.
+    /// The preview for entries the user selected as shown: refused when one
+    /// is gone or was changed since (the UI then shows the latest first).
+    func forgetPreview(selected: [MemoryReadRevision], activeRoot: UUID?) throws -> ForgetPreview {
+        for read in selected {
+            guard let entry = assistant.memory.entry(read.entryID) else { throw MemoryError.missing }
+            guard entry.revision == read.revision else { throw MemoryError.stale }
+        }
+        return try forgetPreview(selected.map(\.entryID), activeRoot: activeRoot)
+    }
+
     func forgetPreview(_ entryIDs: [UUID], activeRoot: UUID?) throws -> ForgetPreview {
         var reads: [MemoryReadRevision] = []
+        var shown: [MemoryRecord] = []
         var seedsRoots: Set<UUID> = []
         var seedMessages: Set<UUID> = []
         for id in entryIDs {
             guard let entry = assistant.memory.entry(id) else { throw MemoryError.missing }
             reads.append(MemoryReadRevision(entryID: id, revision: entry.revision))
+            shown.append(entry)
             seedsRoots.formUnion(entry.sourceRootPromptIDs)
             seedMessages.formUnion(entry.sourceMessageIDs)
         }
@@ -196,7 +211,7 @@ nonisolated extension HistoryFile {
         let closure = Self.dependencyClosure(seeds: seedsRoots, messages: maskedMessages, index: index)
         let summaries = assistant.compactions.filter { !closure.isDisjoint(with: $0.sourceRootPromptIDs)
             || !maskedMessages.isDisjoint(with: $0.sourceMessageIDs) }.count
-        return ForgetPreview(entries: reads, ledgerRevision: assistant.memory.revision,
+        return ForgetPreview(entries: reads, shown: shown, ledgerRevision: assistant.memory.revision,
                              dependencyRevision: index.dependencyRevision, affectedRoots: closure,
                              maskedMessages: maskedMessages, stopsActiveRoot: activeRoot.map(closure.contains) ?? false,
                              affectedSummaries: summaries)
