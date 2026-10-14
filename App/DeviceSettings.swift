@@ -32,6 +32,11 @@ enum DeviceSettings {
         nonEmpty(UserDefaults.standard.string(forKey: tunnelKey)) ?? embeddedTunnelEndpoint
     }
     static var assistantBundleID: String { Bundle.main.bundleIdentifier ?? "" }
+    static var phoneBackend: PhoneBackendKind {
+        UserDefaults.standard.string(forKey: "phoneControlBackend").flatMap(PhoneBackendKind.init(rawValue:)) ?? .defaultBackend
+    }
+    /// Preserve existing text behavior on upgrade; this policy is device-local.
+    static var clipboardAllowed: Bool { UserDefaults.standard.object(forKey: "phoneClipboardAllowed") as? Bool ?? true }
     /// Off by default; screenshots may contain personal screen content.
     static var saveScreenshots: Bool { UserDefaults.standard.bool(forKey: screenshotsKey) }
     /// Off by default: no run log or native idevice log file is written.
@@ -131,6 +136,8 @@ enum DeviceSettings {
 
 @MainActor
 final class DeviceSettingsModel: ObservableObject {
+    @Published var backend = DeviceSettings.phoneBackend
+    @Published var clipboardAllowed = DeviceSettings.clipboardAllowed
     @Published var runner = UserDefaults.standard.string(forKey: "runnerBundleID") ?? ""
     @Published var tunnel = UserDefaults.standard.string(forKey: "tunnelEndpoint") ?? ""
     @Published var saveScreenshots = DeviceSettings.saveScreenshots
@@ -145,6 +152,30 @@ final class DeviceSettingsModel: ObservableObject {
     private let engine: Model
 
     init(engine: Model) { self.engine = engine }
+
+    func saveBackend() {
+        guard engine.beginDeviceConfigurationChange() else {
+            backend = DeviceSettings.phoneBackend
+            status = "请等待当前连接检查、准备或手机任务结束后再切换。"
+            return
+        }
+        defer { engine.endDeviceConfigurationChange() }
+        UserDefaults.standard.set(backend.rawValue, forKey: "phoneControlBackend")
+        generation += 1
+        connectionVerified = false
+        status = backend == .ddi ? "已选择 DDI，无需安装 Automation。" : "已选择 WDA，请安装匹配的 Automation。"
+    }
+
+    func saveClipboardPolicy() {
+        guard engine.beginDeviceConfigurationChange() else {
+            clipboardAllowed = DeviceSettings.clipboardAllowed
+            status = "请等待当前手机任务结束后再修改剪贴板许可。"
+            return
+        }
+        defer { engine.endDeviceConfigurationChange() }
+        UserDefaults.standard.set(clipboardAllowed, forKey: "phoneClipboardAllowed")
+        status = clipboardAllowed ? "后续回合允许模型使用剪贴板输入。" : "后续回合禁止剪贴板；DDI 可直接替换普通单行文本框或逐键输入。"
+    }
 
     func save() {
         guard !importing, !checking, engine.beginDeviceConfigurationChange() else {
@@ -192,7 +223,7 @@ final class DeviceSettingsModel: ObservableObject {
                 guard generation == connection else { return }
                 connectionVerified = true
                 connectionStatus = "配对与 VPN 连接正常"
-                status = "连接检查通过；Automation 安装、开发者模式及首次 XCTest 授权仍需完成。"
+                status = backend == .ddi ? "连接检查通过；首次手机操作将检查开发者模式和 DDI 服务。" : "连接检查通过；Automation 安装、开发者模式及首次 XCTest 授权仍需完成。"
             } catch {
                 guard generation == connection else { return }
                 connectionStatus = "连接未通过"

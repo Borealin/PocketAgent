@@ -261,7 +261,7 @@ remove sideload signing, the separate automation companion or device setup.
 ## Architecture and compatibility
 
 App: SwiftUI sessions/provider/sync views. AgentKit: model protocols and agent
-loop. Native: Rust FFI tunnel/DDI/runner startup, then localhost WDA tools.
+loop. Native: Rust FFI RP/DDI preparation, then owned DDI service primitives or selectable WDA runner/HTTP tools.
 Run configuration is captured before enqueue; changing a session selection does
 not alter work already accepted. Existing transcript event order and tool result
 IDs are preserved. Restart interrupts active work, never replays it.
@@ -279,6 +279,21 @@ Legacy endpoint/model and Keychain settings migrate once; production defaults
 contain no private gateway or company identity. Local build overrides preserve
 the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
+
+## Device Hub backend feasibility
+
+The separate [Device Hub design](devicehub-control.md) remains production work in
+progress. A local native probe on the user-selected iPhone 12 mini reused the pinned
+idevice revision and current RP tunnel patch without replacing the installed app.
+It disproved the mandatory-display-stream assumption for ordinary touch on iOS
+27.0 / 24A437 with mounted DDI 27A5252f / CoreDevice 642.15. On-phone screenshot,
+Calculator launch, visible `7 + 5 = 12`, Home return, ASCII key delivery and raw AX
+requests 6 → 1 → 5 were exercised without XCTest/WDA. This is feasibility evidence,
+not a delivered PocketAgent backend: full AX/tool mapping, native system dialogs,
+Unicode paste and interrupted/background lifecycle were not covered by that
+initial probe. Production integration is described below; unplugged operation and
+other DDI/OS combinations remain open. The public release still uses WDA, while
+this branch follows the user-selected DDI default with a manual WDA selector.
 
 ## Setup and readiness
 
@@ -499,6 +514,198 @@ the directory and outside symlink, keeping both entries present. It retains
 concurrent successful-read and no-escape assertions, adds actual-swap/error
 witnesses and checks the normal read before and after the attack. Production
 file confinement is unchanged.
+
+## DDI phone backend (2026-10-12)
+
+Status: implemented on the devicehub-control branch; selected-device acceptance
+includes the shared executor and production chat path for cross-app Unicode input.
+The same-identity original-app update preserved existing data, and the settings
+selector was exercised in both directions before restoring DDI.
+The user selected DDI as the default with a manual
+WDA selector, and requires text input in other apps without XCTest.
+The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
+snapshot validation, script lease checks, FIFO action queue and no-replay rule.
+The backend is captured in ChatJob at enqueue, alongside the model configuration.
+
+PhoneControl supplies observations and primitive effects to the existing executor.
+DDI reuses RP/DDI preparation, gets launchable installed apps through the same Installation Proxy metadata
+filter as WDA; AppService streaming supplies native process-path matching, reads bounded AXChildren graphs and takes native screenshots.
+Foreground identity comes from a bounded read-only hit scan and a unique
+process/app-path match. A blank centre point returned AX error 8 while the same
+app's visible input-field point returned its complete tree; the selected point is
+reused and checked again after graph traversal. Unknown process paths still fail.
+Only verified portrait primary-display geometry is accepted; unsupported or
+unidentified surfaces fail before coordinate input. WDA still owns its runner PID
+and HTTP session, and is never selected automatically after an uncertain action.
+
+Native source lives in Native/ddi and bootstrap copies it into the pinned idevice
+FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
+new managed checkout instead of reapplying a new patch to the old patched tree;
+unknown edits are refused and preserved. Corresponding-source packaging resolves
+that same checkout for upstream sources and crate vendoring. AX keyed archives remain data, with size, depth, cycle, reference
+expansion and message limits. One semantic request is outstanding at a time; a
+failed AX socket is closed before fresh read-only recovery. Cancellation has a
+separate atomic handle. Touch/button releases and empty key reports precede queue
+release; the turn owns its virtual keyboard until cancellation or finalization,
+then confirms its removal. No media stream is opened. Finalization returns to the
+assistant and closes owned DDI services before releasing the tunnel.
+
+Native calls now return effect-phase metadata through FFI. Pre-effect refusals
+remain eligible for read-only recovery and a separately planned action; an uncertain
+effect or failed input release still disables input and explicitly requires a new
+turn. Composite Swift tools retain any earlier clipboard, focus or clear effect in
+their outcome. No branch replays input or switches routes. The shared installed-app
+catalog is loaded before native DDI readiness is published, so a failed inventory
+read can resume instead of turning a live session into an empty-catalog result.
+
+Optional type_text method=null follows the existing omitted-method paste default
+and frozen policy on both backends. Nonempty paste cannot be confirmed from a
+placeholder-equal AX value. Gemini receives a wire-only OpenAPI schema projection
+without additionalProperties or uniqueItems; AgentKit's registered runtime schema
+and the executor's sequence, duplicate-modifier and clipboard validation remain
+unchanged. The other provider schemas retain their original declarations.
+
+Confirmed integration fixes: decoding AX UID zero as an empty string changed the
+translation token's null fields and the device refused its attributes request.
+Null references now remain null and a regression covers that wire shape. The
+initial all-app inventory setup timed out; the streaming inventory completed
+initialization on the same device. Background UIKit writes left the old clipboard
+value in Spotlight; foreground preparation was a temporary workaround. That
+workaround has been removed because it required target restoration and excluded
+system processes. The native backend now sends CoreDevice SET to general with
+UTF-8 text UTIs, reads exact bytes back before clearing, and uses a fresh read-only
+connection to confirm them immediately before HID paste. It does not activate the
+assistant. Existing foreground/node/geometry checks still govern every input.
+
+The earlier raw probe logged plist Data as JSON null and recorded timeouts
+alongside SET/PULL replies. These observations did not establish failed storage;
+reading UIPasteboard in the app was also not an independent cross-app insertion
+witness. Apple-client request tracing confirmed the general/item/text-UTI shape;
+the current idevice SET and Apple client both read test UTF-8 back on the selected
+phone through the Mac transport. The on-phone RP path has also delivered Unicode
+to independent UIKit fields and Spotlight without activating the assistant.
+The prior receive-timeout root cause remains open. No success claim follows from
+an ACK alone. Initial keyboard commands left partial
+old text until a keyboard-settle interval and individual key-up reports were added.
+For a focused editable TextView with omitted text attributes, a nonempty
+replacement defers clear confirmation to the exact post-paste value; omission is
+not treated as proof of emptiness. Clear-only still reports unreadable values.
+Replacement input returns
+an unconfirmed result if its fresh AX value does not match. Missing value and
+placeholder cannot confirm empty input. Secure/insert-without-clear results
+explicitly report input_verified=false and action_outcome=submitted; they do not
+claim exact content confirmation. Secure text subrole 5
+is normalized and its value is excluded from tool results.
+The full executor check also exposed fragmented DTX replies: fragment zero is a
+header-only envelope whose nonzero length describes the message, not following
+bytes. The reader now follows that framing and a duplex-stream regression covers
+it. AX setup failure attempts unsubscribe before dropping the socket; failed
+input cleanup closes AX and disables further input while preserving owned release
+state for finalization. AppService activation uses terminateExisting=false; returning to a running
+assistant must preserve the process that owns the turn and its finalization.
+
+Device acceptance exercised all baseline tools through the shared executor against independent
+UIKit fields and ordinary system search, with actual editing callbacks and no
+assistant activation during background typing. Normal and multiline replacement
+were confirmed by exact fresh AX values; the known secure test text was witnessed
+by the independent receiver while the tool result remained redacted and unverified.
+Stale snapshots refused input, in-flight long-press cancellation released the owned
+contact, and finalization removed the keyboard without cleanup warnings.
+New test-app network permission
+prompts interrupted initial runs before target input; those runs are unconfirmed,
+not passed. The production chat path also confirmed exact ordinary-field replacement
+in the independent receiver and returned to the existing assistant process.
+The original App's first host-prepared prompt paste requested iOS paste permission;
+the bench setup allowed that known prompt before starting the production turn.
+This is global paste-based input, not proof of acceptance by every custom control.
+The HID API carries keyboard usages. type_text now accepts optional method=ax
+for nonempty clear=true replacement of ordinary TextField/SearchField nodes;
+omitted method retains paste, and WDA rejects explicit AX before preparation.
+AX uses request8/attribute53 once after fresh native identity/foreground/frame/hit
+checks, without focus, clipboard or HID effects. Model and script calls share
+TextInputRequest validation, including the frozen clipboard policy. A fresh
+exact non-placeholder AX value is field confirmation, never business validation;
+results label its source and require observing target App behavior. Observations expose known focused
+state and the AX result reports target_focused without inferring it from the setter
+acknowledgement. The model
+confirms focus or uses node-bound press_keys before submission. Callback and
+empty-value compatibility limits, and completed selected-device acceptance, are recorded in
+[devicehub-control.md](devicehub-control.md#ax-final-text-route). Real search also exposed a fractional-frame
+round-trip counterexample that can falsely trip AX's strict frame check, and a
+unreadable App Store/Safari foreground after submission. These are recorded as
+compatibility/observation limits; submitted errors require a fresh read, never replay.
+A later Mac-side UniversalHID bench check confirmed
+ASCII with an English layout and Chinese via existing Pinyin candidates plus
+Space, with exact AX and independent UIKit callback confirmation and no clipboard
+access. This is input-method feasibility, not an integrated on-phone input mode.
+The IME's marked Latin value differs from committed text; a future implementation
+must verify layout, candidate and final content. Candidate paging, rare/polyphonic
+characters, mixed text, emoji and interrupted composition remain unverified.
+The user approved the additive input contract on 2026-10-13. type_text keeps its
+final-text schema; press_keys supplies 1–32 physical key positions and modifiers
+on a freshly observed input field, using the owned DDI keyboard and fixed timing.
+It returns the actual screen with input_verified=false and unknown composition/
+layout, rather than claiming a committed Unicode string. Already-focused fields
+are not retapped. WDA does not expose this new DDI primitive.
+The device-local clipboard policy defaults to allowed for compatibility, is frozen
+at job enqueue, informs model tools and is enforced in the shared executor for
+scripts and model calls before effects. Disallowed copy/cut/paste chords are also
+checked at native input validation. No route switches or replay follow uncertain
+effects. This extension is implemented and the selected-device gate is complete; design
+and recovery limits are in devicehub-control.md.
+
+The first production-chat keyboard run opened the target successfully but failed
+at mainKeyboard creation with a transport error. Independent UIKit callbacks
+confirmed no text was inserted; subsequent input in that turn was refused as
+uncertain. The candidate now opens a fresh HID channel before its first owned
+keyboard creation, after any touch is released, without retrying an effect.
+This addresses reuse of the setup channel after model inference; idle transport
+versus prior no-reply touch traffic is not yet isolated. The fresh-channel
+candidate passed physical ASCII, Shift and digit input, and two-part Pinyin plus
+selection of an actually observed candidate. The latter reported unconfirmed
+final cleanup despite independently confirmed committed text. Keyboard lifecycle
+requests now use their own fresh, retained HID channel; touch reports, including
+candidate selection, keep the original channel. Static cleanup-phase diagnostics
+distinguish keyboard release/reset/removal and AX unsubscribe without recording
+input. The exact initial HID transport cause is still open. Later staged diagnostics
+identified a repeated finalization warning as AX unsubscribe, with keyboard
+release/reset/removal confirmed. Finalization now unsubscribes before activating
+the assistant, so app switching cannot race the old target subscription. DTX ACK
+handling correlates error responses to the requested conversation; an older
+error cannot fail a newer unsubscribe, while its own error stays unconfirmed.
+Device framing diagnostics then isolated the warning: the current unsubscribe's
+single-fragment control reply header declared 16 payload bytes, but the stream
+ended before any body byte arrived. There was no semantic-read timeout in that
+reproduction. The installed ipb AX client also reports connection-closed-before-ack
+separately. Teardown now distinguishes that narrowly correlated empty-reply
+closure from an acknowledged unsubscribe, drops the socket in either case and
+reports the actual subscription_stop/connection_closed outcome. An unrelated
+header, partial body, protocol error, timeout or ordinary semantic request still
+fails. This does not establish a successful server ACK or a general TCP fix.
+Protocol regressions cover those distinctions; production final-text input completed
+without a cleanup warning, while its closure remained explicitly unacknowledged.
+
+A fresh empty-field keyboard turn reported an issued action and the shared
+foreground/root-change guard, while the independent receiver remained unchanged. Recovery showed the same app with newly visible keyboard nodes. The
+exact transient PID-versus-root branch was not logged. After a focus tap,
+press_keys now reuses the existing bounded read-only observation recovery and
+verifies the same app, field identity and focus before sending keys. Neither the
+focus tap nor input is replayed. The repeated empty-field device check passed;
+the exact cause of the earlier transient observation remains unestablished.
+
+During keyboard stop acceptance, a script deadline revoked the phone lease and
+stopped a partially delivered key sequence; a new direct-key turn confirmed
+modifier release. A later script was refused by the existing preflight live-task
+check despite the earlier stop result reporting zero guest processes. The guard
+requested an App restart; the kernel/count failure cause is unestablished. This
+is separate from DDI keyboard input and must not be described as successful
+script-runtime reuse. No script safeguard is bypassed.
+
+The previous errSecInternalComponent development-signing failure no longer
+reproduces on a disposable test binary; its cause remains unresolved. Current
+candidates can be signed and installed. Private logs, pairing, signing and
+success-only records remain local outside Git. No Looktech app/firmware or
+schema/rpc change is involved.
 
 ## On-device workspace and scripting
 
@@ -863,6 +1070,29 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+The PR #1 compatibility review reproduced optional-null rejection and nonempty
+paste false confirmation using the compiled Core code, and old-patch bootstrap
+upgrade failure using an isolated checkout of the pinned idevice revision. Source
+inspection also found that native pre-effect refusals poisoned all later input,
+and that opening DDI before a failed shared inventory read let later preparation
+skip the inventory. The fixes preserve the default routes, current stored data and
+no-replay boundary. Native regressions cover refusal versus uncertain effect,
+failed release and exact fractional-frame JSON round trips; Core regressions cover
+the wire outcome, optional-null policy, placeholder ambiguity and Gemini projection.
+Temporary Git-fixture regressions cover patch upgrades, interrupted staging and
+preservation of unknown edits. This implementation has renewed Core/native tests,
+iOS archive and signed-IPA inspection. On the wired portrait iPhone 12 mini,
+the production executor's pre-effect refusal leaves later input usable; optional-null
+paste, clipboard denial with explicit AX, placeholder ambiguity and selectable WDA
+were checked against an independent receiver. Lease revocation released the received
+touch, and a new turn accepted input; the same-turn poison guard remains covered by
+native tests rather than that device case. The same-identity update retained existing
+IDs, messages, order, deletion records and provider/workspace/rule configuration. A
+real configured Responses-model turn completed one read-only observation of the
+receiver. This scope does not certify live Gemini requests, arbitrary custom fields,
+unplugged startup or active Dynamic Island surface preparation. Success artifacts and
+transcripts remain in the private local handoff.
 
 The transcript dismissed the keyboard during interactive scrolling but had no
 tap-to-dismiss path. A transcript-only simultaneous tap now clears the root's
