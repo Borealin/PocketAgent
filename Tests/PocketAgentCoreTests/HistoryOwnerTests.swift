@@ -291,6 +291,65 @@ struct HistoryFileEncoderTests {
         }
     }
 
+    /// Scope-index rows (membership, roots) are reused from earlier writes
+    /// only while unchanged: after every kind of index change the incremental
+    /// file decodes to the same history as a full encode, as the same JSON value.
+    @MainActor
+    @Test func cachedScopeRowsFollowEveryIndexChange() throws {
+        var file = try LongHistoryBenchmark.synthetic(messages: 300)
+        let encoder = HistoryFileEncoder()
+        func same() throws {
+            let incremental = try encoder.encode(file)
+            #expect(try HistoryCodec.decode(incremental) == file)
+            let a = try JSONSerialization.jsonObject(with: incremental) as? NSDictionary
+            let b = try JSONSerialization.jsonObject(with: HistoryCodec.encode(file)) as? NSDictionary
+            let rows = { (d: NSDictionary?) -> Set<String> in
+                let index = (d?["assistant"] as? NSDictionary)?["scopeIndex"] as? NSDictionary
+                return Set(((index?["messageRoots"] as? [NSDictionary]) ?? []).map { "\($0)" })
+            }
+            // Same value except the order of membership rows, which carries no meaning.
+            let sameRows = rows(a) == rows(b)
+            #expect(sameRows)
+            let strip = { (d: NSDictionary?) -> NSDictionary? in
+                guard let copy = d?.mutableCopy() as? NSMutableDictionary,
+                      let assistant = (copy["assistant"] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary,
+                      let index = (assistant["scopeIndex"] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary else { return nil }
+                index["messageRoots"] = nil; assistant["scopeIndex"] = index; copy["assistant"] = assistant
+                return copy
+            }
+            let sameValue = strip(a) == strip(b)
+            #expect(sameValue)
+        }
+        try same()
+        try same()
+        let primary = file.assistant.primarySessionID
+        let roots = file.assistant.scopeIndex.sortedRootRows.map(\.rootPromptID)
+        // A new root and member, a dependency change, a mask, a moved member, a removed message.
+        let prompt = AgentTranscriptMessage(role: .user, text: "新的一轮")
+        try file.acceptRoot(prompt, attachments: [], in: primary, scope: .general)
+        try same()
+        try file.registerReads(root: prompt.id, memory: [], roots: [roots[0]], messages: [])
+        try same()
+        try file.assistant.scopeIndex.mask(root: roots[1], by: UUID())
+        try same()
+        try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "事件"), to: primary, root: prompt.id)
+        try same()
+        file.sessions[0].messages.removeLast(7)
+        try file.assistant.scopeIndex.prune(existing: Set(file.sessions.flatMap { $0.messages.map(\.id) }))
+        try same()
+        // The same message ID removed and recorded again under another root between two writes.
+        let target = AgentTranscriptMessage(role: .user, text: "另一轮")
+        try file.acceptRoot(target, attachments: [], in: primary, scope: .general)
+        try same()
+        let moved = file.sessions[0].messages[10]
+        #expect(file.assistant.scopeIndex.root(of: moved.id).map { $0 != target.id } == true)
+        file.sessions[0].messages.removeAll { $0.id == moved.id }
+        try file.assistant.scopeIndex.prune(existing: Set(file.sessions.flatMap { $0.messages.map(\.id) }))
+        try file.appendEvent(moved, to: primary, root: target.id)
+        #expect(file.assistant.scopeIndex.root(of: moved.id) == target.id)
+        try same()
+    }
+
     @Test func spliceRefusesAMissingOrRepeatedPair() {
         let once = Data(#"{"a":1,"messages":"S","b":[]}"#.utf8)
         let twice = Data(#"{"messages":"S","x":{"messages":"S"}}"#.utf8)
