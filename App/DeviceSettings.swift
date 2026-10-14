@@ -52,6 +52,14 @@ enum DeviceSettings {
     /// Local launch argument only: the real transcript view over synthetic long
     /// histories in a read-only controller (`ViewportBenchmarkRoot`).
     static var viewportBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentViewportBenchmark") }
+    /// Local acceptance launch argument only (fault injection, not reachable
+    /// from the UI): each context-maintenance fold waits 20 s after its checks
+    /// and read registration, before its provider request, so a forget can be
+    /// confirmed while the turn prepares. The wait is cancellable; nothing is
+    /// sent or shown during it.
+    static var maintenanceDispatchHold: Duration? {
+        ProcessInfo.processInfo.arguments.contains("-PocketAgentHoldMaintenanceDispatch") ? .seconds(20) : nil
+    }
 
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {
