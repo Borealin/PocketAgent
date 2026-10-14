@@ -140,7 +140,16 @@ final class ChatController: ObservableObject {
         owner.onChange = { [weak self] in self?.revision &+= 1 }
         owner.onStorageFailure = { [weak self] error in self?.storageFailed(error) }
         workspaces.inUse = { [weak self] id in self?.workspaceInUse(id) ?? false }
+        providers.onDefaultSelection = { [weak self] in self?.adoptDefaultSelection() }
         if owner.health.isReady { cleanupAttachments() }
+        adoptDefaultSelection()
+    }
+
+    /// The primary line without a model uses the Settings default model;
+    /// an existing selection is kept.
+    func adoptDefaultSelection() {
+        guard owner.health.isReady, owner.file.primary?.selection == nil, providers.defaultSelection != nil else { return }
+        transact { try $0.adoptDefaultSelection(self.providers.defaultSelection) }
     }
 
     // MARK: Derived state

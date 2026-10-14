@@ -238,14 +238,41 @@ struct KeyOriginTests {
                                          enteredNewKey: false, removeKey: false) == bound)
     }
 
-    /// assistant-v1 provider files are strict: earlier shapes and other
-    /// generations/schemas are refused, never converted.
-    @Test func providerFileRefusesEarlierShapesAndUnknownVersions() throws {
-        let earlier = #"{"version":1,"providers":[],"deletedProviders":[],"legacySecretPending":false}"#
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(ProviderFile.self, from: Data(earlier.utf8)) }
-        let current = #"{"generation":"assistant-v1","schemaVersion":2,"providers":[],"defaultSelection":null,"deletedProviders":[],"keyOrigins":{},"budgetOverrides":[]}"#
-        #expect(throws: ProviderError.unsupportedVersion(2)) { try JSONDecoder().decode(ProviderFile.self, from: Data(current.utf8)) }
-        let valid = current.replacingOccurrences(of: #""schemaVersion":2"#, with: #""schemaVersion":1"#)
-        #expect(try JSONDecoder().decode(ProviderFile.self, from: Data(valid.utf8)).keyOrigins.isEmpty)
+    /// The common Settings file is read in place and never rewritten by
+    /// loading; a corrupt or unsupported file is refused and left untouched.
+    /// History keeps its own assistant-v1 namespace and adopts nothing.
+    @Test func providerSettingsAreReadInPlaceAndRefusedFilesStayUntouched() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pa-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = ProviderSettingsStorage(applicationSupport: root)
+        #expect(storage.url == root.appendingPathComponent("providers.json"))
+        #expect(try storage.load() == nil)
+        let provider = ProviderRecord(name: "P", inferenceURL: "https://a.example.com/v1/chat/completions",
+                                      models: [ProviderModelEntry(id: "m", supportsImages: true)],
+                                      updatedAt: Date(timeIntervalSinceReferenceDate: 7))
+        let earlier = try JSONSerialization.data(withJSONObject: [
+            "version": 1, "providers": [try JSONSerialization.jsonObject(with: JSONEncoder().encode(provider))],
+            "defaultSelection": ["providerID": provider.id.uuidString, "modelID": "m"],
+            "deletedProviders": [], "legacySecretPending": false,
+            "keyOrigins": [provider.id.uuidString: ["https://a.example.com"]]] as [String: Any])
+        try earlier.write(to: storage.url)
+        let loaded = try #require(try storage.load())
+        #expect(loaded.providers == [provider] && loaded.defaultSelection == ModelSelection(providerID: provider.id, modelID: "m"))
+        #expect(loaded.keyOrigins[provider.id.uuidString] == ["https://a.example.com"])
+        #expect(try Data(contentsOf: storage.url) == earlier)
+        var edited = loaded
+        edited.budgetOverrides = [ContextBudgetOverride(providerID: provider.id, modelID: "m", inputCeiling: 9000)]
+        try storage.write(edited)
+        #expect(try storage.load()?.budgetOverrides == edited.budgetOverrides)
+        #expect(try storage.load()?.providers.map(\.id) == [provider.id])
+        for refused in [Data("{not json".utf8), Data(#"{"version":2,"providers":[]}"#.utf8)] {
+            try refused.write(to: storage.url)
+            #expect(throws: (any Error).self) { try storage.load() }
+            #expect(try Data(contentsOf: storage.url) == refused)
+        }
+        let namespace = AssistantNamespace(applicationSupport: root)
+        #expect(namespace.history.deletingLastPathComponent().lastPathComponent == AssistantNamespace.directoryName)
+        if case .absent = try HistoryStorage(url: namespace.history).load() {} else { Issue.record("expected an empty history namespace") }
     }
 }

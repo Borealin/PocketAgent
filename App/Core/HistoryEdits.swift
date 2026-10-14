@@ -24,6 +24,17 @@ nonisolated extension HistoryFile {
         if touch { sessions[index].updatedAt = Date() }
     }
 
+    /// The primary line without a model takes the Settings default. An
+    /// existing selection is never replaced, and the fill is not an explicit
+    /// metadata edit (a synchronized explicit choice still wins). Returns
+    /// whether the primary changed.
+    @discardableResult
+    mutating func adoptDefaultSelection(_ selection: ModelSelection?) throws -> Bool {
+        guard let selection, let primary, primary.selection == nil else { return false }
+        try editSession(primary.id, touch: false) { $0.selection = selection }
+        return true
+    }
+
     /// A new root prompt and its scope are recorded in the same write. The
     /// root is not dispatch-authorized until the startup permit commits.
     mutating func acceptRoot(_ prompt: AgentTranscriptMessage, attachments: [ChatAttachment], in sessionID: UUID,
