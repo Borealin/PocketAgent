@@ -26,15 +26,15 @@ final class AssistantTurnSupport {
     /// Whether this run still owns its session (not replaced, cancelled, revoked or finished).
     let isActive: @MainActor () -> Bool
     private let synthetic = SyntheticIDs()
-    private var rawRoots: [UUID] = []
-    private var summaryRoots: [UUID] = []
-    private var summaryMessageID: UUID?
-    private var historicalMessages: [UUID] = []
-    private var lastRawEstimate: Int?
+    /// Every request's preparation (Core, shared with the gate tests).
+    private let requests: AssistantRequestPreparer
     /// Outcome of context maintenance this turn (shown in the status detail).
     private(set) var maintenanceNote: String?
     /// Receives the estimate of every complete request, before the ceiling check.
-    var onEstimate: (@MainActor (Int) -> Void)?
+    var onEstimate: (@MainActor (Int) -> Void)? {
+        get { requests.onEstimate }
+        set { requests.onEstimate = newValue }
+    }
     private var calibrationKey: EstimatorCalibration.Key {
         .init(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
     }
@@ -43,6 +43,9 @@ final class AssistantTurnSupport {
          config: RunConfiguration, epoch: UInt64, isActive: @escaping @MainActor () -> Bool) {
         self.owner = owner; self.sessionID = sessionID; self.promptID = promptID; self.scope = scope
         self.references = references; self.config = config; self.epoch = epoch; self.isActive = isActive
+        let key = EstimatorCalibration.Key(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
+        requests = AssistantRequestPreparer(owner: owner, sessionID: sessionID, promptID: promptID, scope: scope,
+                                            budget: config.budget, estimator: { EstimatorCalibration.shared.estimator(key) })
     }
 
     nonisolated var syntheticIDs: Set<UUID> { synthetic.value }
@@ -70,10 +73,12 @@ final class AssistantTurnSupport {
             }
         }
         synthetic.set(prepared.syntheticIDs)
-        rawRoots = prepared.rawRoots
-        summaryRoots = prepared.summaryRoots
-        summaryMessageID = prepared.summaryID.flatMap { id in owner.file.assistant.compactions.first { $0.id == id }?.record.summaryMessageID }
-        historicalMessages = prepared.historicalMessages
+        requests.rawRoots = prepared.rawRoots
+        requests.summaryRoots = prepared.summaryRoots
+        requests.summaryMessageID = prepared.summaryID.flatMap { id in
+            owner.file.assistant.compactions.first { $0.id == id }?.record.summaryMessageID
+        }
+        requests.historicalMessages = prepared.historicalMessages
         let session = owner.file.session(sessionID)
         return AttachmentHydration.context(prepared.messages, attachments: session?.attachments ?? [:],
                                            supportsImages: config.supportsImages, load: attachmentFiles.data)
@@ -108,38 +113,11 @@ final class AssistantTurnSupport {
     // MARK: Every request
 
     func prepareRequest(_ request: AgentModelRequest) async throws -> AgentModelRequest {
-        let file = owner.file
-        let index = file.assistant.scopeIndex
-        var invalid: Set<UUID> = []
-        if let summaryMessageID, summaryRoots.contains(where: index.isMasked(root:)) { invalid.insert(summaryMessageID) }
-        var prepared = request
-        prepared.messages = try AssistantRequestProjection.filterForgotten(request.messages, index: index, currentRoot: promptID,
-                                                                           invalidSummaries: invalid)
-        prepared.messages = AssistantRequestProjection.projectOldScreens(prepared.messages)
-        let real = Set(file.session(sessionID)?.messages.map(\.id) ?? [])
-        let query = AssistantRequestProjection.memoryQuery(prepared.messages, real: real)
-        let block = MemoryBlock.build(file.assistant.memory, scope: scope, query: query)
-        prepared.systemPrompt = MemoryBlock.apply(block, to: request.systemPrompt,
-                                                  hasMemoryTools: request.tools.contains { $0.name == "memory_search" })
-        let estimator = EstimatorCalibration.shared.estimator(calibrationKey)
-        let estimate = estimator.estimate(prepared)
-        onEstimate?(estimate)
-        if let ceiling = config.budget.hardCeiling, estimate > ceiling {
-            throw ContextBudgetError.overHardCeiling(estimated: estimate, ceiling: ceiling, source: config.budget.label)
-        }
-        // What this dispatch reads is durable before it is sent.
-        let present = Set(prepared.messages.map(\.id))
-        let roots = rawRoots.filter { root in present.contains(root) || prepared.messages.contains { index.root(of: $0.id) == root } }
-            + (invalid.isEmpty && summaryMessageID.map(present.contains) == true ? summaryRoots : [])
-        do {
-            try owner.transact { try $0.registerReads(root: promptID, memory: block.reads, roots: roots, messages: historicalMessages) }
-        } catch { throw StorageCommitError.saveFailed(error.localizedDescription) }
-        lastRawEstimate = estimator.rawEstimate(prepared)
-        return prepared
+        try requests.prepare(request)
     }
 
     func observeUsage(_ usage: AgentTokenUsage) {
-        guard let raw = lastRawEstimate, usage.inputTokens > 0 else { return }
+        guard let raw = requests.lastRawEstimate, usage.inputTokens > 0 else { return }
         EstimatorCalibration.shared.record(calibrationKey, estimatedRaw: raw, actualInputTokens: usage.inputTokens)
     }
 

@@ -36,6 +36,7 @@
 		70E1558DD60DD52607A32538 /* HistoryOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FA7F23F4F43343D30E3D16A /* HistoryOwner.swift */; };
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
 		721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E07338DA36C6016FB8828 /* PhoneBackend.swift */; };
+		73302C0C511CA39E86999817 /* AssistantRequestPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7479825EBF4A10452CAE8365 /* AssistantRequestPreparer.swift */; };
 		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
 		73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925006F86E0B486805C14187 /* StreamingSummary.swift */; };
 		7BF504059BFF50CB719B57D3 /* ipb-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */; };
@@ -121,6 +122,7 @@
 		71BBBC1966721F24A0B7C74B /* ContextBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextBudget.swift; sourceTree = "<group>"; };
 		7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketMemoryAdapter.swift; sourceTree = "<group>"; };
 		73652AF715C4968790030FB2 /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
+		7479825EBF4A10452CAE8365 /* AssistantRequestPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRequestPreparer.swift; sourceTree = "<group>"; };
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
 		7F385985B41CF2BDD68B588A /* SyncApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncApply.swift; sourceTree = "<group>"; };
 		7F4597769ADE790DBCF5243A /* TextInputRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInputRequest.swift; sourceTree = "<group>"; };
@@ -218,6 +220,7 @@
 			isa = PBXGroup;
 			children = (
 				1B2149D605EB4681C28AA432 /* AgentContextBuilder.swift */,
+				7479825EBF4A10452CAE8365 /* AssistantRequestPreparer.swift */,
 				8B0353F740886263A926C60F /* AssistantRequestProjection.swift */,
 				532A0E3415F99019452AA442 /* AssistantState.swift */,
 				8D84987315C6121941984C15 /* Attachments.swift */,
@@ -413,6 +416,7 @@
 			files = (
 				6310CDFC25B8F19D1BAE638E /* AgentContextBuilder.swift in Sources */,
 				839990BB08A26E5F07CEF123 /* AgentRunner.swift in Sources */,
+				73302C0C511CA39E86999817 /* AssistantRequestPreparer.swift in Sources */,
 				F0EFCFE096DFF63344A2535B /* AssistantRequestProjection.swift in Sources */,
 				EFD714D2364181BB7EE72640 /* AssistantState.swift in Sources */,
 				FCD0F1007FC746B9806DAB48 /* AssistantTurnSupport.swift in Sources */,
