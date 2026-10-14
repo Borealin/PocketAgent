@@ -761,6 +761,9 @@ final class PhoneExecutor {
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let failure = error as? DDIOperationFailure {
+                // Observation/node preparation can itself issue a system-surface
+                // gesture outside effect {}; retain its native effect metadata.
+                issued = failure.actionWasIssued(after: issued)
                 var result: [String: Any] = ["ok": false, "code": failure.code,
                     "message": failure.message + (failure.requiresNewTurn
                         ? " 本轮输入已停用，请结束本轮并在新回合重新观察；不要重试或切换输入方式。"
