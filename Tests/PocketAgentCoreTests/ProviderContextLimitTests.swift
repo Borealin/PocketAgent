@@ -25,7 +25,7 @@ private final class LimitProtocol: URLProtocol, @unchecked Sendable {
 }
 
 /// A secret-looking value and an endpoint that must never reach the message.
-private let echoed = #""note":"sk-PKATEST-0000 https://internal.example/v1""#
+private let echoed = #""note":"PKATEST_SECRET_SENTINEL https://pkatest.invalid/v1""#
 
 private func client(_ format: ModelAPIFormat, _ reply: LimitProtocol.Reply) -> AgentProviderClient {
     LimitProtocol.reply.withLock { $0 = reply }
@@ -73,7 +73,7 @@ struct ProviderContextLimitTests {
             let text = mapped?.errorDescription ?? ""
             #expect(text.contains(kind == .contextWindow ? "本机输入上限" : "减少图片"), "\(error)")
             #expect(text.contains("此前已执行的动作和结果保留") && text.contains("拒绝后不再执行新的手机动作"))
-            #expect(!text.contains("sk-PKATEST") && !text.contains("internal.example"))
+            #expect(!text.contains("PKATEST_SECRET_SENTINEL") && !text.contains("pkatest.invalid"))
             #expect(!text.contains("However") && !text.contains("prompt is too long") && !text.contains("Entity"))
         }
         // The advice is an attempt, with its boundary.
@@ -144,7 +144,7 @@ struct ProviderContextLimitTests {
         let text = try #require(failure)
         #expect(text == ProviderContextLimit(path: .main, kind: .contextWindow, status: 400, code: "context_length_exceeded",
                                              reportedLimit: 8192).errorDescription)
-        #expect(!text.contains("sk-PKATEST") && !text.contains("internal.example") && !text.contains("However"))
+        #expect(!text.contains("PKATEST_SECRET_SENTINEL") && !text.contains("pkatest.invalid") && !text.contains("However"))
     }
 
     /// The same rejection sent inside a Responses stream (an in-stream
