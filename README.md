@@ -159,6 +159,12 @@ itself. A request that fails before it starts returns its text to the input;
 the original stays visible, marked as not started, and the assistant does not
 read it as context. In a task conversation, **引用到你的助理** (long press a
 message) lets the assistant read that exact finished part of history once.
+To start over without losing memory, swipe or long-press **你的助理** in the
+list and choose **清空对话，保留记忆**: the assistant's conversation, draft,
+references, summaries and its images are deleted (also on synced devices);
+saved memory, forget records, the current model and project, model services
+and other tasks stay. It is unavailable while the assistant is working or a
+waiting request needs a decision.
 
 This release stores conversation history in a new `assistant-v1` format: it
 starts with an empty assistant and does not read or convert earlier
