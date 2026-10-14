@@ -45,16 +45,19 @@ enum ProviderKeychain {
 @MainActor
 final class ProviderStore: ObservableObject {
     @Published private(set) var providers: [ProviderRecord] = []
-    @Published private(set) var defaultSelection: ModelSelection?
+    @Published private(set) var defaultSelection: ModelSelection? { didSet { onDefaultSelection?() } }
     @Published private(set) var keyed: Set<UUID> = []
     @Published var storageError = ""
     @Published var notice = ""
     private(set) var deletedProviders: [Tombstone] = []
     private var keyOrigins: [String: [String]] = [:]
+    private var legacySecretPending = false
     /// Local context budget settings; never synchronized.
     @Published private(set) var budgetOverrides: [ContextBudgetOverride] = []
-    /// assistant-v1 namespace; earlier provider files are not read or converted.
-    private let file = assistantNamespace.providers
+    /// Called after the default selection is assigned.
+    var onDefaultSelection: (() -> Void)?
+    /// The app's common Settings file, shared by the assistant and independent tasks.
+    private let storage = ProviderSettingsStorage(applicationSupport: applicationSupport)
 
     init() {
         load()
@@ -192,19 +195,17 @@ final class ProviderStore: ObservableObject {
 
     // MARK: Storage
 
+    /// Existing settings are used as stored (same provider IDs, so Keychain
+    /// items and key origin bindings keep applying); nothing is written here.
     private func load() {
         do {
-            if FileManager.default.fileExists(atPath: file.path) {
-                let stored = try JSONDecoder().decode(ProviderFile.self, from: Data(contentsOf: file))
+            if let stored = try storage.load() {
                 providers = stored.providers
                 defaultSelection = stored.defaultSelection
                 deletedProviders = stored.deletedProviders
+                legacySecretPending = stored.legacySecretPending
                 keyOrigins = stored.keyOrigins
                 budgetOverrides = stored.budgetOverrides
-            } else {
-                // New namespace: providers are set up again; Keychain items are
-                // resolved by the new provider IDs only.
-                try persist()
             }
         } catch { storageError = "服务商配置读取失败，原文件已保留：\(error.localizedDescription)" }
         refreshKeys()
@@ -220,9 +221,8 @@ final class ProviderStore: ObservableObject {
 
     private func persist() throws {
         guard storageError.isEmpty else { return }
-        let stored = ProviderFile(providers: providers, defaultSelection: defaultSelection,
-                                  deletedProviders: deletedProviders, keyOrigins: keyOrigins, budgetOverrides: budgetOverrides)
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(stored).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try storage.write(ProviderFile(providers: providers, defaultSelection: defaultSelection,
+                                       deletedProviders: deletedProviders, legacySecretPending: legacySecretPending,
+                                       keyOrigins: keyOrigins, budgetOverrides: budgetOverrides))
     }
 }

@@ -1,14 +1,14 @@
 import Foundation
 
-/// File locations of the assistant-v1 namespace. Earlier namespaces (the
-/// Documents history, the root providers file and attachment directory, the
-/// old sync file) are never scanned, read, converted or removed.
+/// File locations of the assistant-v1 history namespace. Earlier history (the
+/// Documents conversations, the root attachment directory, the old sync file)
+/// is never scanned, read, converted or removed. Provider settings are not
+/// part of it: the common Settings file is used (`ProviderSettingsStorage`).
 nonisolated struct AssistantNamespace: Sendable {
     static let directoryName = "assistant-v1"
     let directory: URL
     init(applicationSupport: URL) { directory = applicationSupport.appendingPathComponent(Self.directoryName, isDirectory: true) }
     var history: URL { directory.appendingPathComponent("history.json") }
-    var providers: URL { directory.appendingPathComponent("providers.json") }
     var attachments: URL { directory.appendingPathComponent("Attachments", isDirectory: true) }
 }
 

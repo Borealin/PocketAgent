@@ -205,25 +205,71 @@ struct ProviderConfigTests {
         #expect(throws: ProviderError.invalidURL("u")) { try EndpointValidation.validate("https:///nohost", field: "u") }
     }
 
-    @Test func providerFileIsStrictAndKeepsLocalBudgetOverrides() throws {
+    /// The common Settings file is used in place: an earlier build's version-1
+    /// file keeps provider IDs, default, tombstones, key origins and its pending
+    /// flag; budgets are an additive key that earlier readers ignore.
+    @Test func commonProviderFileKeepsIDsOriginsDefaultAndBudgets() throws {
         let provider = ProviderRecord(name: "P", inferenceURL: "https://a.example.com/v1/responses",
-                                      models: [ProviderModelEntry(id: "m", supportsImages: false)])
-        let override = ContextBudgetOverride(providerID: provider.id, modelID: "m", contextWindow: 128_000, inputCeiling: nil)
-        let file = ProviderFile(providers: [provider], defaultSelection: nil, budgetOverrides: [override])
-        let data = try JSONEncoder().encode(file)
-        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(root["defaultSelection"] is NSNull && root["generation"] as? String == "assistant-v1")
-        let rows = try #require(root["budgetOverrides"] as? [[String: Any]])
-        #expect(rows.first?["inputCeiling"] is NSNull)
-        let decoded = try JSONDecoder().decode(ProviderFile.self, from: data)
-        #expect(decoded.budgetOverrides == [override] && decoded.providers == [provider])
-        // The previous provider file shape is not read or converted.
-        let legacy = try JSONSerialization.data(withJSONObject: ["version": 1, "providers": [], "legacySecretPending": false])
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(ProviderFile.self, from: legacy) }
-        var missing = root; missing["budgetOverrides"] = nil
-        #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ProviderFile.self, from: JSONSerialization.data(withJSONObject: missing))
+                                      models: [ProviderModelEntry(id: "m", supportsImages: false)],
+                                      updatedAt: Date(timeIntervalSinceReferenceDate: 1000))
+        let selection = ModelSelection(providerID: provider.id, modelID: "m")
+        let tombstone = Tombstone(id: UUID(), deletedAt: Date(timeIntervalSinceReferenceDate: 5))
+        let origins = [provider.id.uuidString: ["https://a.example.com"]]
+        func json<T: Encodable>(_ value: T) throws -> Any { try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) }
+        func earlier(_ fields: [String: Any]) throws -> Data {
+            var root: [String: Any] = ["version": 1, "providers": [try json(provider)]]
+            root.merge(fields) { $1 }
+            return try JSONSerialization.data(withJSONObject: root)
         }
+        let full = try earlier(["defaultSelection": try json(selection), "deletedProviders": [try json(tombstone)],
+                                "legacySecretPending": true, "keyOrigins": origins])
+        var file = try JSONDecoder().decode(ProviderFile.self, from: full)
+        #expect(file.providers == [provider] && file.defaultSelection == selection && file.deletedProviders == [tombstone])
+        #expect(file.keyOrigins == origins && file.legacySecretPending && file.budgetOverrides.isEmpty)
+        // Keys an earlier writer omitted are defaults, not errors.
+        let sparse = try JSONDecoder().decode(ProviderFile.self, from: earlier([:]))
+        #expect(sparse.providers == [provider] && sparse.defaultSelection == nil && sparse.keyOrigins.isEmpty)
+        #expect(sparse.deletedProviders.isEmpty && !sparse.legacySecretPending)
+        // A local budget round-trips, and the written file still reads with the earlier reader.
+        let override = ContextBudgetOverride(providerID: provider.id, modelID: "m", contextWindow: 128_000)
+        file.budgetOverrides = [override]
+        let written = try JSONEncoder().encode(file)
+        let again = try JSONDecoder().decode(ProviderFile.self, from: written)
+        #expect(again.providers == [provider] && again.defaultSelection == selection && again.keyOrigins == origins)
+        #expect(again.deletedProviders == [tombstone] && again.legacySecretPending && again.budgetOverrides == [override])
+        let previous = try JSONDecoder().decode(EarlierProviderFileV1.self, from: written)
+        #expect(previous.version == 1 && previous.providers == [provider] && previous.defaultSelection == selection)
+        #expect(previous.keyOrigins == origins && previous.deletedProviders == [tombstone] && previous.legacySecretPending == true)
+        // No default: the key is omitted, as earlier builds wrote it.
+        let root = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(ProviderFile(providers: [provider])))
+                                as? [String: Any])
+        #expect(root["defaultSelection"] == nil && root["version"] as? Int == 1)
+        // Other versions and the unreleased assistant-v1 settings shape are refused, never converted.
+        #expect(throws: ProviderError.unsupportedVersion(2)) {
+            try JSONDecoder().decode(ProviderFile.self, from: earlier(["version": 2]))
+        }
+        let unreleased = #"{"generation":"assistant-v1","schemaVersion":1,"providers":[],"defaultSelection":null,"deletedProviders":[],"keyOrigins":{},"budgetOverrides":[]}"#
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(ProviderFile.self, from: Data(unreleased.utf8)) }
+        file.budgetOverrides = [override, override]
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(ProviderFile.self, from: JSONEncoder().encode(file)) }
+    }
+
+    /// The assistant primary without a model takes the Settings default; an
+    /// existing choice and other conversations are untouched; no history appears.
+    @Test func primaryWithoutModelAdoptsTheSettingsDefault() throws {
+        let configured = ModelSelection(providerID: UUID(), modelID: "m")
+        var file = HistoryFile.initial(selection: nil)
+        let task = ChatSession(selection: nil)
+        file.sessions.append(task)
+        let metadata = file.primary?.metadataUpdatedAt
+        #expect(try file.adoptDefaultSelection(nil) == false && file.primary?.selection == nil)
+        #expect(try file.adoptDefaultSelection(configured))
+        #expect(file.primary?.selection == configured && file.primary?.messages.isEmpty == true)
+        #expect(file.primary?.metadataUpdatedAt == metadata && file.session(task.id)?.selection == nil)
+        let explicit = ModelSelection(providerID: UUID(), modelID: "n")
+        try file.editSession(file.assistant.primarySessionID) { $0.selection = explicit }
+        #expect(try file.adoptDefaultSelection(configured) == false && file.primary?.selection == explicit)
+        #expect(try HistoryCodec.decode(HistoryCodec.encode(file)).primary?.selection == explicit)
     }
 
     @Test func budgetPolicyHardCapsOnlyKnownOrExplicitLimits() throws {
@@ -284,4 +330,14 @@ struct ProviderConfigTests {
         let keys = Set(object?.keys.map { $0.lowercased() } ?? [])
         #expect(keys.allSatisfy { !$0.contains("key") && !$0.contains("secret") && !$0.contains("credential") })
     }
+}
+
+/// The version-1 reader of earlier builds: optional keys may be absent, unknown keys are ignored.
+private struct EarlierProviderFileV1: Decodable {
+    var version: Int
+    var providers: [ProviderRecord]
+    var defaultSelection: ModelSelection?
+    var deletedProviders: [Tombstone]?
+    var legacySecretPending: Bool?
+    var keyOrigins: [String: [String]]?
 }
