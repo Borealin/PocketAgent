@@ -275,6 +275,8 @@ struct MemoryEditorView: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var workspaces: WorkspaceStore
     @State var draft: MemoryDraft
+    /// Replaces the plain edit (remember mode also settles the composer draft).
+    var commit: ((UserMemoryEdit) -> MemoryReceipt?)? = nil
     let done: () -> Void
     @State private var error = ""
 
@@ -318,7 +320,7 @@ struct MemoryEditorView: View {
             .replace(entryID: $0, expectedRevision: draft.expectedRevision, content: draft.content)
         } ?? .add(target: draft.target, scope: draft.scope, content: draft.content, origin: draft.origin,
                   sourceRootPromptIDs: draft.sourceRoots, sourceMessageIDs: draft.sourceMessages)
-        if chat.editMemory(edit) != nil { done() } else { error = chat.notice }
+        if (commit.map { $0(edit) } ?? chat.editMemory(edit)) != nil { done() } else { error = chat.notice }
     }
 }
 

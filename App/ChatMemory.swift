@@ -34,6 +34,35 @@ extension ChatController {
         if ok, let receipt { memoryNotice = receipt.result }
     }
 
+    // MARK: Remember mode (host only)
+
+    var canRemember: Bool {
+        guard storageReady, let selected, isPrimary(selected.id) else { return false }
+        return !selected.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Opens the prefilled editor for the primary composer's text. No run,
+    /// background task, phone action or tool group; an exact `记住：` command
+    /// still saves directly.
+    func beginRemember() {
+        guard canRemember, let session = selected else { return }
+        notice = ""
+        if let command = MemoryCommand.parse(session.draft) { rememberCommand(command, sessionID: session.id); return }
+        rememberRequest = RememberRequest(sessionID: session.id, text: session.draft,
+                                          draftRevision: draftRevisions[session.id, default: 0])
+    }
+
+    /// The editor's explicit save (see `HistoryFile.commitRemember`). A
+    /// failure keeps the draft, the editor and its target/scope choice.
+    func saveRemember(_ edit: UserMemoryEdit, request: RememberRequest) -> MemoryReceipt? {
+        var receipt: MemoryReceipt?
+        let revision = draftRevisions[request.sessionID, default: 0]
+        guard transact({ receipt = try $0.commitRemember(edit, request: request, draftRevision: revision) }) else { return nil }
+        memoryNotice = receipt?.result ?? ""
+        rememberMode = false
+        return receipt
+    }
+
     /// One explicit panel or chip edit, CAS-checked against the shown revision.
     @discardableResult
     func editMemory(_ edit: UserMemoryEdit) -> MemoryReceipt? {
