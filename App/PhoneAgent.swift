@@ -15,6 +15,18 @@ final class TurnStatus {
     var reportedTotal: Int64 = -1
     var unitsChangedAt = Date()
     init(_ value: ExecutionStatus) { self.value = value }
+    /// The one turn deadline: rules, context preparation, model, tools and
+    /// scripts all count from acceptance of the turn's status.
+    var deadline: TurnDeadline { TurnDeadline(start: started, limit: 600) }
+}
+
+/// One shared deadline for a turn; nothing resets it at runtime start.
+nonisolated struct TurnDeadline: Sendable {
+    let start: Date
+    let limit: TimeInterval
+    var end: Date { start.addingTimeInterval(limit) }
+    var remaining: TimeInterval { end.timeIntervalSinceNow }
+    var expired: Bool { remaining <= 0 }
 }
 
 @MainActor
@@ -22,7 +34,7 @@ extension Model {
     func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, clipboardAllowed: Bool, goal: String, images: [AgentImageAttachment],
                            task: BGContinuedProcessingTask, progress: Progress, status: TurnStatus,
                            conversationID: UUID, promptID: UUID,
-                           priorMessages: [AgentTranscriptMessage],
+                           priorMessages: [AgentTranscriptMessage], gates: TurnGates,
                            onEvent: (@MainActor (AgentEvent, ExecutionStatus) -> Void)?,
                            onStatus: (@MainActor (ExecutionStatus) -> Void)?,
                            onFinished: (@MainActor (Bool, String, ExecutionStatus) -> Void)?) {
@@ -49,6 +61,7 @@ extension Model {
             status.reportedTotal = total
         }
         publish("started")
+        let deadline = status.deadline
         job = Task {
             var successful = false
             do {
@@ -58,8 +71,10 @@ extension Model {
                     RulesContext.load(global: WorkspaceStore.globalDirectory, workspace: workspace?.root)
                 }.value
                 let capabilities = ToolCapabilities(workspace: workspace != nil, scripts: ScriptRuntime.shared.isBundled,
-                                                    skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed)
-                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed)
+                                                    skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed,
+                                                    memory: gates.assistant != nil)
+                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed,
+                                          deadline: deadline, effectsBlocked: gates.effectsBlocked)
                 let turn = TurnTools(phone: phone, workspace: workspace, capabilities: capabilities,
                     onScriptStage: { stage in
                         status.value.applyScript(stage); publish("script_" + stage.rawValue); onStatus?(status.value)
@@ -73,28 +88,67 @@ extension Model {
                 var loop = AgentLoopConfiguration()
                 loop.toolExecution = .sequential; loop.maximumToolConcurrency = 1
                 loop.modelRetryPolicy = AgentModelRetryPolicy(delays: [.seconds(1)])
-                let tools = turn.tools()
-                let runtime = AgentRuntime(model: PhoneObservingModel(client: provider, phone: phone),
-                    tools: tools, approval: RegistryApproval(capabilities: capabilities), configuration: loop)
-                activeAgentRuntime = runtime
+                var tools = turn.tools()
+                var prior = priorMessages
+                var systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
+                    capabilities: capabilities, workspaceName: workspace?.name, rules: rules)
+                if let assistant = gates.assistant {
+                    // Primary line: bounded context (summary + same-scope recent
+                    // history), refreshed memory per request, read-only memory tools.
+                    loop.contextPipeline = { _, _, _ in AssistantContextPipeline.pipeline }
+                    loop.contextSnapshot = { _, _ in AgentTurnContextSnapshot() }
+                    tools += assistant.readTools()
+                    systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
+                        capabilities: capabilities, workspaceName: workspace?.name, rules: rules,
+                        memorySlot: AssistantContextPipeline.memorySlot)
+                    status.value.phase = .preparingContext
+                    publish("context_preparation"); onStatus?(status.value)
+                    prior = try await assistant.prepareContext(
+                        prompt: AgentTranscriptMessage(id: promptID, role: .user, text: goal, images: images),
+                        systemPrompt: systemPrompt, tools: tools.map(\.descriptor), provider: provider, deadline: deadline)
+                    if let note = assistant.maintenanceNote { status.value.contextNote = note }
+                    status.value.phase = .connecting
+                    publish("context_ready"); onStatus?(status.value)
+                }
+                let gatedModel = CommitGatedModel(base: provider, barrier: gates.barrier, epoch: gates.epoch,
+                    promptID: promptID, synthetic: { gates.assistant?.syntheticIDs ?? [] },
+                    prepare: { request in
+                        var prepared = try await phone.prepare(request)
+                        if let assistant = gates.assistant { prepared = try await assistant.prepareRequest(prepared) }
+                        // Only the dispatched copy is adapted; tool validation keeps the strict schema.
+                        return ProviderToolSchema.prepare(prepared, format: config.format)
+                    })
+                let approval = CommitGatedApproval(barrier: gates.barrier, epoch: gates.epoch) { request in
+                    switch ToolCatalog.decision(for: request.descriptor.name, capabilities: capabilities) {
+                    case .allow: .allow
+                    case .deny(let reason): .deny(reason)
+                    }
+                }
+                let runtime = AgentRuntime(model: gatedModel, tools: tools, approval: approval, configuration: loop)
                 log("phone_agent_started", ["tools": tools.map { $0.descriptor.name }, "imageInput": config.supportsImages,
                     "workspace": workspace != nil, "globalRules": rules.globalRules != nil,
-                    "projectRules": rules.projectRules != nil, "skills": rules.skills.count])
+                    "projectRules": rules.projectRules != nil, "skills": rules.skills.count,
+                    "assistant": gates.assistant != nil])
+                // Startup permit: durably committed before runtime.start and any
+                // main model or phone request. A failed commit starts nothing.
+                if pendingAgentCancellation { throw CancellationError() }
+                try Task.checkCancellation()
+                try gates.permit()
+                activeAgentRuntime = runtime
                 let watchdog = Task {
-                    do { try await Task.sleep(for: .seconds(600)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(max(0, deadline.remaining))) } catch { return }
                     log("deadline_exceeded"); await runtime.cancel()
                 }
                 defer { watchdog.cancel() }
                 let events = await runtime.start(AgentRunRequest(conversationID: conversationID, promptID: promptID,
                     prompt: goal, promptImages: images, permissionMode: .fullAccess,
-                    systemPrompt: AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
-                        capabilities: capabilities, workspaceName: workspace?.name, rules: rules),
-                    priorMessages: priorMessages))
+                    systemPrompt: systemPrompt, priorMessages: prior))
                 await withTaskCancellationHandler {
                     for await event in events {
                         status.value.apply(event)
                         publish(Self.progressReason(event))
                         onEvent?(event, status.value)
+                        if case .usageUpdated(let usage) = event { gates.assistant?.observeUsage(usage) }
                         switch event {
                         // Default diagnostics omit arguments, results and message text.
                         case .toolStarted(let invocation):
@@ -114,6 +168,9 @@ extension Model {
                 log("phone_agent_completed", ["requests": phone.requests, "toolCalls": phone.calls])
             } catch {
                 successful = false
+                if status.value.failure == nil, !(error is CancellationError) {
+                    status.value.failure = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                }
                 log(Task.isCancelled ? "interrupted" : "failed", Model.errorFields(error))
             }
             task.expirationHandler = nil
@@ -159,37 +216,6 @@ extension Model {
     }
 }
 
-/// Model tool calls follow the registry's decision; ordinary file, network
-/// and script work is not confirmed step by step.
-private struct RegistryApproval: AgentApprovalHandling {
-    let capabilities: ToolCapabilities
-    func authorize(_ request: AgentApprovalRequest, mode: AgentPermissionMode) async -> AgentApprovalDecision {
-        switch ToolCatalog.decision(for: request.descriptor.name, capabilities: capabilities) {
-        case .allow: .allow
-        case .deny(let reason): .deny(reason)
-        }
-    }
-}
-
-private struct PhoneObservingModel: AgentModelStreaming {
-    let client: AgentProviderClient
-    let phone: PhoneExecutor
-    func stream(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, any Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let enriched = try await phone.prepare(request)
-                    let wire = ProviderToolSchema.prepare(enriched, format: phone.config.format)
-                    for try await event in client.stream(wire) { continuation.yield(event) }
-                    continuation.finish()
-                } catch { continuation.finish(throwing: error) }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-    func shouldRetry(after error: any Error) -> Bool { client.shouldRetry(after: error) }
-}
-
 // WDA XML retains visibility and logical frames. Node IDs are local to one
 // observation; no private AX objects or speculative accessibility IDs are exposed.
 final class PhoneTree: NSObject, XMLParserDelegate {
@@ -227,7 +253,10 @@ final class PhoneExecutor {
     let model: Model
     let task: BGContinuedProcessingTask
     let config: RunConfiguration
-    let started = Date()
+    let deadline: TurnDeadline
+    /// Host health and Stop: a non-nil reason refuses every new effect,
+    /// including requests from a running script's phone helper.
+    let effectsBlocked: @MainActor () -> String?
     var base: String?
     let control: any PhoneControl
     let backend: PhoneBackendKind
@@ -246,8 +275,10 @@ final class PhoneExecutor {
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
     private var compactedTaskTitle: String?
-    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool) {
+    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool,
+         deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
+        self.deadline = deadline; self.effectsBlocked = effectsBlocked
         self.clipboardAllowed = clipboardAllowed
         control = backend == .ddi ? DDIControl(model) : WDAControl(model)
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -260,7 +291,7 @@ final class PhoneExecutor {
         } else { taskSurfaceGeometry = nil }
     }
 
-    var remainingTime: TimeInterval { 600 - Date().timeIntervalSince(started) }
+    var remainingTime: TimeInterval { deadline.remaining }
 
     private func acquire() async {
         guard actionInFlight else { actionInFlight = true; return }
@@ -324,7 +355,8 @@ final class PhoneExecutor {
     func checkDeadline() throws {
         try Task.checkCancellation()
         guard !model.pendingAgentCancellation else { throw CancellationError() }
-        guard Date().timeIntervalSince(started) < 600 else { throw failure("本轮已达到 10 分钟上限；请发送新消息继续。") }
+        if let reason = effectsBlocked() { throw failure(reason) }
+        guard !deadline.expired else { throw failure("本轮已达到 10 分钟上限；请发送新消息继续。") }
     }
     func ready() async throws -> String {
         if let base { return base }
@@ -836,7 +868,8 @@ final class TurnTools {
     }
 
     func tools() -> [AnyAgentTool] {
-        ToolCatalog.available(capabilities).map { spec in
+        // Memory tools are AgentKit's native read-only definitions, added by the primary line.
+        ToolCatalog.available(capabilities).filter { $0.kind != .memory }.map { spec in
             AnyAgentTool(descriptor: spec.descriptor) { invocation, _ in try await self.handle(spec, invocation.call) }
         }
     }
@@ -848,6 +881,7 @@ final class TurnTools {
             let content: String
             switch spec.kind {
             case .phone: return try await phone.executeModel(call)
+            case .memory: throw failure("记忆工具由助理主线提供。")
             case .script: return await script(call)
             case .network: content = try await NativeTools.http(args, tool: http, workspace: root)
             case .context:

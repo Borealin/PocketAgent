@@ -1,6 +1,6 @@
 import Foundation
 
-nonisolated enum PhoneBackendKind: String, CaseIterable, Sendable {
+nonisolated enum PhoneBackendKind: String, CaseIterable, Codable, Sendable {
     case ddi, wda
     static let defaultBackend = PhoneBackendKind.ddi
     var label: String { self == .ddi ? "DDI" : "WDA" }

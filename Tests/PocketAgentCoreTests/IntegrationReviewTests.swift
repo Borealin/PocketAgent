@@ -238,11 +238,14 @@ struct KeyOriginTests {
                                          enteredNewKey: false, removeKey: false) == bound)
     }
 
-    @Test func providerFileWithoutBindingsStillDecodesAndUnknownVersionFails() throws {
-        let legacy = #"{"version":1,"providers":[],"deletedProviders":[],"legacySecretPending":false}"#
-        #expect(try JSONDecoder().decode(ProviderFile.self, from: Data(legacy.utf8)).keyOrigins.isEmpty)
-        #expect(throws: ProviderError.unsupportedVersion(2)) {
-            try JSONDecoder().decode(ProviderFile.self, from: Data(#"{"version":2,"providers":[]}"#.utf8))
-        }
+    /// assistant-v1 provider files are strict: earlier shapes and other
+    /// generations/schemas are refused, never converted.
+    @Test func providerFileRefusesEarlierShapesAndUnknownVersions() throws {
+        let earlier = #"{"version":1,"providers":[],"deletedProviders":[],"legacySecretPending":false}"#
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(ProviderFile.self, from: Data(earlier.utf8)) }
+        let current = #"{"generation":"assistant-v1","schemaVersion":2,"providers":[],"defaultSelection":null,"deletedProviders":[],"keyOrigins":{},"budgetOverrides":[]}"#
+        #expect(throws: ProviderError.unsupportedVersion(2)) { try JSONDecoder().decode(ProviderFile.self, from: Data(current.utf8)) }
+        let valid = current.replacingOccurrences(of: #""schemaVersion":2"#, with: #""schemaVersion":1"#)
+        #expect(try JSONDecoder().decode(ProviderFile.self, from: Data(valid.utf8)).keyOrigins.isEmpty)
     }
 }

@@ -18,8 +18,9 @@ nonisolated struct Tombstone: Hashable, Codable, Sendable {
     var deletedAt: Date
 }
 
-nonisolated struct ChatSession: Identifiable, Codable, Sendable {
+nonisolated struct ChatSession: Identifiable, Hashable, Codable, Sendable {
     static let defaultTitle = "新会话"
+    static let primaryTitle = "你的助理"
     var id = UUID()
     var title = ChatSession.defaultTitle
     var messages: [AgentTranscriptMessage] = []
@@ -43,29 +44,46 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
     /// projects are not part of portable sync, so it is never synchronized.
     var workspaceID: UUID?
 
-    init(selection: ModelSelection? = nil) { self.selection = selection }
+    init(id: UUID = UUID(), selection: ModelSelection? = nil, title: String = ChatSession.defaultTitle) {
+        self.id = id; self.selection = selection; self.title = title
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, messages, draft, state, detail, updatedAt, selection, metadataUpdatedAt, attributions, conflictOf
         case attachments, draftAttachments, workspaceID
     }
-    // v1/v2 rows lack the newer fields; real IDs and messages are mandatory.
+    /// assistant-v1 only: every key is required and nullable values are explicit.
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
         messages = try c.decode([AgentTranscriptMessage].self, forKey: .messages)
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? Self.defaultTitle
-        draft = try c.decodeIfPresent(String.self, forKey: .draft) ?? ""
-        state = try c.decodeIfPresent(ChatState.self, forKey: .state) ?? .idle
-        detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
-        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(timeIntervalSince1970: 0)
-        selection = try c.decodeIfPresent(ModelSelection.self, forKey: .selection)
-        metadataUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .metadataUpdatedAt) ?? Date(timeIntervalSince1970: 0)
-        attributions = try c.decodeIfPresent([String: String].self, forKey: .attributions) ?? [:]
-        conflictOf = try c.decodeIfPresent(UUID.self, forKey: .conflictOf)
-        attachments = try c.decodeIfPresent([String: [ChatAttachment]].self, forKey: .attachments) ?? [:]
-        draftAttachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .draftAttachments) ?? []
-        workspaceID = try c.decodeIfPresent(UUID.self, forKey: .workspaceID)
+        draft = try c.decode(String.self, forKey: .draft)
+        state = try c.decode(ChatState.self, forKey: .state)
+        detail = try c.decode(String.self, forKey: .detail)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        selection = try c.nullable(ModelSelection.self, .selection)
+        metadataUpdatedAt = try c.decode(Date.self, forKey: .metadataUpdatedAt)
+        attributions = try c.decode([String: String].self, forKey: .attributions)
+        conflictOf = try c.nullable(UUID.self, .conflictOf)
+        attachments = try c.decode([String: [ChatAttachment]].self, forKey: .attachments)
+        draftAttachments = try c.decode([ChatAttachment].self, forKey: .draftAttachments)
+        workspaceID = try c.nullable(UUID.self, .workspaceID)
+    }
+    func encode(to encoder: any Encoder) throws { try encode(to: encoder, messagesPlaceholder: nil) }
+
+    /// Shared by the normal encoding and the incremental writer, which
+    /// substitutes a sentinel string for `messages` (same keys, no drift).
+    func encode(to encoder: any Encoder, messagesPlaceholder: String?) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(title, forKey: .title)
+        if let messagesPlaceholder { try c.encode(messagesPlaceholder, forKey: .messages) }
+        else { try c.encode(messages, forKey: .messages) }
+        try c.encode(draft, forKey: .draft); try c.encode(state, forKey: .state); try c.encode(detail, forKey: .detail)
+        try c.encode(updatedAt, forKey: .updatedAt); try c.encode(selection, forKey: .selection)
+        try c.encode(metadataUpdatedAt, forKey: .metadataUpdatedAt); try c.encode(attributions, forKey: .attributions)
+        try c.encode(conflictOf, forKey: .conflictOf); try c.encode(attachments, forKey: .attachments)
+        try c.encode(draftAttachments, forKey: .draftAttachments); try c.encode(workspaceID, forKey: .workspaceID)
     }
 
     func attachments(of message: AgentTranscriptMessage) -> [ChatAttachment] {
@@ -79,103 +97,163 @@ nonisolated struct ChatSession: Identifiable, Codable, Sendable {
 
     /// History never stores image bytes delivered through run events: user
     /// photos are file-backed under `attachments`, and live phone screenshots
-    /// belong only to the request that carried them.
+    /// belong only to the request that carried them. Replay snapshots are
+    /// request-only state as well.
     static func forHistory(_ message: AgentTranscriptMessage) -> AgentTranscriptMessage {
         var message = message
         message.images = []
+        message.contextSnapshot = nil
         return message
     }
 }
 
-nonisolated struct HistoryFile: Codable, Sendable {
-    static let currentVersion = 3
-    var version = HistoryFile.currentVersion
+/// The one atomic local history file of the assistant-v1 namespace.
+nonisolated struct HistoryFile: Hashable, Codable, Sendable {
+    static let generationTag = "assistant-v1"
+    static let currentSchema = 1
+    var generation: String
+    var schemaVersion: Int
+    /// Key required, value may be null.
     var selectedID: UUID?
     var sessions: [ChatSession]
-    var deletedSessions: [Tombstone] = []
+    var deletedSessions: [Tombstone]
+    var assistant: AssistantState
 
-    init(selectedID: UUID?, sessions: [ChatSession], deletedSessions: [Tombstone]) {
-        self.selectedID = selectedID; self.sessions = sessions; self.deletedSessions = deletedSessions
+    /// A new namespace: one empty primary line and every required field, created in one write.
+    static func initial(selection: ModelSelection?, now: Date = Date()) -> HistoryFile {
+        var primary = ChatSession(selection: selection, title: ChatSession.primaryTitle)
+        primary.updatedAt = now
+        return HistoryFile(generation: generationTag, schemaVersion: currentSchema, selectedID: primary.id,
+                           sessions: [primary], deletedSessions: [], assistant: AssistantState(primarySessionID: primary.id))
     }
-    private enum CodingKeys: String, CodingKey { case version, selectedID, sessions, deletedSessions }
+
+    init(generation: String, schemaVersion: Int, selectedID: UUID?, sessions: [ChatSession],
+         deletedSessions: [Tombstone], assistant: AssistantState) {
+        self.generation = generation; self.schemaVersion = schemaVersion; self.selectedID = selectedID
+        self.sessions = sessions; self.deletedSessions = deletedSessions; self.assistant = assistant
+    }
+
+    private enum CodingKeys: String, CodingKey { case generation, schemaVersion, selectedID, sessions, deletedSessions, assistant }
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decode(Int.self, forKey: .version)
-        selectedID = try c.decodeIfPresent(UUID.self, forKey: .selectedID)
+        generation = try c.decode(String.self, forKey: .generation)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        guard generation == Self.generationTag else { throw HistoryError.unsupportedGeneration(generation) }
+        guard schemaVersion == Self.currentSchema else { throw HistoryError.unsupportedSchema(schemaVersion) }
+        selectedID = try c.nullable(UUID.self, .selectedID)
         sessions = try c.decode([ChatSession].self, forKey: .sessions)
-        deletedSessions = try c.decodeIfPresent([Tombstone].self, forKey: .deletedSessions) ?? []
+        deletedSessions = try c.decode([Tombstone].self, forKey: .deletedSessions)
+        assistant = try c.decode(AssistantState.self, forKey: .assistant)
     }
+    func encode(to encoder: any Encoder) throws { try encode(to: encoder, sessionsPlaceholder: nil) }
+
+    func encode(to encoder: any Encoder, sessionsPlaceholder: String?) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(generation, forKey: .generation); try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(selectedID, forKey: .selectedID)
+        if let sessionsPlaceholder { try c.encode(sessionsPlaceholder, forKey: .sessions) }
+        else { try c.encode(sessions, forKey: .sessions) }
+        try c.encode(deletedSessions, forKey: .deletedSessions); try c.encode(assistant, forKey: .assistant)
+    }
+
+    func session(_ id: UUID) -> ChatSession? { sessions.first { $0.id == id } }
+    func sessionIndex(_ id: UUID) -> Int? { sessions.firstIndex { $0.id == id } }
+    var primary: ChatSession? { session(assistant.primarySessionID) }
 }
 
 nonisolated enum HistoryError: LocalizedError, Equatable {
-    case unreadable
-    case unsupportedVersion(Int)
-    case duplicateSessionIDs
+    case unreadable(String)
+    case unsupportedGeneration(String)
+    case unsupportedSchema(Int)
+    case invalid(String)
     var errorDescription: String? {
         switch self {
-        case .unreadable: "无效的会话文件"
-        case .unsupportedVersion(let version): "不支持的会话文件版本 \(version)"
-        case .duplicateSessionIDs: "会话文件包含重复会话 ID"
+        case .unreadable(let detail): "历史文件无法读取：\(detail)"
+        case .unsupportedGeneration(let generation): "不支持的历史格式 \(generation)；本版本只读取 assistant-v1。"
+        case .unsupportedSchema(let version): "不支持的历史结构版本 \(version)"
+        case .invalid(let detail): "历史文件内容无效：\(detail)"
         }
     }
 }
 
-nonisolated enum HistoryMigration {
+/// Strict assistant-v1 codec: one generation and schema, no historical
+/// decoder, no field backfill, no automatic repair or deduplication.
+nonisolated enum HistoryCodec {
     static let interruptedDetail = "App 上次退出时任务未完成；发送新消息继续，不会自动重放操作。"
 
-    /// Decodes any supported history version into the current layout. Only the
-    /// removed counter demo mode is discarded; real sessions keep their IDs and
-    /// messages. Sessions from files older than v3 adopt `legacySelection` so
-    /// they keep using the migrated provider. Unfinished work becomes
-    /// interrupted and is never replayed.
-    static func decode(_ data: Data, legacySelection: ModelSelection?) throws -> HistoryFile {
-        guard var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = root["version"] as? Int else { throw HistoryError.unreadable }
-        guard (1...HistoryFile.currentVersion).contains(version) else { throw HistoryError.unsupportedVersion(version) }
-        var data = data
-        if version == 1 {
-            guard let rows = root["sessions"] as? [[String: Any]] else { throw HistoryError.unreadable }
-            root["sessions"] = rows.filter { $0["mode"] as? String != "counter" }
-            data = try JSONSerialization.data(withJSONObject: root)
+    /// Pure read: decoding never changes run state; the owner's recovery
+    /// transaction does that and publishes only after it is saved.
+    static func decode(_ data: Data) throws -> HistoryFile {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HistoryError.unreadable("不是 JSON 对象")
         }
-        var file = try JSONDecoder().decode(HistoryFile.self, from: data)
-        guard Set(file.sessions.map(\.id)).count == file.sessions.count else { throw HistoryError.duplicateSessionIDs }
-        for i in file.sessions.indices {
-            file.sessions[i].messages = repairedToolOrder(file.sessions[i].messages)
-            if version < HistoryFile.currentVersion, file.sessions[i].selection == nil {
-                file.sessions[i].selection = legacySelection
-            }
-            if [.running, .queued, .cancelling].contains(file.sessions[i].state) {
-                file.sessions[i].state = .interrupted
-                file.sessions[i].detail = interruptedDetail
-            }
-        }
-        file.version = HistoryFile.currentVersion
+        guard let generation = root["generation"] as? String else { throw HistoryError.unsupportedGeneration("缺少 generation") }
+        guard generation == HistoryFile.generationTag else { throw HistoryError.unsupportedGeneration(generation) }
+        guard let schema = root["schemaVersion"] as? Int else { throw HistoryError.unreadable("缺少 schemaVersion") }
+        guard schema == HistoryFile.currentSchema else { throw HistoryError.unsupportedSchema(schema) }
+        let file: HistoryFile
+        do { file = try JSONDecoder().decode(HistoryFile.self, from: data) }
+        catch let error as HistoryError { throw error }
+        catch { throw HistoryError.unreadable(String(String(describing: error).prefix(240))) }
+        try validate(file)
         return file
     }
 
     static func encode(_ file: HistoryFile) throws -> Data {
-        var file = file
-        file.version = HistoryFile.currentVersion
+        try validate(file)
         return try JSONEncoder().encode(file)
     }
 
-    /// Places each tool result directly after the assistant message that
-    /// called it. Event order is otherwise authoritative; dates are not sorted.
-    static func repairedToolOrder(_ messages: [AgentTranscriptMessage]) -> [AgentTranscriptMessage] {
-        let calls = Set(messages.flatMap { $0.toolCalls.map(\.id) })
-        let results = Dictionary(grouping: messages.filter { $0.role == .tool && $0.toolCallID != nil },
-                                 by: { $0.toolCallID! })
-        var ordered: [AgentTranscriptMessage] = []
-        var emitted: Set<UUID> = []
-        for message in messages {
-            if message.role == .tool, let call = message.toolCallID, calls.contains(call) { continue }
-            guard emitted.insert(message.id).inserted else { continue }
-            ordered.append(message)
-            for call in message.toolCalls {
-                for result in results[call.id] ?? [] where emitted.insert(result.id).inserted { ordered.append(result) }
+    /// Structural invariants of the current format. Different conflict copies
+    /// may share message IDs; a duplicate inside one session may not.
+    static func validate(_ file: HistoryFile) throws {
+        guard file.generation == HistoryFile.generationTag else { throw HistoryError.unsupportedGeneration(file.generation) }
+        guard file.schemaVersion == HistoryFile.currentSchema else { throw HistoryError.unsupportedSchema(file.schemaVersion) }
+        var sessionIDs: Set<UUID> = []
+        var allMessages: Set<UUID> = []
+        for session in file.sessions {
+            guard sessionIDs.insert(session.id).inserted else { throw HistoryError.invalid("重复会话 ID") }
+            var ids: Set<UUID> = []
+            for message in session.messages {
+                guard ids.insert(message.id).inserted else { throw HistoryError.invalid("会话内重复消息 ID") }
+            }
+            allMessages.formUnion(ids)
+        }
+        guard Set(file.deletedSessions.map(\.id)).count == file.deletedSessions.count else {
+            throw HistoryError.invalid("重复删除记录")
+        }
+        let assistant = file.assistant
+        let ledger = assistant.memory
+        guard Set(ledger.active.map(\.id)).count == ledger.active.count else { throw HistoryError.invalid("重复记忆 ID") }
+        guard Set(ledger.tombstones.map(\.id)).count == ledger.tombstones.count else { throw HistoryError.invalid("重复遗忘记录") }
+        guard Set(ledger.active.map(\.id)).isDisjoint(with: ledger.tombstones.map(\.entryID)) else {
+            throw HistoryError.invalid("记忆同时处于有效和已遗忘状态")
+        }
+        guard Set(assistant.compactions.map(\.id)).count == assistant.compactions.count else { throw HistoryError.invalid("重复摘要 ID") }
+        guard Set(assistant.memoryReceipts.map(\.id)).count == assistant.memoryReceipts.count,
+              assistant.memoryReceipts.count <= MemoryReceipt.retained else { throw HistoryError.invalid("记忆回执无效") }
+        if let pending = assistant.pendingNext {
+            guard let session = file.session(pending.sessionID) else { throw HistoryError.invalid("待处理请求指向不存在的会话") }
+            switch pending.prompt {
+            case .detached(let message, let attachments):
+                guard !allMessages.contains(message.id) else { throw HistoryError.invalid("待处理请求与历史消息重复所有权") }
+                try validateDetached(message, attachments: attachments)
+            case .promoted(let id):
+                guard session.messages.contains(where: { $0.id == id }) else { throw HistoryError.invalid("已提升请求不在历史中") }
+                guard assistant.scopeIndex.scopedRoot(id)?.dispatchAuthorized == false else {
+                    throw HistoryError.invalid("已授权的请求仍保留提升回执")
+                }
             }
         }
-        return ordered
+    }
+
+    /// Detached prompts carry no request payloads: no image bytes, replay
+    /// snapshot or provider items. Attachments are file references.
+    static func validateDetached(_ message: AgentTranscriptMessage, attachments: [ChatAttachment]) throws {
+        guard message.role == .user, message.images.isEmpty, message.contextSnapshot == nil, message.providerItems.isEmpty,
+              message.contextAttachments.isEmpty, message.toolCalls.isEmpty,
+              attachments.count <= ChatAttachment.maxPerMessage else {
+            throw HistoryError.invalid("待处理请求包含不允许的载荷")
+        }
     }
 }

@@ -7,6 +7,9 @@ import UniformTypeIdentifiers
 /// picked (typically in iCloud Drive). No ubiquity container entitlement.
 enum FolderSync {
     static let fileName = "PocketAgent-Sync.json"
+    /// assistant-v1 data lives in its own subfolder; earlier sync files beside
+    /// it are never read, merged or removed.
+    static let directoryName = AssistantNamespace.directoryName
 
     struct Outcome: Sendable {
         var plan: SyncPlan
@@ -19,8 +22,21 @@ enum FolderSync {
         guard folder.startAccessingSecurityScopedResource() else { throw failure("无法访问同步文件夹，请重新选择。") }
         defer { folder.stopAccessingSecurityScopedResource() }
         let refreshed = stale ? try? folder.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) : nil
-        let file = folder.appendingPathComponent(fileName)
-        let placeholder = folder.appendingPathComponent(".\(fileName).icloud")
+        let directory = folder.appendingPathComponent(directoryName, isDirectory: true)
+        var directoryError: NSError?
+        var created: Result<Void, any Error> = .success(())
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: directory, options: .forMerging, error: &directoryError) { target in
+            created = Result {
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory) {
+                    guard isDirectory.boolValue else { throw failure("同步位置中的 \(directoryName) 不是文件夹。") }
+                } else { try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false) }
+            }
+        }
+        if let directoryError { throw directoryError }
+        try created.get()
+        let file = directory.appendingPathComponent(fileName)
+        let placeholder = directory.appendingPathComponent(".\(fileName).icloud")
         if !FileManager.default.fileExists(atPath: file.path), FileManager.default.fileExists(atPath: placeholder.path) {
             try? FileManager.default.startDownloadingUbiquitousItem(at: file)
             throw SyncError.notDownloaded
@@ -174,7 +190,9 @@ final class SyncCoordinator: ObservableObject {
             status = "本地数据读取失败，已暂停同步以免覆盖。"; return
         }
         let connection = generation
-        let deferred = chat.activeSessionIDs
+        // Active jobs, the pending request's session and launch work are
+        // deferred now and checked again when the result is applied.
+        let deferred = chat.syncDeferred
         let base = PortableSnapshot(sessions: chat.sessions, sessionTombstones: chat.deletedSessions,
                                     providers: providers.providers, providerTombstones: providers.deletedProviders)
         status = "正在同步…"
@@ -185,8 +203,7 @@ final class SyncCoordinator: ObservableObject {
             guard connection == generation else { return }
             if let refreshed = outcome.refreshedBookmark { try? storeBookmark(refreshed) }
             // Never executes synced work: merged sessions arrive idle or keep local state.
-            let skipped = chat.applySync(merged: outcome.plan.merged, base: base,
-                                       deferred: deferred.union(chat.activeSessionIDs))
+            let skipped = chat.applySync(merged: outcome.plan.merged, base: base, deferred: deferred)
             providers.applySync(merged: outcome.plan.merged, base: base)
             let time = Date().formatted(date: .omitted, time: .shortened)
             status = skipped > 0 ? "已同步 \(time)；\(skipped) 个会话在本机任务结束后再合并。" : "已同步 \(time)。"

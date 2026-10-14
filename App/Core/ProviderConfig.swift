@@ -49,36 +49,57 @@ nonisolated struct ProviderRecord: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+/// assistant-v1 provider file: strict keys, explicit nulls, no legacy
+/// endpoint/model/Keychain-ID migration. Budget overrides are local only.
 nonisolated struct ProviderFile: Codable, Sendable {
-    static let currentVersion = 1
-    var version = ProviderFile.currentVersion
+    static let generationTag = HistoryFile.generationTag
+    static let currentSchema = 1
+    var generation = ProviderFile.generationTag
+    var schemaVersion = ProviderFile.currentSchema
     var providers: [ProviderRecord] = []
-    /// Local only: selection given to new conversations.
+    /// Local only: selection given to new conversations. Key required, may be null.
     var defaultSelection: ModelSelection?
     var deletedProviders: [Tombstone] = []
-    /// Legacy secret copy did not complete; retried on the next launch.
-    var legacySecretPending = false
     /// Provider ID → origins its local key was entered for. A key is never
     /// sent to an origin outside this set (e.g. after a synced URL change).
     var keyOrigins: [String: [String]] = [:]
+    /// Local context budget settings per provider/model; never synchronized.
+    var budgetOverrides: [ContextBudgetOverride] = []
 
     init(providers: [ProviderRecord] = [], defaultSelection: ModelSelection? = nil, deletedProviders: [Tombstone] = [],
-         legacySecretPending: Bool = false, keyOrigins: [String: [String]] = [:]) {
+         keyOrigins: [String: [String]] = [:], budgetOverrides: [ContextBudgetOverride] = []) {
         self.providers = providers; self.defaultSelection = defaultSelection; self.deletedProviders = deletedProviders
-        self.legacySecretPending = legacySecretPending; self.keyOrigins = keyOrigins
+        self.keyOrigins = keyOrigins; self.budgetOverrides = budgetOverrides
     }
     private enum CodingKeys: String, CodingKey {
-        case version, providers, defaultSelection, deletedProviders, legacySecretPending, keyOrigins
+        case generation, schemaVersion, providers, defaultSelection, deletedProviders, keyOrigins, budgetOverrides
     }
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decode(Int.self, forKey: .version)
-        guard version == ProviderFile.currentVersion else { throw ProviderError.unsupportedVersion(version) }
+        generation = try c.decode(String.self, forKey: .generation)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        guard generation == Self.generationTag else { throw ProviderError.unsupportedFormat(generation) }
+        guard schemaVersion == Self.currentSchema else { throw ProviderError.unsupportedVersion(schemaVersion) }
         providers = try c.decode([ProviderRecord].self, forKey: .providers)
-        defaultSelection = try c.decodeIfPresent(ModelSelection.self, forKey: .defaultSelection)
-        deletedProviders = try c.decodeIfPresent([Tombstone].self, forKey: .deletedProviders) ?? []
-        legacySecretPending = try c.decodeIfPresent(Bool.self, forKey: .legacySecretPending) ?? false
-        keyOrigins = try c.decodeIfPresent([String: [String]].self, forKey: .keyOrigins) ?? [:]
+        defaultSelection = try c.nullable(ModelSelection.self, .defaultSelection)
+        deletedProviders = try c.decode([Tombstone].self, forKey: .deletedProviders)
+        keyOrigins = try c.decode([String: [String]].self, forKey: .keyOrigins)
+        budgetOverrides = try c.decode([ContextBudgetOverride].self, forKey: .budgetOverrides)
+        guard Set(providers.map(\.id)).count == providers.count else { throw ProviderError.invalidFile("重复服务商 ID") }
+        guard Set(budgetOverrides.map { "\($0.providerID.uuidString)/\($0.modelID)" }).count == budgetOverrides.count else {
+            throw ProviderError.invalidFile("重复上下文预算设置")
+        }
+    }
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(generation, forKey: .generation); try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(providers, forKey: .providers); try c.encode(defaultSelection, forKey: .defaultSelection)
+        try c.encode(deletedProviders, forKey: .deletedProviders); try c.encode(keyOrigins, forKey: .keyOrigins)
+        try c.encode(budgetOverrides, forKey: .budgetOverrides)
+    }
+
+    func budgetOverride(_ selection: ModelSelection) -> ContextBudgetOverride? {
+        budgetOverrides.first { $0.providerID == selection.providerID && $0.modelID == selection.modelID }
     }
 }
 
@@ -88,6 +109,8 @@ nonisolated enum ProviderError: LocalizedError, Equatable {
     case noSelection, providerDeleted, providerDisabled(String), modelMissing(String, String)
     case keyOriginChanged(String)
     case unsupportedVersion(Int)
+    case unsupportedFormat(String)
+    case invalidFile(String)
     var errorDescription: String? {
         switch self {
         case .missingName: "请填写服务商名称。"
@@ -101,6 +124,8 @@ nonisolated enum ProviderError: LocalizedError, Equatable {
         case .providerDisabled(let name): "服务商 \(name) 已停用，请启用或重新选择模型。"
         case .modelMissing(let name, let model): "服务商 \(name) 中没有模型 \(model)，请重新选择。"
         case .unsupportedVersion(let version): "不支持的服务商文件版本 \(version)"
+        case .unsupportedFormat(let generation): "不支持的服务商文件格式 \(generation)；本版本只读取 assistant-v1。"
+        case .invalidFile(let detail): "服务商文件内容无效：\(detail)"
         case .keyOriginChanged(let name):
             "服务商 \(name) 的地址已改为本机 Key 未确认的主机；为避免把 API Key 发往该地址，请在模型服务中重新输入 Key 或删除 Key。"
         }
@@ -149,6 +174,8 @@ nonisolated struct RunConfiguration: Sendable, CustomStringConvertible, CustomDe
     let modelID: String
     let supportsImages: Bool
     let secret: String
+    /// Context budget frozen with the turn; local override or unknown-window soft target.
+    var budget: ContextBudgetPolicy = .unknown
 
     /// Model first, then the provider. Recorded as attribution for new
     /// replies; attributions already in history are shown verbatim.
@@ -168,7 +195,8 @@ nonisolated struct RunConfiguration: Sendable, CustomStringConvertible, CustomDe
     /// stored key is refused for any other origin.
     static func resolve(_ selection: ModelSelection?, providers: [ProviderRecord],
                         secret: (UUID) throws -> String?,
-                        boundOrigins: (UUID) -> Set<String>?) throws -> RunConfiguration {
+                        boundOrigins: (UUID) -> Set<String>?,
+                        budgetOverride: ContextBudgetOverride? = nil) throws -> RunConfiguration {
         guard let selection else { throw ProviderError.noSelection }
         guard let provider = providers.first(where: { $0.id == selection.providerID }) else { throw ProviderError.providerDeleted }
         guard provider.isEnabled else { throw ProviderError.providerDisabled(provider.name) }
@@ -182,7 +210,8 @@ nonisolated struct RunConfiguration: Sendable, CustomStringConvertible, CustomDe
         }
         return RunConfiguration(providerID: valid.id, providerName: valid.name, format: valid.format,
                                 inferenceURL: valid.inferenceURL, modelID: model.id,
-                                supportsImages: model.supportsImages, secret: key)
+                                supportsImages: model.supportsImages, secret: key,
+                                budget: try ContextBudgetPolicy.resolve(budgetOverride))
     }
 }
 
@@ -199,35 +228,5 @@ nonisolated enum KeyBinding {
         if let bound, saved.credentialOrigins.isSubset(of: bound) { return bound }
         if let stored, stored.credentialOrigins != saved.credentialOrigins { return saved.credentialOrigins }
         throw ProviderError.keyOriginChanged(saved.name)
-    }
-}
-
-/// One-time migration of the single-provider settings stored by earlier builds.
-nonisolated enum LegacyProviderMigration {
-    /// Fixed so a re-run, or another device migrating the same settings,
-    /// produces the same provider instead of a duplicate.
-    static let providerID = UUID(uuidString: "5C0B7E57-1D2A-4F3B-9E6C-0A8F4D2B7C11")!
-    static let defaultKeychainService = "PocketAgent.ModelAPI"
-    static let keychainAccount = "deepseek"
-
-    /// `Info.plist` may name a different legacy service; blank means default.
-    static func keychainService(info: String?) -> String {
-        let value = info?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return value.isEmpty || value.hasPrefix("$(") ? defaultKeychainService : value
-    }
-
-    /// Earlier builds spoke the Responses format with image input.
-    static func provider(endpoint: String?, model: String?, now: Date = Date()) -> ProviderRecord? {
-        guard let endpoint = endpoint?.trimmingCharacters(in: .whitespacesAndNewlines), !endpoint.isEmpty,
-              let model = model?.trimmingCharacters(in: .whitespacesAndNewlines), !model.isEmpty,
-              let valid = try? EndpointValidation.validate(endpoint, field: "endpoint"),
-              let host = URLComponents(string: valid)?.host else { return nil }
-        return ProviderRecord(id: providerID, name: host, format: .responses, isEnabled: true,
-                              inferenceURL: valid, modelsBaseURL: "",
-                              models: [ProviderModelEntry(id: model, supportsImages: true)], updatedAt: now)
-    }
-
-    static func selection(for provider: ProviderRecord) -> ModelSelection? {
-        provider.models.first.map { ModelSelection(providerID: provider.id, modelID: $0.id) }
     }
 }
