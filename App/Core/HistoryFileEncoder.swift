@@ -2,8 +2,9 @@ import AgentKit
 import Foundation
 
 /// Produces the same JSON value as `HistoryCodec.encode` (key order may
-/// differ) while re-encoding only messages that changed since the previous
-/// write. History stays one atomic file in the current format.
+/// differ) while re-encoding only messages and scope-index rows (membership,
+/// roots) that changed since the previous write. History stays one atomic
+/// file in the current format.
 ///
 /// Splicing is structural, not a search for a field name: each shell is
 /// encoded with a fresh per-write sentinel string in place of its message or
@@ -18,7 +19,12 @@ nonisolated final class HistoryFileEncoder {
         var data: Data
     }
     private var cache: [UUID: Cached] = [:]
+    /// Encoded scope-index rows, reused while the row is unchanged.
+    private var memberRows: [UUID: (root: UUID, data: Data)] = [:]
+    private var rootRows: [UUID: (root: ScopedRoot, key: String, data: Data)] = [:]
     private let encoder = JSONEncoder()
+    /// Encodes the file shell with the scope-index row arrays as placeholders.
+    private let shellEncoder = JSONEncoder()
 
     init() {}
 
@@ -69,9 +75,53 @@ nonisolated final class HistoryFileEncoder {
             }
         }
         if cache.count > live.count { cache = cache.filter { live.contains($0.key) } }
-        let shell = try encoder.encode(FileShell(file: file, sentinel: sentinel))
+        let rows = sentinel + "-rows"
+        shellEncoder.userInfo[ScopeIndex.rowsPlaceholderKey] = rows
+        var shell = try shellEncoder.encode(FileShell(file: file, sentinel: sentinel))
+        let index = file.assistant.scopeIndex
+        if let members = Self.splice(shell, key: "messageRoots", sentinel: rows + "-members", elements: try memberElements(index)),
+           let rooted = Self.splice(members, key: "roots", sentinel: rows + "-roots", elements: try rootElements(index)) {
+            shell = rooted
+        } else {
+            shell = try encoder.encode(FileShell(file: file, sentinel: sentinel))
+        }
         if let spliced = Self.splice(shell, key: "sessions", sentinel: sentinel, elements: sessions) { return spliced }
         return try encoder.encode(file)
+    }
+
+    /// Membership rows in the index's own order (order carries no meaning).
+    private func memberElements(_ index: ScopeIndex) throws -> [Data] {
+        var parts: [Data] = []
+        parts.reserveCapacity(index.messageRoots.count)
+        for (message, root) in index.messageRoots {
+            if let cached = memberRows[message], cached.root == root {
+                parts.append(cached.data)
+            } else {
+                let data = try encoder.encode(MessageRootRow(messageID: message, rootPromptID: root))
+                memberRows[message] = (root, data)
+                parts.append(data)
+            }
+        }
+        if memberRows.count > index.messageRoots.count { memberRows = memberRows.filter { index.messageRoots[$0.key] != nil } }
+        return parts
+    }
+
+    /// Root rows sorted by root ID string, as `ScopeIndex` writes them.
+    private func rootElements(_ index: ScopeIndex) throws -> [Data] {
+        var rows: [(key: String, data: Data)] = []
+        rows.reserveCapacity(index.roots.count)
+        for (id, root) in index.roots {
+            if let cached = rootRows[id], cached.root == root {
+                rows.append((cached.key, cached.data))
+            } else {
+                let key = id.uuidString
+                let data = try encoder.encode(ScopedRootRow(rootPromptID: id, root: root))
+                rootRows[id] = (root, key, data)
+                rows.append((key, data))
+            }
+        }
+        if rootRows.count > index.roots.count { rootRows = rootRows.filter { index.roots[$0.key] != nil } }
+        return rows.sorted { $0.key < $1.key }.map(\.data)
     }
 
     /// The session with `messages` replaced by the sentinel string.

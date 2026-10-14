@@ -228,19 +228,32 @@ nonisolated struct ScopeIndex: Hashable, Sendable, Codable {
         guard processed == roots.count else { throw StrictCodingError.invalid("依赖图存在环") }
     }
 
+    /// Set by `HistoryFileEncoder`: the membership and root arrays are written
+    /// as `<value>-members` / `<value>-roots` and spliced from cached rows.
+    static let rowsPlaceholderKey = CodingUserInfoKey(rawValue: "pocketagent.scopeIndexRowsPlaceholder")!
+
     func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
         try c.encode(dependencyRevision, forKey: .dependencyRevision)
-        // Row order carries no meaning; the decoder rejects duplicates.
-        try c.encode(messageRoots.map { MessageRootRow(messageID: $0.key, rootPromptID: $0.value) }, forKey: .messageRoots)
-        try c.encode(roots.map { ScopedRootRow(rootPromptID: $0.key, root: $0.value) }
-            .sorted { $0.rootPromptID.uuidString < $1.rootPromptID.uuidString }, forKey: .roots)
+        if let placeholder = encoder.userInfo[Self.rowsPlaceholderKey] as? String {
+            try c.encode(placeholder + "-members", forKey: .messageRoots)
+            try c.encode(placeholder + "-roots", forKey: .roots)
+        } else {
+            // Row order carries no meaning; the decoder rejects duplicates.
+            try c.encode(messageRoots.map { MessageRootRow(messageID: $0.key, rootPromptID: $0.value) }, forKey: .messageRoots)
+            try c.encode(sortedRootRows, forKey: .roots)
+        }
         try c.encode(Self.rows(maskedRoots), forKey: .maskedRoots)
         try c.encode(Self.rows(maskedMessages), forKey: .maskedMessages)
     }
+    /// Root rows by root ID string; each key is formatted once, not per comparison.
+    var sortedRootRows: [ScopedRootRow] {
+        roots.map { (key: $0.key.uuidString, row: ScopedRootRow(rootPromptID: $0.key, root: $0.value)) }
+            .sorted { $0.key < $1.key }.map(\.row)
+    }
     private static func rows(_ map: [UUID: Set<UUID>]) -> [MaskRow] {
-        map.flatMap { key, values in values.map { MaskRow(id: key, tombstoneID: $0) } }
-            .sorted { ($0.id.uuidString, $0.tombstoneID.uuidString) < ($1.id.uuidString, $1.tombstoneID.uuidString) }
+        map.flatMap { key, values in values.map { (key: (key.uuidString, $0.uuidString), row: MaskRow(id: key, tombstoneID: $0)) } }
+            .sorted { $0.key < $1.key }.map(\.row)
     }
 
     // MARK: Queries
