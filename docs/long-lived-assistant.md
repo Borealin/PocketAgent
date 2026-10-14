@@ -292,7 +292,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 **已决定采用“默认你的助理入口＋现有 AgentKit＋本地长期记忆”。** 本版本独立任务保留在任务/历史区，主线固定身份，模型每轮runtime仍可销毁。长期连续性由原始消息、有效记忆、摘要和按需检索承接；运行继续沿用一个活动槽、串行手机队列与现有DDI/WDA。
 
-ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。新格式从空主线开始，不自动接收旧版本数据；历史与provider配置只支持当前格式，portable同步用新目录与generation隔离旧客户端。新增文件层主指针、scope/已知依赖、记忆账本、摘要及一个pendingNext；显式记忆由宿主提交，模型只有只读记忆/历史工具。启动许可、轮内保存屏障和遗忘撤销都在实际模型/工具边界落实。纠正记忆只刷新未来请求；显式遗忘才按已知依赖排除历史，并在最终操作面板显示连带影响。首版是单设备本机MVP；跨设备统一助理、自动学习、并行与全天候工作后置。
+ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。新格式从空主线开始，不自动接收旧版本数据；历史只支持当前格式，portable同步用新目录与generation隔离旧客户端；模型服务设置不在新命名空间内，原地复用App通用的version-1设置文件。新增文件层主指针、scope/已知依赖、记忆账本、摘要及一个pendingNext；显式记忆由宿主提交，模型只有只读记忆/历史工具。启动许可、轮内保存屏障和遗忘撤销都在实际模型/工具边界落实。纠正记忆只刷新未来请求；显式遗忘才按已知依赖排除历史，并在最终操作面板显示连带影响。首版是单设备本机MVP；跨设备统一助理、自动学习、并行与全天候工作后置。
 
 | 层 | 复用 | 新增 / 必要改造 |
 |---|---|---|
@@ -549,7 +549,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 |---|---|---|
 | Core 测试 | 通过 | 257 项/55 组（macOS 主机，mock transport）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响） |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
-| 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理在设备上经 `consume` 完成并CAS提交（两次，第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume） |
+| 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 代码ae324d3的开发包上：主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；第一次真实整理。代码841d3c0的最终开发包上：未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理经 `consume` 完成并CAS提交（第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume） |
 | 设备未覆盖 | 未验证 | 改模型后召回（设备只配置了1个模型）；手机动作与fresh observe（本机VPN隧道未连接，observe_screen返回失败、未执行动作）；超预算摘要拒发、维护中遗忘、150/600秒期限只在主机验证 |
 | 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
 | bounded streaming 维护 | 主机＋设备 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备上一次真实整理成功 |
@@ -584,14 +584,14 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 ## 4. 资源与交付计划
 
-按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施，四项代码均已完成并由 Core 测试覆盖。MVP 交付仍以指定设备验收为门禁；依赖真实模型的设备场景见下表依赖列。
+按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施，四项代码均已完成并由 Core 测试覆盖，指定设备（iPhone 12 mini）上的物理UI与真实模型场景已通过；设备未覆盖项见第 3 节“验证范围”。
 
 | 阶段 / 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
-| P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；Core/构建通过，设备部分验证；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
-| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；AgentKit fork已固定；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
-| P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1/P2、完整来源注册与撤销 |
-| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1–P3、指定设备与长历史样本 |
+| P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；Core/构建与设备验证通过；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
+| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备真实整理通过，超预算拒发/150秒期限仅主机验证；AgentKit fork已固定；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
+| P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备记忆/遗忘/中文检索通过，改模型后召回未验证；2026-10-14 | P1/P2、完整来源注册与撤销 |
+| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备pending/Stop/恢复/跨项目继续通过，手机动作（VPN未连接）与设备长历史未验证；2026-10-14 | P1–P3、指定设备与长历史样本 |
 | 自动学习候选、普通聊天前台宿主 | PocketAgent | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | MVP后续 | 显式记忆/遗忘、能力冻结/生命周期稳定 |
 | 并行委派、多设备身份/记忆同步 | PocketAgent调度/sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | 新资源owner、portable并发与双设备验证 |
 | 主动跟进、持续语音、云端常驻 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 本期未纳入 | 新需求/运行与授权设计 |
