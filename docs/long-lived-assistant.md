@@ -547,10 +547,12 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 258 项/55 组（macOS 主机，mock transport）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
+| Core 测试 | 通过 | 260 项/56 组（macOS 主机，mock transport）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
 | 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 代码ae324d3的开发包上：主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；第一次真实整理。代码841d3c0的最终开发包上：未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理经 `consume` 完成并CAS提交（第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume）。最终包（代码7fd93a8）上：启动失败注入→草稿归还且该prompt未授权，正常重启后同文本以新ID重发，真实模型只回答一次，追问“此前该消息出现几次”答1；新生成的摘要来源不含未启动root，覆盖未启动root的旧摘要不再采用；连接已有LocalDevVPN后，独立任务中真实读取应用清单（find_apps）、打开“设置”并新鲜观察首页成功；执行中途杀进程后任务为interrupted，25秒内无任何新动作（不重放） |
-| 设备未覆盖 / 边界 | 未验证或未解决 | 改模型后召回（设备只配置了1个模型）；超预算摘要拒发、维护中遗忘、150/600秒期限只在主机验证。观察PocketAgent自身聊天页（长主线与几乎为空的新任务都一样）在DDI抓取AX图时失败：`Native/ddi/ax.rs` 的合并条件（跨PID、重复identity、深度>32或节点≥512）报 `AX graph identity/size/depth limit`；同一页面经ipb深层读取为110节点、深度15、无重复ID，推测为跨进程元素或重复identity（例如系统粘贴按钮），未证实；该检查与粘贴按钮在本任务前已存在，未改上限。打开“天气”时DDI activate返回设备错误（未深究） |
+| DDI 自身页面观察（最终包，代码7169080） | 通过（物理UI＋真实模型） | 键盘显示系统粘贴建议时，长主线与全新空任务的 observe_screen 均成功（outside_app_elements=1，约50节点）；让模型 tap_point 粘贴建议位置被触摸前拒绝（target_covered，未执行，随后新观察，输入框无粘贴）；打开“设置”、滑动、点进“通用”每步后观察成功；手机任务中途杀进程→interrupted、25秒内无新动作，新请求只做新观察；运行中Stop（按新截图确认停止键可见才点）→已取消、之后无动作、未打开设置 |
+| 整轮600秒期限（设备） | 通过 | 测试数据任务持续调用wait（每次回复4个，85次调用/22次回复，均低于本轮上限）在600.2秒时被整轮期限停止，未完成的wait报已取消、无重放；修复后状态原因为“本轮已达到 10 分钟上限” |
+| 设备未覆盖 / 边界 | 未验证或环境边界 | 改模型后召回：设备上的服务商只配置1个模型且没有模型目录地址，App内“连接并加载模型”不可用；要发现第二个模型只能新填目录地址（等于编造端点并改动用户配置），未做；超预算摘要拒发、维护中遗忘、150秒维护期限只在主机验证（600秒整轮期限已在设备上触发，见下一行）；灵动岛机型的任务面板收起手势只有原生边界测试（未用灵动岛设备）。“天气”首次运行欢迎页没有天气App进程：启动返回CoreDevice 10004（报为未确认），前台进程无法识别时观察按设计拒绝 |
 | 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
 | bounded streaming 维护 | 主机＋设备 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备上一次真实整理成功 |
 
@@ -567,6 +569,8 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - 摘要规划为后续fold固定预留4,000 token，但上一摘要最多64 KiB；fold发送前未按完整请求估算，约60 KB中文上一摘要会超过已知窗口上限仍被发出。改为每个fold发送前估算完整SummaryRequest并对照冻结预算，超出不发送；同时发送前检查存储与显式遗忘，避免第二个fold再披露已撤销来源。
 - promoted未授权请求在项目A失败后，用户改到项目B再显式继续：重排只更新pending.workspaceID，root仍记在A，permit也不核对scope；同ID任务读写B的内容却归属A，A之后的自动上下文/检索可能读到B的结果。改为重排时把未授权root原子移到确认的scope，permit校验job.scope；回归覆盖A→B与A→无项目（原ID一条，A的上下文与检索读不到该轮）。
 - 普通发送在permit前失败（如启动失败注入）时草稿归还，但原prompt仍是eligible root：设备上重发后模型看到两遍并标注重复，该prompt也进入了随后的摘要。根因：eligibility只排除 `abandonedUnstarted`。改为自动上下文/摘要/自动检索只使用已提交permit的root；旧摘要若覆盖未启动root即不再有效（重新整理）；回归覆盖归还+同文本新ID重发只投影一次、旧摘要失效、permit后失败结果保留、显式引用标注未开始执行。
+- 整轮600秒watchdog取消runtime时没有记录原因，到期的轮次在界面上显示为笼统的“手机助手未完成本轮”。改为取消前先记录整轮期限原因（已有原因时不覆盖）。
+- 观察PocketAgent自身聊天页（长主线与空任务一样）报合并的AX图上限错误。同页对照：键盘显示系统粘贴建议（发送后或任何剪贴板写入后出现）时失败，收起键盘即完整读取；ipb同类遍历在该状态命中“子元素属于其他进程”。根因：该建议栏由其他进程承载，挂在本App元素的children中。改为跨进程子元素计数（≤32）并跳过（不读不遍历不作为节点），观察结果带 `outside_app_elements` 与说明；重复、深度、规模仍为硬上限且分别报错。同时把坐标动作绑定到同一DDI会话最近一次成功快照（快照开始清空、每个屏幕动作消耗）：前台仍须为被观察App且目标点元素属于它，存在应用外元素时空白点视为无法确认；触摸前拒绝按未执行上报。执行器自身的灵动岛任务面板收起手势走单独受限操作，且作为准备动作计入调用结果。
 - 维护期间读取未登记且active root只认permit后的轮次，遗忘预览看不到正在准备的轮次，提交后却因来源被屏蔽停轮。改为发送前原子登记fold与父摘要coverage roots，active root包含引擎正在执行的主线（准备或运行中），遗忘只停止该主线轮次。
 
 ### 拒绝方案
@@ -588,7 +592,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 | P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；Core/构建与设备验证通过；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
 | P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备真实整理通过，超预算拒发/150秒期限仅主机验证；AgentKit fork已固定；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
 | P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备记忆/遗忘/中文检索通过，改模型后召回未验证；2026-10-14 | P1/P2、完整来源注册与撤销 |
-| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备pending/Stop/恢复/跨项目继续、失败重发、真实App观察与杀进程不重放通过；观察PocketAgent自身页面的DDI AX边界未解决，设备长历史未测；2026-10-14 | P1–P3、指定设备与长历史样本 |
+| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；设备pending/Stop/恢复/跨项目继续、失败重发、真实App与自身页面观察、触摸前归属拒绝、Stop与杀进程不重放通过；设备长历史未测；2026-10-14 | P1–P3、指定设备与长历史样本 |
 | 自动学习候选、普通聊天前台宿主 | PocketAgent | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | MVP后续 | 显式记忆/遗忘、能力冻结/生命周期稳定 |
 | 并行委派、多设备身份/记忆同步 | PocketAgent调度/sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | 新资源owner、portable并发与双设备验证 |
 | 主动跟进、持续语音、云端常驻 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 本期未纳入 | 新需求/运行与授权设计 |
