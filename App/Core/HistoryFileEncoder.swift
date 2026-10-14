@@ -24,7 +24,19 @@ nonisolated final class HistoryFileEncoder {
     private var rootRows: [UUID: (root: ScopedRoot, key: String, data: Data)] = [:]
     private let encoder = JSONEncoder()
     /// Encodes the file shell with the scope-index row arrays as placeholders.
-    private let shellEncoder = JSONEncoder()
+    /// Sorted keys make an unchanged value encode to the same bytes (the
+    /// default key order differs between encodes), which `HistoryLayout`
+    /// relies on to leave unchanged regions alone.
+    private let shellEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
+    private let sortedEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
 
     init() {}
 
@@ -75,19 +87,33 @@ nonisolated final class HistoryFileEncoder {
             }
         }
         if cache.count > live.count { cache = cache.filter { live.contains($0.key) } }
-        let rows = sentinel + "-rows"
-        shellEncoder.userInfo[ScopeIndex.rowsPlaceholderKey] = rows
-        var shell = try shellEncoder.encode(FileShell(file: file, sentinel: sentinel))
-        let index = file.assistant.scopeIndex
-        if let members = Self.splice(shell, key: "messageRoots", sentinel: rows + "-members", elements: try memberElements(index)),
-           let rooted = Self.splice(members, key: "roots", sentinel: rows + "-roots", elements: try rootElements(index)) {
-            shell = rooted
-        } else {
-            shell = try encoder.encode(FileShell(file: file, sentinel: sentinel))
-        }
+        let shell = try fileShell(file, sentinel: sentinel)
         if let spliced = Self.splice(shell, key: "sessions", sentinel: sentinel, elements: sessions) { return spliced }
         return try encoder.encode(file)
     }
+
+    /// The file with `"sessions":"<sentinel>"` in place of its sessions and
+    /// the scope-index rows spliced from the row caches (`HistoryLayout`
+    /// shares it).
+    func fileShell(_ file: HistoryFile, sentinel: String) throws -> Data {
+        let rows = sentinel + "-rows"
+        shellEncoder.userInfo[ScopeIndex.rowsPlaceholderKey] = rows
+        let shell = try shellEncoder.encode(FileShell(file: file, sentinel: sentinel))
+        let index = file.assistant.scopeIndex
+        if let members = Self.splice(shell, key: "messageRoots", sentinel: rows + "-members", elements: try memberElements(index)),
+           let rooted = Self.splice(members, key: "roots", sentinel: rows + "-roots", elements: try rootElements(index)) {
+            return rooted
+        }
+        return try encoder.encode(FileShell(file: file, sentinel: sentinel))
+    }
+
+    /// The session with `"messages":"<sentinel>"` in place of its messages.
+    func sessionShell(_ session: ChatSession, sentinel: String) throws -> Data {
+        try sortedEncoder.encode(SessionShell(session: session, sentinel: sentinel))
+    }
+
+    /// One message's JSON (uncached).
+    func encodeMessage(_ message: AgentTranscriptMessage) throws -> Data { try encoder.encode(message) }
 
     /// Membership rows in the index's own order (order carries no meaning).
     private func memberElements(_ index: ScopeIndex) throws -> [Data] {

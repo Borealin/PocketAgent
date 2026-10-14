@@ -17,6 +17,7 @@
 		274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */; };
 		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
+		34099A8780B4604D642B7DDF /* HistoryLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83CF5CA29D35FDB6F28D3800 /* HistoryLayout.swift */; };
 		341233CF7A70637134AD1A8B /* iSHLicenses in Resources */ = {isa = PBXBuildFile; fileRef = E53F96B6F3F454BD229C1E52 /* iSHLicenses */; };
 		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
 		3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19938EABD2390F0D02B28600 /* ChatPolicies.swift */; };
@@ -53,6 +54,7 @@
 		929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65594612732E3288F588504 /* WDARequestDiagnostics.swift */; };
 		954F84FD21FFD7D4A19C3375 /* ChatMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EA1370AD3A250D19122214 /* ChatMemory.swift */; };
 		995617D04781DEA5D74A43BB /* MemoryIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B223C0E5700F2D9CA4EF175E /* MemoryIntent.swift */; };
+		99BAD74D3D73586F0FB1F0B7 /* HistoryPatchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80341CF1D97227B90E077AD8 /* HistoryPatchStore.swift */; };
 		9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */; };
 		9D5DD95030FB44DD0CD6DC5E /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38833AB31402CD8F11B2F334 /* Workspace.swift */; };
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
@@ -129,7 +131,9 @@
 		7B1523AE79BCB523972CA3A5 /* Controller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controller.swift; sourceTree = "<group>"; };
 		7F385985B41CF2BDD68B588A /* SyncApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncApply.swift; sourceTree = "<group>"; };
 		7F4597769ADE790DBCF5243A /* TextInputRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInputRequest.swift; sourceTree = "<group>"; };
+		80341CF1D97227B90E077AD8 /* HistoryPatchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryPatchStore.swift; sourceTree = "<group>"; };
 		804391BFC8C85058D642A661 /* ChatTurns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTurns.swift; sourceTree = "<group>"; };
+		83CF5CA29D35FDB6F28D3800 /* HistoryLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryLayout.swift; sourceTree = "<group>"; };
 		88E51E4C8A00C974E4731352 /* PairingImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingImport.swift; sourceTree = "<group>"; };
 		8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRootView.swift; sourceTree = "<group>"; };
 		8B0353F740886263A926C60F /* AssistantRequestProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRequestProjection.swift; sourceTree = "<group>"; };
@@ -236,7 +240,9 @@
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */,
 				AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */,
+				83CF5CA29D35FDB6F28D3800 /* HistoryLayout.swift */,
 				1FA7F23F4F43343D30E3D16A /* HistoryOwner.swift */,
+				80341CF1D97227B90E077AD8 /* HistoryPatchStore.swift */,
 				FF3646323BE7793B3B8697E9 /* HistoryStorage.swift */,
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */,
@@ -446,7 +452,9 @@
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
 				44F4187565D0FE5BDA5973E5 /* HistoryEdits.swift in Sources */,
 				837D7E83B6804FE0BE3D8C99 /* HistoryFileEncoder.swift in Sources */,
+				34099A8780B4604D642B7DDF /* HistoryLayout.swift in Sources */,
 				70E1558DD60DD52607A32538 /* HistoryOwner.swift in Sources */,
+				99BAD74D3D73586F0FB1F0B7 /* HistoryPatchStore.swift in Sources */,
 				F887E531FDE10E1EFD4C5B72 /* HistoryStorage.swift in Sources */,
 				EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */,
 				CF2C238B864452DC5A9B68D5 /* KeyboardSequence.swift in Sources */,

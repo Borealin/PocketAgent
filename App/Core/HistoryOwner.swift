@@ -36,7 +36,13 @@ final class HistoryOwner {
     private(set) var file: HistoryFile
     private(set) var health: StorageHealth
     let barrier = TranscriptCommitBarrier()
-    private let writer: (Data) throws -> Void
+    /// Where a write goes: the history file in the stable layout (patching
+    /// changed ranges), or a closure that receives the whole encoded file.
+    enum Sink {
+        case data((Data) throws -> Void)
+        case store(PatchingHistoryWriter)
+    }
+    private let sink: Sink
     private let encoder = HistoryFileEncoder()
     /// Published after every state change (successful transaction or record).
     var onChange: (() -> Void)?
@@ -46,7 +52,11 @@ final class HistoryOwner {
     private(set) var lastWriteSeconds: Double = 0
 
     init(file: HistoryFile, health: StorageHealth = .ready, writer: @escaping (Data) throws -> Void) {
-        self.file = file; self.health = health; self.writer = writer
+        self.file = file; self.health = health; sink = .data(writer)
+    }
+
+    init(file: HistoryFile, health: StorageHealth = .ready, store: PatchingHistoryWriter) {
+        self.file = file; self.health = health; sink = .store(store)
     }
 
     /// Commits made durable by one write, released only after it succeeds.
@@ -133,8 +143,10 @@ final class HistoryOwner {
 
     private func write(_ candidate: HistoryFile) throws {
         let started = ProcessInfo.processInfo.systemUptime
-        let data = try encoder.encode(candidate)
-        try writer(data)
+        switch sink {
+        case .data(let writer): try writer(try encoder.encode(candidate))
+        case .store(let store): try store.write(candidate)
+        }
         lastWriteSeconds = ProcessInfo.processInfo.systemUptime - started
     }
 
