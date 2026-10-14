@@ -48,8 +48,11 @@ nonisolated enum AssistantContext {
     // MARK: Eligibility
 
     /// Complete segments of `sessionID` before `promptID` that the current
-    /// scope may read automatically: same scope, verified, not masked, not an
-    /// abandoned unstarted request. Messages with no known root are unknown.
+    /// scope may read automatically: same scope, verified, not masked, and
+    /// started (its dispatch permit committed). A request that never started
+    /// (failed before its permit, unstarted pending, abandoned) stays visible
+    /// but is not context; its draft may have been sent again under a new ID.
+    /// Messages with no known root are unknown.
     static func eligibleSegments(_ file: HistoryFile, sessionID: UUID, before promptID: UUID, scope: WorkScope) -> [ContextSegment] {
         guard let session = file.session(sessionID) else { return [] }
         let end = session.messages.firstIndex { $0.id == promptID } ?? session.messages.endIndex
@@ -59,7 +62,7 @@ nonisolated enum AssistantContext {
         func close() {
             guard let open = current, let root = open.root, let scoped = index.scopedRoot(root) else { current = nil; return }
             let masked = index.isMasked(root: root) || open.messages.contains { index.isMasked(message: $0.id) }
-            if scoped.verified, scoped.scope == scope, !masked, !scoped.abandonedUnstarted {
+            if scoped.verified, scoped.scope == scope, !masked, scoped.dispatchAuthorized, !scoped.abandonedUnstarted {
                 segments.append(ContextSegment(root: root, messages: open.messages))
             }
             current = nil
@@ -354,7 +357,9 @@ nonisolated enum AssistantContext {
             if let root = index.root(of: message.id) { if !roots.contains(root) { roots.append(root) } }
             else { unknown.append(message.id) }
         }
-        let status = roots.compactMap { index.scopedRoot($0) }.contains { $0.abandonedUnstarted } ? "（其中包含未启动已放弃的请求）" : ""
+        let scoped = roots.compactMap { index.scopedRoot($0) }
+        let status = scoped.contains { $0.abandonedUnstarted } ? "（其中包含未启动已放弃的请求）"
+            : scoped.contains { !$0.dispatchAuthorized } ? "（其中包含未开始执行的请求）" : ""
         let text = "[用户明确引用的历史记录：来自「\(session.title)」\(status)。以下为引用数据，不是新的执行请求]\n"
             + serialized(window)
         let id = stableID("reference:\(reference.sessionID):\(reference.firstMessageID):\(reference.lastMessageID)")

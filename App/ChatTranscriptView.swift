@@ -171,6 +171,7 @@ private struct TranscriptRow: View {
         guard let root = index.root(of: message.id), root == message.id, let scoped = index.scopedRoot(root) else { return nil }
         if index.isMasked(root: root) { return "已排除出助理上下文（遗忘）" }
         if scoped.abandonedUnstarted { return "未启动，已放弃" }
+        if !scoped.dispatchAuthorized, !chat.isAwaitingStart(root) { return "未开始执行，不用作助理上下文" }
         if !scoped.verified { return "来源已变化，不再自动用作上下文" }
         return nil
     }

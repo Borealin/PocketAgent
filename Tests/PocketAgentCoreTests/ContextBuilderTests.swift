@@ -65,6 +65,58 @@ struct ContextBuilderTests {
         #expect(projectOnly.count == 1 && projectOnly[0].root != general)
     }
 
+    /// A send that failed before its permit gives its draft back and the same
+    /// text is sent again under a new ID. Later context, summaries and
+    /// automatic history search use that text once, from the request that ran;
+    /// a summary that still counted the unstarted copy is no longer trusted; a
+    /// run that failed after its permit keeps its real and unknown results.
+    @Test func requestsThatNeverStartedAreNotAutomaticContext() async throws {
+        var fixture = Fixture()
+        let earlier = try fixture.turn("第一轮")
+        let failed = AgentTranscriptMessage(role: .user, text: "列出这些章节的标题")
+        try fixture.file.acceptRoot(failed, attachments: [], in: fixture.primary, scope: .general)
+        try fixture.file.editSession(fixture.primary) { $0.state = .failed }
+        let resent = try fixture.turn("列出这些章节的标题")
+        let interrupted = AgentTranscriptMessage(role: .user, text: "打开设置")
+        try fixture.file.acceptRoot(interrupted, attachments: [], in: fixture.primary, scope: .general)
+        try fixture.file.commitDispatchPermit(root: interrupted.id, sessionID: fixture.primary, scope: .general)
+        let call = AgentToolCall(id: "call-open", name: "tap", arguments: .object([:]))
+        try fixture.file.appendEvent(AgentTranscriptMessage(role: .assistant, toolCalls: [call]), to: fixture.primary,
+                                     root: interrupted.id)
+        try fixture.file.editSession(fixture.primary) { $0.state = .failed }
+        let prompt = AgentTranscriptMessage(role: .user, text: "当前")
+        try fixture.file.acceptRoot(prompt, attachments: [], in: fixture.primary, scope: .general)
+        let segments = AssistantContext.eligibleSegments(fixture.file, sessionID: fixture.primary, before: prompt.id, scope: .general)
+        #expect(segments.map(\.root) == [earlier, resent, interrupted.id])
+        let built = AssistantContext.build(fixture.input(prompt: prompt.id))
+        #expect(built.messages.filter { $0.text == failed.text }.count == 1 && !built.messages.contains { $0.id == failed.id })
+        #expect(built.messages.contains { $0.role == .tool && $0.toolCallID == call.id && $0.isError })
+        // A summary written while the unstarted copy still counted is not trusted.
+        let stored = try #require(fixture.file.primary?.messages.first { $0.id == failed.id })
+        let stale = try fixture.candidate(covering: [segments[0], ContextSegment(root: failed.id, messages: [stored])], predecessor: nil)
+        let good = try fixture.candidate(covering: [segments[0]], predecessor: nil)
+        var withStale = fixture.file
+        withStale.assistant.compactions.append(stale)
+        #expect(AssistantContext.build(.init(file: withStale, sessionID: fixture.primary, promptID: prompt.id, scope: .general,
+            references: [], budget: .unknown, estimator: ContextEstimator(), systemPrompt: "s", tools: [], prompt: [])).summaryID == nil)
+        var withGood = fixture.file
+        withGood.assistant.compactions.append(good)
+        #expect(AssistantContext.build(.init(file: withGood, sessionID: fixture.primary, promptID: prompt.id, scope: .general,
+            references: [], budget: .unknown, estimator: ContextEstimator(), systemPrompt: "s", tools: [], prompt: [])).summaryID == good.id)
+        // Automatic history search finds only the request that ran.
+        let snapshot = fixture.file
+        let adapter = PocketMemoryAdapter(scope: .general, currentRoot: prompt.id, references: [], snapshot: { snapshot },
+                                          register: { _, _, _ in })
+        let found = try await adapter.searchSessions(AgentSessionSearchRequest(query: "章节的标题"))
+        #expect(found.objectValue?["segments"]?.arrayValue?.compactMap { $0.objectValue?["root_prompt_id"]?.stringValue }
+                == [resent.uuidString])
+        // An explicit reference still shows the unstarted request, labelled as such (not as abandoned).
+        let reference = HistoryReference(sessionID: fixture.primary, firstMessageID: failed.id, lastMessageID: failed.id,
+                                         expectedContentDigest: try AssistantContext.referenceDigest([stored]))
+        let quoted = try #require(AssistantContext.quote(reference, file: fixture.file))
+        #expect(quoted.message.text.contains("未开始执行") && !quoted.message.text.contains("已放弃"))
+    }
+
     @Test func interruptedGroupsGetDeterministicSyntheticRepairs() {
         let call = AgentToolCall(id: "c", name: "tap", arguments: .object([:]))
         let assistant = AgentTranscriptMessage(role: .assistant, toolCalls: [call])
