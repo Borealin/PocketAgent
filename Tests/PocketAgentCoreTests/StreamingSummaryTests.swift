@@ -12,6 +12,14 @@ struct StreamingSummaryTests {
     private actor Deliveries {
         var calls = 0, total = 0
         func add(_ count: Int) { calls += 1; total += count }
+        /// Deliveries hop through the main actor, which other suites may keep
+        /// busy: wait (bounded) until `expected` arrived, then a short grace
+        /// for any extra one, instead of a fixed sleep.
+        func settle(_ expected: Int) async throws {
+            let end = ContinuousClock.now + .seconds(5)
+            while total < expected, ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(20)) }
+            try await Task.sleep(for: .milliseconds(200))
+        }
     }
 
     @Test func manyEventsKeepOnlyTextAndCoalesceProgress() async throws {
@@ -25,7 +33,7 @@ struct StreamingSummaryTests {
             try onEvent(.finished(.completed))
         }, deadline: long, progress: progress)
         #expect(text == String(repeating: "a", count: 10_000))
-        try await Task.sleep(for: .milliseconds(200))
+        try await deliveries.settle(20_000)
         let calls = await deliveries.calls, total = await deliveries.total
         #expect(total == 20_000 && calls < 20_000)
     }
@@ -78,7 +86,7 @@ struct StreamingSummaryTests {
                 try onEvent(.finished(.completed))
             }, deadline: long, idleSeconds: 0.6, progress: progress)
         }
-        try await Task.sleep(for: .milliseconds(200))
+        try await deliveries.settle(3)
         let delivered = await deliveries.total
         #expect(delivered == 3) // the two distinct texts and the first reasoning only
         let collector = SummaryCollector()

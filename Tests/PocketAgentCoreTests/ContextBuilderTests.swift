@@ -4,7 +4,7 @@ import Testing
 @testable import PocketAgentCore
 
 struct ContextBuilderTests {
-    fileprivate struct Fixture {
+    struct Fixture {
         var file = HistoryFile.initial(selection: nil)
         var primary: UUID { file.assistant.primarySessionID }
 

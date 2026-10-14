@@ -35,6 +35,17 @@ nonisolated struct SummaryPlan: Sendable {
     var predecessor: StoredCompaction?
     /// Up to three folds, each a run of complete eligible segments.
     var folds: [[ContextSegment]]
+    /// Depth of `predecessor`'s chain (1 for a root or a checkpoint).
+    var predecessorDepth = 0
+}
+
+/// A valid summary chain tip over the eligible messages.
+nonisolated struct SummaryTip: Sendable {
+    var tip: StoredCompaction
+    /// Eligible messages it covers, from the first.
+    var covered: Int
+    /// Records from the tip back to its root or checkpoint, inclusive.
+    var depth: Int
 }
 
 nonisolated enum AssistantContext {
@@ -181,6 +192,76 @@ nonisolated enum AssistantContext {
                                    domain: "summary-record")
     }
 
+    // MARK: Checkpoints
+
+    /// `builderVersion` that marks a checkpoint: a host copy receipt, never a
+    /// summarizer input. Builds without checkpoints ignore such records.
+    static let checkpointBuilderVersion = 1_000 + builderVersion
+
+    private struct CheckpointReceiptDTO: Encodable {
+        let sourceFingerprint: String
+        let basisID: String
+        let basisRecordDigest: String
+        let roots: [String]
+    }
+
+    /// A checkpoint is a host copy receipt that re-roots a valid tip at the
+    /// depth limit; no model request makes it. Its summary and anchor are the
+    /// tip's, byte for byte; it covers exactly the eligible prefix ending at
+    /// that anchor (nothing the tip did not cover) and lists every root of
+    /// that prefix; its parent stays the tip, kept with its own chain as
+    /// evidence. It is committed by the same CAS as a summary, only while the
+    /// tip is the current valid tip, i.e. right after the tip's whole chain
+    /// was revalidated against the current raw sources. Later checks trust
+    /// that sealed receipt instead of walking the old chain again: they
+    /// recompute the fingerprint of the current raw prefix (the projection a
+    /// root summary of it would be digested over), the parent's record digest
+    /// from its stored body, and the receipt digest, which is kept in
+    /// `inputDigest` but is a source fingerprint, not a model input.
+    static func checkpointReceipt(prefix: [AgentTranscriptMessage], roots: [UUID], attachments: [String: [ChatAttachment]],
+                                  scope: WorkScope, basis: StoredCompaction) throws -> String {
+        let fingerprint = try inputDigest(messages: prefix, attachments: attachments, scope: scope, parent: nil)
+        return try CanonicalDigest.digest(CheckpointReceiptDTO(sourceFingerprint: fingerprint, basisID: basis.id.uuidString,
+                                                               basisRecordDigest: basis.recordDigest,
+                                                               roots: roots.map(\.uuidString)),
+                                          domain: "summary-checkpoint-receipt")
+    }
+
+    /// Every root of `prefix`, in order.
+    static func roots(of prefix: [AgentTranscriptMessage], index: ScopeIndex) -> [UUID] {
+        var roots: [UUID] = []
+        var seen: Set<UUID> = []
+        for message in prefix { if let root = index.root(of: message.id), seen.insert(root).inserted { roots.append(root) } }
+        return roots
+    }
+
+    /// The checkpoint of `tip`, which must be the current valid tip.
+    static func checkpoint(of tip: StoredCompaction, in file: HistoryFile, forgetEpoch: UInt64) throws -> StoredCompaction {
+        let eligible = eligibleSegments(file, sessionID: tip.sessionID, before: UUID(), scope: tip.scope).flatMap(\.messages)
+        guard let current = validTip(file, sessionID: tip.sessionID, scope: tip.scope, eligible: eligible),
+              current.tip.id == tip.id, tip.builderVersion == builderVersion else {
+            throw SummaryPreparationError(detail: "摘要链已变化，本轮不再整理")
+        }
+        let prefix = Array(eligible[..<current.covered])
+        let ids = prefix.map(\.id)
+        let roots = roots(of: prefix, index: file.assistant.scopeIndex)
+        let receipt = try checkpointReceipt(prefix: prefix, roots: roots, attachments: file.session(tip.sessionID)?.attachments ?? [:],
+                                            scope: tip.scope, basis: tip)
+        let record = AgentCompactionRecord(summaryMessageID: UUID(), compactedThroughMessageID: tip.record.compactedThroughMessageID,
+                                           sequence: tip.record.sequence + 1, summary: tip.record.summary,
+                                           summarizedTokens: tip.record.summarizedTokens, keptTokens: 0,
+                                           displayAnchor: tip.record.displayAnchor)
+        return StoredCompaction(
+            id: record.id, record: record, sessionID: tip.sessionID, scope: tip.scope,
+            sourceRootPromptIDs: roots, sourceMessageIDs: ids,
+            predecessorID: tip.id, predecessorDigest: tip.recordDigest, inputDigest: receipt,
+            recordDigest: try recordDigest(inputDigest: receipt, record: record, sourceIDs: ids, parentRecordDigest: tip.recordDigest),
+            builderVersion: checkpointBuilderVersion, summaryPromptVersion: tip.summaryPromptVersion, forgetEpoch: forgetEpoch,
+            summaryModel: tip.summaryModel)
+    }
+
+    // MARK: Valid chain
+
     /// The longest stored summary chain that exactly covers a prefix of the
     /// eligible real messages: every record's source IDs continue the parent
     /// without gap or overlap, the anchor is the last covered message, and
@@ -188,43 +269,129 @@ nonisolated enum AssistantContext {
     /// and the number of covered messages.
     static func validSummary(_ file: HistoryFile, sessionID: UUID, scope: WorkScope,
                              eligible: [AgentTranscriptMessage]) -> (StoredCompaction, Int)? {
+        validTip(file, sessionID: sessionID, scope: scope, eligible: eligible).map { ($0.tip, $0.covered) }
+    }
+
+    /// Records whose parent links run into a cycle (each walked once,
+    /// iteratively). Nothing on or leading into a cycle is valid, checkpoints
+    /// included, although a checkpoint's validity does not walk its parent's chain.
+    static func cyclicRecords(_ byID: [UUID: StoredCompaction]) -> Set<UUID> {
+        var cyclic: Set<UUID> = []
+        var done: Set<UUID> = []
+        for start in byID.keys where !done.contains(start) {
+            var path: [UUID] = []
+            var onPath: Set<UUID> = []
+            var cursor: UUID? = start
+            var cycle = false
+            while let id = cursor, !done.contains(id) {
+                if onPath.contains(id) { cycle = true; break }
+                path.append(id); onPath.insert(id)
+                cursor = byID[id]?.predecessorID.flatMap { byID[$0] == nil ? nil : $0 }
+            }
+            if let id = cursor, cyclic.contains(id) { cycle = true }
+            if cycle { cyclic.formUnion(path) }
+            done.formUnion(path)
+        }
+        return cyclic
+    }
+
+    /// Each record is checked once, from roots and checkpoints down to their
+    /// children; a record deeper than `maxChainDepth`, under an invalid or
+    /// missing parent, or on a cycle is never valid. Every record lists
+    /// exactly the roots of the messages it covers (its forget edges), once
+    /// each. Of equal coverage the shallower tip wins (a checkpoint over its
+    /// basis), then the earlier record.
+    static func validTip(_ file: HistoryFile, sessionID: UUID, scope: WorkScope,
+                         eligible: [AgentTranscriptMessage]) -> SummaryTip? {
         let candidates = file.assistant.compactions.filter { $0.sessionID == sessionID && $0.scope == scope }
         guard !candidates.isEmpty, let session = file.session(sessionID) else { return nil }
         let byID = Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        var best: (StoredCompaction, Int)?
-        for tip in candidates {
-            var chain: [StoredCompaction] = [tip]
-            var seen: Set<UUID> = [tip.id]
-            var valid = true
-            while let parentID = chain.last?.predecessorID {
-                guard chain.count < maxChainDepth, let parent = byID[parentID], seen.insert(parentID).inserted else { valid = false; break }
-                chain.append(parent)
+        let cyclic = cyclicRecords(byID)
+        let index = file.assistant.scopeIndex
+        var children: [UUID: [StoredCompaction]] = [:]
+        var queue: [(record: StoredCompaction, parent: SummaryTip?)] = []
+        for record in candidates where !cyclic.contains(record.id) {
+            if let parentID = record.predecessorID, record.builderVersion != checkpointBuilderVersion {
+                children[parentID, default: []].append(record)
+            } else {
+                queue.append((record, nil))
             }
-            guard valid else { continue }
-            chain.reverse()
-            var position = 0
-            var parent: StoredCompaction?
-            for record in chain {
-                let ids = record.sourceMessageIDs
-                guard !ids.isEmpty, position + ids.count <= eligible.count,
-                      Array(eligible[position..<position + ids.count].map(\.id)) == ids,
-                      record.record.compactedThroughMessageID == ids.last,
-                      record.predecessorID == parent?.id, record.predecessorDigest == parent?.recordDigest,
-                      record.builderVersion == builderVersion, record.summaryPromptVersion == summaryPromptVersion,
-                      let input = try? inputDigest(messages: Array(eligible[position..<position + ids.count]),
-                                                   attachments: session.attachments, scope: scope, parent: parent),
-                      input == record.inputDigest,
-                      let output = try? recordDigest(inputDigest: input, record: record.record, sourceIDs: ids,
-                                                     parentRecordDigest: parent?.recordDigest),
-                      output == record.recordDigest else { valid = false; break }
-                position += ids.count
-                parent = record
+        }
+        func covers(_ ids: [UUID], from position: Int) -> [AgentTranscriptMessage]? {
+            guard !ids.isEmpty, position + ids.count <= eligible.count else { return nil }
+            let slice = Array(eligible[position..<position + ids.count])
+            return slice.map(\.id) == ids ? slice : nil
+        }
+        func listsRoots(_ record: StoredCompaction, of messages: [AgentTranscriptMessage]) -> Bool {
+            let listed = record.sourceRootPromptIDs
+            return listed.count == Set(listed).count && Set(listed) == Set(roots(of: messages, index: index))
+        }
+        func check(_ record: StoredCompaction, parent: SummaryTip?) -> SummaryTip? {
+            let ids = record.sourceMessageIDs
+            guard record.record.compactedThroughMessageID == ids.last, record.summaryPromptVersion == summaryPromptVersion
+            else { return nil }
+            let input: String?
+            let parentDigest: String?
+            let tip: SummaryTip
+            if record.builderVersion == checkpointBuilderVersion {
+                // A sealed host copy of an ordinary tip of this session and
+                // scope: same anchor and summary bytes, the exact prefix and
+                // its roots, and a parent whose stored body still yields its
+                // record digest.
+                guard let basisID = record.predecessorID, let basis = byID[basisID], basis.id != record.id,
+                      basis.builderVersion == builderVersion, basis.summaryPromptVersion == record.summaryPromptVersion,
+                      record.predecessorDigest == basis.recordDigest,
+                      basis.record.compactedThroughMessageID == ids.last, basis.sourceMessageIDs.last == ids.last,
+                      basis.record.summary == record.record.summary,
+                      (try? recordDigest(inputDigest: basis.inputDigest, record: basis.record, sourceIDs: basis.sourceMessageIDs,
+                                         parentRecordDigest: basis.predecessorDigest)) == basis.recordDigest,
+                      let prefix = covers(ids, from: 0), listsRoots(record, of: prefix) else { return nil }
+                input = try? checkpointReceipt(prefix: prefix, roots: roots(of: prefix, index: index),
+                                               attachments: session.attachments, scope: scope, basis: basis)
+                parentDigest = basis.recordDigest
+                tip = SummaryTip(tip: record, covered: ids.count, depth: 1)
+            } else if record.builderVersion != builderVersion {
+                return nil
+            } else if let parent {
+                guard let slice = covers(ids, from: parent.covered), listsRoots(record, of: slice),
+                      record.predecessorID == parent.tip.id, record.predecessorDigest == parent.tip.recordDigest else { return nil }
+                input = try? inputDigest(messages: slice, attachments: session.attachments, scope: scope, parent: parent.tip)
+                parentDigest = parent.tip.recordDigest
+                tip = SummaryTip(tip: record, covered: parent.covered + ids.count, depth: parent.depth + 1)
+            } else {
+                guard let slice = covers(ids, from: 0), listsRoots(record, of: slice) else { return nil }
+                input = try? inputDigest(messages: slice, attachments: session.attachments, scope: scope, parent: nil)
+                parentDigest = nil
+                tip = SummaryTip(tip: record, covered: ids.count, depth: 1)
             }
-            if valid, position > (best?.1 ?? 0) { best = (tip, position) }
+            guard let input, input == record.inputDigest,
+                  let output = try? recordDigest(inputDigest: input, record: record.record, sourceIDs: ids,
+                                                 parentRecordDigest: parentDigest),
+                  output == record.recordDigest else { return nil }
+            return tip
+        }
+        let order = Dictionary(candidates.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var best: SummaryTip?
+        var next = 0
+        while next < queue.count {
+            let (record, parent) = queue[next]
+            next += 1
+            guard let tip = check(record, parent: parent) else { continue }
+            if let current = best {
+                let better = tip.covered > current.covered || tip.covered == current.covered
+                    && (tip.depth < current.depth || tip.depth == current.depth && order[record.id]! < order[current.tip.id]!)
+                if better { best = tip }
+            } else {
+                best = tip
+            }
+            guard tip.depth < maxChainDepth else { continue }
+            for child in children[record.id] ?? [] { queue.append((child, tip)) }
         }
         return best
     }
 
+    /// Every root a tip covers, through its parents up to and including a
+    /// checkpoint (which lists all roots of the chain it re-rooted).
     static func coverageRoots(_ tip: StoredCompaction, in file: HistoryFile) -> [UUID] {
         var roots: [UUID] = []
         var seen: Set<UUID> = []
@@ -233,7 +400,7 @@ nonisolated enum AssistantContext {
         var depth = 0
         while let current = record, depth < maxChainDepth {
             for root in current.sourceRootPromptIDs where seen.insert(root).inserted { roots.append(root) }
-            record = current.predecessorID.flatMap { byID[$0] }
+            record = current.builderVersion == checkpointBuilderVersion ? nil : current.predecessorID.flatMap { byID[$0] }
             depth += 1
         }
         return roots
@@ -269,11 +436,12 @@ nonisolated enum AssistantContext {
         var messages: [AgentTranscriptMessage] = []
         var covered = 0
         var summary: StoredCompaction?
+        var depth = 0
         var summaryRoots: [UUID] = []
-        if let (tip, count) = validSummary(input.file, sessionID: input.sessionID, scope: input.scope, eligible: eligible) {
-            summary = tip; covered = count
-            summaryRoots = coverageRoots(tip, in: input.file)
-            let message = summaryMessage(tip)
+        if let valid = validTip(input.file, sessionID: input.sessionID, scope: input.scope, eligible: eligible) {
+            summary = valid.tip; covered = valid.covered; depth = valid.depth
+            summaryRoots = coverageRoots(valid.tip, in: input.file)
+            let message = summaryMessage(valid.tip)
             messages.append(message); synthetic.insert(message.id)
         }
         // Raw segments after the summary anchor (segments are never split:
@@ -303,6 +471,7 @@ nonisolated enum AssistantContext {
         var plan: SummaryPlan?
         if estimate > input.budget.summaryTrigger {
             plan = summaryPlan(remaining, predecessor: summary, input: input)
+            plan?.predecessorDepth = depth
         }
         return PreparedContext(messages: messages, syntheticIDs: synthetic, rawRoots: rawRoots, summaryRoots: summaryRoots,
                                summaryID: summary?.id, historicalMessages: historical, plan: plan, estimatedTokens: estimate)
@@ -310,7 +479,9 @@ nonisolated enum AssistantContext {
 
     /// Keep the most recent complete segments within 35% of the target and
     /// summarize the older remainder (folded with the previous summary), in at
-    /// most three folds that each fit the summarizer's own input budget.
+    /// most three folds that each fit the summarizer's own input budget. A
+    /// longer remainder starts with its oldest three folds; later turns
+    /// continue from the new tip.
     static func summaryPlan(_ remaining: [ContextSegment], predecessor: StoredCompaction?, input: Input) -> SummaryPlan? {
         var kept = 0
         var cut = remaining.count
@@ -328,16 +499,19 @@ nonisolated enum AssistantContext {
         var size = predecessor.map { ContextEstimator.textTokens($0.record.summary) } ?? 0
         for segment in older {
             let tokens = ContextEstimator.textTokens(serialized(segment.messages))
-            if tokens > foldBudget { return nil } // one safe group is larger than a summarizer input
+            // One safe group larger than a summarizer input is never split:
+            // the chain stops before it.
+            if tokens > foldBudget { break }
             if !current.isEmpty, size + tokens > foldBudget {
                 // A folded summary carries forward; its real size is checked
                 // with the complete request before each dispatch (SummaryMaintenance).
                 folds.append(current); current = []; size = 4_000
+                if folds.count == maxFolds { break }
             }
             current.append(segment); size += tokens
         }
-        if !current.isEmpty { folds.append(current) }
-        guard folds.count <= maxFolds else { return nil }
+        if !current.isEmpty, folds.count < maxFolds { folds.append(current) }
+        guard !folds.isEmpty else { return nil }
         return SummaryPlan(sessionID: input.sessionID, scope: input.scope, predecessor: predecessor, folds: folds)
     }
 
