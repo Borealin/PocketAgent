@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：公开资料及固定版本关键架构路径已静态核对；实现方案仍在设计中
+> 状态：公开资料及固定版本关键架构路径已静态核对；具体改造方案 v1 设计中；未修改应用代码
 >
 > 最后核对：2026-10-14
 >
@@ -12,7 +12,7 @@
 
 ## 1. 需求与关联资料
 
-用户确认目标为“单入口＋长期记忆”：再次打开 App 时直接回到同一个助理，换话题、换模型和跨天使用时仍能找回相关偏好与之前的决定。现有 PocketAgent 的主组织单位是独立会话，每条会话分别保存历史、模型和项目。推荐将产品入口收敛为一条主线，同时保留内部执行轮次、可检索的历史和独立的长期记忆。长期连续性来自数据与上下文管理，每轮仍是有起止的执行。首版沿用本机运行方式，不依赖常驻服务器。
+用户确认目标为“单入口＋长期记忆”：再次打开 App 时直接回到同一个助理，换话题、换模型和跨天使用时仍能找回相关偏好与之前的决定。现有 PocketAgent 的主组织单位是独立会话，每条会话分别保存历史、模型和项目。推荐新增默认“你的助理”独立入口，保留旧任务会话与历史；继续用 AgentKit，补齐宿主的主线、记忆、上下文与输入队列。长期连续性来自数据与上下文管理，每轮仍是有起止的执行。首版沿用本机运行方式，不依赖常驻服务器。
 
 | 类型 | 链接 | 说明 |
 |---|---|---|
@@ -29,7 +29,7 @@
 | OpenMuseAgent 后继 | [nanoMuse](https://github.com/nano-muse/nanoMuse) | Python、OpenMinis iOS 与桌面 Harness 分别核验 |
 | iOS 生命周期 | [Apple：BGContinuedProcessingTaskRequest](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtaskrequest) | 用户在前台发起、可继续到后台的工作 |
 
-用户最新要求是“先做好调研”。本次交付是公开资料与固定版本源码调研；下文的实现建议保留为待讨论设计，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
+用户最新要求是基于调研与现有代码收敛具体改造方案，“先不改代码”，并交给 Opus 5.5 独立评估。本次交付为源码依据与具体方案，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
 
 ## 2. 公开项目调研与结论
 
@@ -40,6 +40,21 @@
 3. 当前两个固定版本都支持原位压缩；Hermes 当前默认 `in_place=true`。没有依据要求 PocketAgent 在每次压缩时建立新 session，也不应按旧教程默认每日清空。
 4. 记忆学习、历史检索和压缩分别有触发与预算。保存事实由实际工具写入完成；记忆文件、摘要或模型声称“已记住”不能互相替代。
 5. PocketAgent 已有固定 AgentKit 的记忆/压缩原语。下文保留适配建议供后续讨论；按用户“先做好调研”的要求，当前不开始实现，不引入新的后台服务。
+
+### 本轮收敛：入口、记忆与执行引擎分别选型
+
+建议采用“独立助理入口＋现有 AgentKit＋宿主补齐长期记忆”。用户本轮要求先形成具体改造方案，尚未授权代码实现或最终选定替换框架。
+
+| 路线 | 改动与收益 | 主要代价 | 本轮建议 |
+|---|---|---|---|
+| 固定当前某条会话，隐藏其他会话 | 导航改动小 | 易继承旧项目/一次性任务；仍需记忆、预算和队列改造 | 不作为主方案 |
+| 新增默认“你的助理”，旧任务/历史共存，继续 AgentKit | 默认入口稳定；保留原执行与旧数据；宿主分别管理记忆和上下文 | 新增主指针、数据扩展、请求投影与运行宿主 | 推荐 |
+| 替换成 OpenMinis 类自有 loop | 可控制整个循环，与上游机制一致 | 替换模型适配、事件、工具调度、取消、生命周期；仍须接入 DDI/WDA | 当前收益不足，后置评估 |
+
+独立入口与保留 AgentKit 可以同时成立。固定版本 AgentKit 已有非破坏请求 pipeline、记忆协议/工具和无工具摘要服务；PocketAgent 尚未把这些接成长期助理。新增入口给用户一个稳定落点，宿主改造让这个落点真正有长期记忆。
+
+[OpenAI Docs](https://learn.chatgpt.com/docs/dots/tasks-and-memory)明确区分助理笔记与工作任务自己的上下文，也支持从同一助理进入可见任务。本方案借鉴这一信息架构；普通聊天与手机轮次如何运行，仍由 PocketAgent 的本机生命周期决定。OpenMinis 的摘要投影机制适合借鉴，但它的 Swift loop、SQLite、同步及工具能力是一个整套宿主实现，不构成必须替换 AgentKit 的依据。
+
 
 <details>
 <summary>公开资料、固定版本源码与差异核验</summary>
@@ -212,6 +227,22 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 根许可证方面，本次固定版本的 [OpenClaw](https://github.com/openclaw/openclaw/blob/ddaa0bd2b0dd077c946ace62a4b87383f032e26e/LICENSE)与 [Hermes](https://github.com/NousResearch/hermes-agent/blob/d97007c32d6340f7ba79ac1dfb5773cc00846448/LICENSE)均为 MIT。此处只确认仓库文件；本次不复制代码，若后续直接复用需核对具体文件、第三方依赖与 notice。
 
 
+### Opus 5.5 独立评估与主审取舍
+
+用户明确要求将参考项目和本地项目交给 Opus 5.5 评估。主评模型为 `claude-opus-5-5`，CLI 内置 advisor 同时使用 `claude-fable-5-1`，评审只开放 Read/Glob/Grep。来源：peer；主会话复核以下决定性接口与持久化路径。Opus 深入读取 PocketAgent、AgentKit 和 nanoMuse iOS，其他参考项目使用前文调研索引，没有声称第二次独立审计了所有仓库。
+
+| 评审意见 | 主审处理 |
+|---|---|
+| 保留 AgentKit，增加独立助理入口 | 采纳；入口、上下文和 loop 分层选型 |
+| 不急于新增 HistoryStore/TurnCoordinator/TurnRecord；先一个 pendingNext | 采纳；原 ChatController 保持唯一 writer，新增必要字段与适配 |
+| 原生 AgentCompactionRecord/Projection 可以复用 | 已复核接口并采纳；额外指纹/失效元数据由宿主补齐 |
+| 记忆不要放 sessionContext，摘要应有真实流式进度 | 已复核 contextSnapshot 捕获/重放与 buffered completion 路径，采纳 |
+| 默认继续升级前选中会话 | 不作为默认；推荐新独立主线，旧项目/任务通过明确引用使用 |
+| 普通聊天前台宿主拆分可以后置 | 采纳；一期保留系统任务与有限后台边界 |
+| 删除记忆不等于删除原文；摘要失效本身不足以遗忘 | 采纳；定义停用/来源屏蔽/重学抑制，历史删除为独立操作 |
+
+许可证组合、特定后台到期时间和所有运行保证均未据 peer 意见直接升级为确定结论；本次未复制外部实现、未重新运行设备验收。方案依据是已复核的宿主缺口与现有原语。
+
 ### 当前能力与具体缺口
 
 会话/同步清单来源：peer；下列决定性落点已由主会话复核源码。
@@ -224,7 +255,9 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 | 正在执行时 send 直接调用 steer | `App/ChatSessions.swift:366-372,411-442` | 单入口中应明确输入目标，避免独立请求串入当前任务 |
 | 所有发送进入 queuedPhone，并受 foreground、engine.busy 控制 | `App/ChatSessions.swift:408,459-486` | 当前串行的是整个执行轮次；纯聊天/网络也不会天然并行 |
 | 历史附件 hydration 限制图片数量，但文字从全部 prior 传入 | `App/Core/Attachments.swift:159-184` | 已有图片预算，缺少长期文字上下文预算 |
-| 每轮新建 AgentRuntime，未传持久 repository、memory store 或自定义 context pipeline | `App/PhoneAgent.swift:71-92` | AgentKit 的可用能力不等于宿主已有长期记忆 |
+| 每轮新建 AgentRuntime，未接记忆工具/仓库适配，未配置持久 repository 或自定义 context pipeline | `App/PhoneAgent.swift:71-92` | AgentKit 的可用能力不等于宿主已有长期记忆 |
+| 后端在 PhoneExecutor.ready 才连接，但 beginAgent 对每次发送提交系统后台任务 | `App/PhoneAgent.swift:328-334`、`App/AgentRunner.swift:28-56` | 现有按需连接复用；前台聊天宿主可后置，不能把入口独立等同于后台能力改变 |
+| 未知工具被 reducer 默认计入手机动作 | `App/Core/ExecutionStatus.swift:110-115` | 注册 memory 工具还要补工具类型与状态展示 |
 | 模型构造只指定输入能力与 4096 输出 token，未传上下文窗口 | `App/Core/ProviderConfig.swift:144-165` | 自动压缩不能假定所有自定义模型的窗口大小 |
 | 迁移保留真实 ID；进行中的状态变 interrupted；按调用修复结果邻接 | `App/Core/ChatHistory.swift:123-180` | 主线迁移不能排序重写消息或恢复执行旧动作 |
 | 同 ID 历史是前缀时选较长，否则保存冲突副本 | `App/Core/PortableSync.swift:286-307` | 两设备并发追加同一主线会产生分支，现有算法没有统一时间线语义 |
@@ -250,125 +283,174 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 ## 3. 技术方案总括
 
-由一个主会话承接用户输入，历史与记忆仍由本地单一历史仓库持有。ContextBuilder 为每轮组装固定规则、当前任务信息、相关长期记忆、有效摘要和近期完整消息，AgentKit 执行当前轮次，PhoneExecutor 保持独占手机资源。模型可主动搜索更早记录；检索结果只提供事实参考，不构成执行授权。用户关闭 App 后再回来，恢复的是关系、历史与状态，已中断的手机动作仍需新指令与新观察。
+**建议保留固定版本 AgentKit，新增默认“你的助理”入口。** 入口拥有一条固定主会话；现有独立会话保留在“任务 / 历史”区。两者共用当前 AgentKit、工具策略与手机执行链。OpenMinis 的主指针与摘要锚点机制可以借鉴，但无需引入它的自有 loop、数据库和同步实现。
+
+第一版仍由 ChatController 持有唯一原子历史文件，并沿用一个活动运行槽。新增主指针、本地记忆、摘要记录和一个待处理请求；不新增持久 TaskStore、TurnRecord 或第二个协调 agent。记忆属于本地助理，不绑定某个模型或主会话 ID；重建主会话不会清空记忆。runtime 每轮创建和销毁，长期连续性由数据和请求投影承接。
+
+| 层 | 直接复用 | 必须新增 / 轻量改造 |
+|---|---|---|
+| 入口与展示 | ChatRootView、ChatTranscriptView、Markdown、图片附件、模型选择 | 默认主入口、旧任务/历史分组、记忆面板、当前任务/下一件事输入目标 |
+| 模型与执行 | AgentRuntime、provider streaming、steer/cancel、模型重试、工具调度、语法修复 | 宿主请求预算 wrapper、无工具摘要进度适配 |
+| 手机能力 | PhoneExecutor FIFO、DDI/WDA、snapshot/前台复核、脚本 lease、终态清理 | 核心执行契约保持；记忆工具纳入现有 registry/reducer |
+| 数据 | HistoryFile、原子写入、迁移、真实 ID、附件、attribution、同步冲突副本 | primarySessionID、MemoryLedger、StoredCompaction、pendingNext、必要 scope 元数据 |
+| 记忆与摘要 | AgentMemoryAccessing、内置三工具、操作/内容校验、中文词法搜索、CompactionRecord/Projection/Service | 同仓库适配、scope/source、删除屏蔽、预算与失效策略 |
 
 ```mermaid
 flowchart TD
-    UI[一个助理聊天入口] --> INPUT[输入路由：当前任务或下一件事]
-    INPUT --> STORE[单一本地历史仓库]
-    STORE --> RAW[完整转录与旧会话]
-    STORE --> MEMORY[偏好、决定与可删除记忆]
-    STORE --> SUMMARY[带来源边界的压缩摘要]
-    RAW --> CONTEXT[有预算的 ContextBuilder]
-    MEMORY --> CONTEXT
-    SUMMARY --> CONTEXT
-    CONTEXT --> RUN[AgentKit：有起止的执行轮次]
-    RUN --> PHONE[PhoneExecutor：手机独占队列]
-    RUN --> STORE
+    HOME[默认：你的助理] --> CTRL[ChatController：唯一写入者 / 一个活动轮次]
+    OLD[任务 / 历史：现有独立会话] --> CTRL
+    CTRL --> FILE[同一个 HistoryFile：原文 / 主指针 / 记忆 / 摘要 / 下一件事]
+    CTRL --> BUILD[ContextBuilder：规则 / 有效记忆 / 摘要 / 近期原文]
+    BUILD --> LOOP[现有 AgentKit runtime]
+    LOOP --> BUDGET[每次请求：截图 enrichment / 预算检查]
+    BUDGET --> MODEL[现有 ProviderClient]
+    LOOP --> PHONE[现有 PhoneExecutor：串行动作]
+    LOOP --> MEM[MemoryAdapter：读写同一 ChatController]
+    LOOP --> EVENTS[现有 reducer / 转录事件]
+    MEM --> CTRL
+    EVENTS --> CTRL
 ```
 
 <details>
-<summary>详细落地方案与验证边界</summary>
+<summary>具体改造、状态流程与分阶段落地</summary>
 
-### 信息架构与旧数据
+### 入口与一次升级
 
-- 首屏直接打开稳定的主会话，标题使用助理名称；删除主界面的新会话按钮。
-- 原会话侧栏改成“历史 / 记忆 / 设置”。旧会话可阅读、检索和显式继续，不自动拼入主线；冲突副本有可见入口。
-- 在 HistoryFile 内保存 `assistantProfile` 与 `primarySessionID`，将主线身份和原始记录一起原子写入；不要把它仅存为临时 selectedID。
-- 助理身份与入口指针分开：`primarySessionID` 表示当前主线落点，不要求所有内部运行永远共用一个工作上下文。首版可原位压缩；若以后增加 reset boundary 或工作段，仍保留助理身份、原始历史和可见连续性。
-- 当前设备的一次升级默认继续升级前有效的选中会话，并固化为主线；没有历史时只创建一次新主线。selectedID 仍可用于临时浏览旧记录，重启回主线。
-- 单设备 MVP 的主线选择是本地状态，不声明它已实现多设备统一身份。需跨设备共享时再定义 portable assistant identity 与选择规则。
-- 保留现有会话/消息 ID、顺序、内容、草稿、附件引用、归属和 provider 配置。迁移只针对当前安装数据的一次升级；不扩大已被用户取消的一般多版本兼容工程。
+1. 抽屉顶部固定“你的助理”，下方为“任务 / 历史”“记忆”“设置”。启动回主线；浏览旧任务只改变 selectedID。主入口去掉新会话按钮，任务区保留显式新建独立会话。
+2. 推荐首次升级新建一个独立主 ChatSession，保存 primarySessionID；不默认把一次性旧任务提升为长期关系。旧会话/消息/草稿/模型/附件/项目和原选中记录均保留，不拼接或改写。无历史时也只创建一次主线。
+3. 主线标题使用固定助理名称，默认模型取已有 defaultSelection，项目默认空。主指针是落点，selectedID 是浏览状态；换模型和换话题不建新主线。旧会话内容通过明确引用和历史搜索使用。
+4. 主线清空和删除普通任务分开；活动运行/待处理请求继续受保护。用户以后可显式设定旧会话为主线，选择时说明会继续其原有上下文；不作为首版必需功能。
 
-### 数据模型与存储 owner
+Opus 建议默认使用升级前选中的非空非冲突会话，以保留即时连续性。本方案采用新主线作为默认，原因是旧 ChatSession 绑定项目，历史还可带 contextSnapshot；一次性工作上下文不宜隐式成为助理起始规则。这是设计取舍，不是框架能力差异。
 
-新增类型均为设计建议，当前源码不存在：
+### 最小数据与唯一 owner
 
-| 模型 | 内容 | 持久化与生命周期 |
+下列均为建议，当前尚未实现。HistoryFile 从 v3 做一次明确升级，保留现有未知版本拒绝覆盖规则，不扩大一般多版本兼容工程。
+
+| 数据 | 内容 | 保存边界 |
 |---|---|---|
-| AssistantProfile | 稳定助理身份、主线会话 ID、展示名称 | 本地 HistoryFile；首版不自动同步 |
-| MemoryEntry | 偏好/决定/长期约束，来源消息 ID、作用域、更新时间、删除状态 | 与历史同一原子文件；默认本地 |
-| CompactionRecord | 会话 ID、摘要、覆盖的消息边界与前缀散列、生成配置版本 | 仅为派生上下文；原始转录始终保留 |
-| TurnRecord | prompt ID、run ID 映射、关联任务、终态 | 描述执行结果，不保存可重放动作或凭证 |
-| PendingIntent | 后续请求的原始消息 ID、待用户继续状态 | 可保存请求；重启不恢复自动执行队列 |
+| primarySessionID | 默认助理聊天落点；名称/模型继续用 ChatSession 字段 | 本地 HistoryFile |
+| MemoryLedger | 原生 AgentMemoryEntry 内容/ID，加 scope、source session/message IDs、origin、revision、deletedAt/屏蔽 | 同一 HistoryFile；记忆不随换模型/换主线丢失 |
+| StoredCompaction | 原生 AgentCompactionRecord 加 sessionID、来源前缀指纹、scope/遗忘版本 | 派生上下文；原文永远保留 |
+| pendingNext | 一条真实用户 message、附件引用、目标和 pending/needsResume 状态 | 与草稿同级；配置/secret 仅在内存 pending ChatJob |
+| 工作 scope 元数据 | 主线 prompt/message IDs 对应的项目范围 | 只用于历史投影归属，不另存运行状态机 |
 
-由现有 ChatController 的持久化边界演进出一个 HistoryStore，提供主线程快照及满足 `AgentMemoryAccessing` 的 actor 安全适配。适配器将修改交回同一个 owner，不建立第二套 AgentKit JSON 历史仓库。新增重要字段用明确版本升级，未知版本继续拒绝覆盖。全文索引、显示窗口和摘要缓存均可重建，不能成为另一份事实源。
+继续让 ChatController（MainActor）成为唯一历史写入者。新增 memory/summarize/sync 的事务方法，不急于抽 HistoryStore actor。MemoryAdapter 以异步接口把操作交回该 owner：用最新状态校验 operations、scope 和屏蔽，再一次原子提交；成功后工具才返回已保存。摘要异步生成，提交前核验来源。读取/写入失败保持原文件和可恢复草稿，不能让模型声称保存成功。
 
-历史检索首版采用有界文本搜索与分页窗口，支持中文短词和同语言关键词；AgentKit 内置匹配需用中文跨天检索样例评估，若效果不足再扩展索引。是否需要 SQLite/FTS 或语义向量由实际召回和数据规模决定，不预先替换单一原子文件约束。
+完整消息、附件和 attributions 继续由当前事件 handler 落盘。AgentRuntime 的默认 InMemoryAgentRunRepository 用于活跃轮次，不成为第二套事实源，不用它恢复中断手机执行。运行状态继续用 ChatJob、ChatState 和 ExecutionStatus；已有 promptID/runID 与工具结果 ID 足够关联首版轮次。
 
-### 上下文与压缩
+### 记忆协议和工具接线
 
-1. 在接受轮次时冻结历史边界、模型、凭证、项目、后端与输入图片，沿用 ChatJob 的现有语义。
-2. ContextBuilder 使用已核实或用户明确配置的模型窗口，并预留规则、工具 schema、图片和输出开销。未知窗口提供显式预算配置/手动压缩，不能依赖 `shouldCompact` 自动工作，也不能把字符估算称为精确 token 计数。
-3. 达到预算时调用 `AgentCompaction.cutIndex` 选安全边界，使用无工具摘要调用。保存摘要及覆盖边界，下一轮发送摘要＋近期原文；摘要不作为真实用户消息追加，不改变原 ID。
-4. 对长执行轮次也在每次模型请求边界检查预算；仅在轮次结束时压缩无法防止一轮内大量工具结果超窗。宿主模型适配层负责异步摘要准备，同步 context pipeline 负责应用已准备的投影。
-5. 异步摘要提交前核对来源前缀散列。发生同步分叉、删除或内容变更就使摘要失效并重建；新输入仍按 steering 的交付顺序进入当前轮次。
-6. 摘要失败保留原文与已完成动作，报告无法继续组装上下文；不静默删历史，不重跑手机工具。更早细节通过 SessionSearchTool 取回，并注明来源会话/消息。
-7. UI 只构建当前可见的近期窗口，向上分页；长历史的完整落盘仍保持单文件，先测量写入耗时和内存，再决定是否需要调整全局存储约束。
+- 新增 `PocketMemoryAdapter: AgentMemoryAccessing`，实现 memoryState、applyMemory、searchMemories、searchSessions。原生协议支持 operations 原子应用，searchSessions 没有默认实现。复用 AgentMemoryState 校验、AgentSearchQuery/NLTokenizer 与词法排序，宿主补 scope/source、预算、tombstone。
+- 按允许 scope 投影原生 AgentMemoryState，应用 operations 后按条目 ID 将差异写回 ledger；不同 scope 同文保留不同身份，不能被原生去重合并。user 表示全局偏好，memory 默认当前项目（无项目则全局），UI 可明确选择 scope。
+- ToolCatalog 登记 memory、memory_search、session_search 与 `.memory` 类型，绑定现有内置工具的 schema/executor，统一能力提示和 RegistryApproval。不要启用整套 built-in catalog 改变原有授权。
+- ExecutionStatus 对未知工具会默认计入 phoneAction；增加记忆阶段/presentation，使真实记忆活动不显示成操作手机，转录行与系统进度同源。
+- **记忆只注入每轮重新组装的 systemPrompt，不放 sessionContext/contextSnapshot。** 后者会捕获到真实 prompt/steering 消息并持久化、重放；遗忘后旧副本可再次回来。同步 context pipeline 只接准备好的投影，不直接 await 记忆或摘要。
 
-### 长期记忆
+### 写入、召回与遗忘
 
-- 注册 memory、memory_search、session_search，并扩展 ToolCatalog 的实际能力/策略；当前注册器不会因为 AgentKit 提供这些类型就自动暴露它们。
-- “记住……”和“忘记……”是首版明确入口；可用 learning service 生成持续偏好候选，但不从一次性工具输出自动提炼全局事实。
-- 记忆区分全局个人偏好、项目决定、暂时任务信息；跨项目检索过滤作用域。来源、时间和有效性必须可查看、可编辑、可删除。
-- 手机 node、snapshot_id、前台状态、坐标和暂时登录状态留在执行上下文中，每轮重新观察；不把它们记为长期可执行事实。
-- 摘要记录短期进展，记忆保存长期事实；不能把“模型曾声称成功”提升为实际完成结果。决策和当前请求以用户最新表达为准。
-- 记忆版本在接受一轮时冻结；用户纠正或工具实际更新的有效记忆由下一轮重新获取。不能把显示层一条长期对话等同于永久冻结同一份个人记忆提示。
-- “忘记这条记忆”删除条目并保留删除标记，同时失效相关摘要/索引并抑制自动重新学习；“删除历史”是独立数据操作。单纯删除一条记忆而继续原样注入旧摘要不足以实现遗忘。
-- 记忆默认本地，不把 Keychain、配对记录、设备配置或本地照片字节加入 portable snapshot。用户手动清理和忘记操作应能阻止 stale snapshot 将内容重新带回。
+首版完成显式“记住 / 修改 / 忘记”和记忆面板。写入绑定真实用户记忆请求或用户编辑；普通问题只开放读取，网页/工具输出不能自行授权写入。模型声称完成不成为完成事实，snapshot_id、坐标和临时手机状态不成为长期动作依据。
 
-### 执行中继续聊天
+- 核心个人偏好小预算注入，再按当前请求与 scope 取相关决定。首版工程初值为核心偏好 ≤2,000 Unicode scalar，相关条目 ≤6,000 scalar/8 条，完整条目取入；这不是 token 计数，需中文样例校准。存储/单条预算也由宿主校验，超限明确要求整理，不截断事实。
+- 自动召回零命中不补满无关条目。AgentMemoryState.referenceEntries 会按更新时间纳入零命中内容，不直接作为严格相关检索。memory_search 可按需读更多；session_search 返回原文窗口及 session/message/分页锚点，支持同语言关键词、短词和中文分词。
+- 主线可切换项目时记录每轮工作 scope；近期原文和摘要也过滤 scope，不能只过滤 memory。旧记录归属未知时不猜测，通过明确引用读取。
+- “忘记记忆”定义为停用条目、屏蔽已知来源、使相关摘要/索引失效并禁止自动学习复活；原文仍可供用户手动查看。若用户要求原始内容也消失，应使用删除历史。不能宣称清除一条 memory 等于语义上的完全遗忘。
+- 每请求检查 forget revision，重新过滤旧注入/摘要，并从近期上下文或自动历史检索中屏蔽已知来源片段/完整安全组。只做摘要失效不足以遗忘：不带屏蔽重新摘要原文会再次写入同一事实。
+- 显式搜索读取最新有效 ledger，正常 prompt 使用当前轮冻结的有效记忆快照；遗忘优先于旧快照。用户后来明确再次记住可创建新 revision；后台候选不能自行解除屏蔽。
 
-保留当前“追加给当前任务”的能力，并在执行期间提供轻量输入目标：“当前任务 / 下一件事”。只有面向当前任务的输入调用 steer；独立请求形成 PendingIntent，在当前轮结束且前台可运行时，以新的冻结配置和上下文进入下一轮。轮次之间释放手机与清理资源。首版维持一个运行槽，避免为长期聊天同时引入并行工具、多个前台手机 owner 或后台任务系统。
+自动学习后置：运行结束、前台且空闲时，用 AgentMemoryLearningService review/correction 生成有限候选，先展示候选再应用。记录 reviewed-through 与 revision，避免重复新增；不持有第二个常驻 agent。不影响显式记忆 MVP 的完成。
 
-清晰的“取消当前任务”只取消其 run；历史、长期记忆与后续请求继续保留。App 重启时运行/排队任务按现有规则标记 interrupted，等待用户继续；保存待办描述不意味着允许重放动作。
+### 请求预算、摘要与真实进度
 
-### 同步与平台边界
+1. 在现有 ProviderFile 增加仅本机的 ContextBudgetOverrides，按 providerID/modelID 索引；ProviderStore 保存，接受请求时并入 RunConfiguration。不要把它直接加进可 portable 的 ProviderModelEntry。已有 4096 输出设置继续保留，已核实窗口可映射 AIModel.contextLength。
+2. 窗口未知时要求明确输入预算或手动压缩，不把推测窗口当 provider 能力。估算包括规则、tools schema、记忆、摘要、消息、当前工具输出和图片；预留输出与估算误差。可用实际 `.usageUpdated.inputTokens` 校准对应模型的估算，不能据此反推固定窗口。
+3. 先验证锚点、来源指纹、scope 和遗忘版本，再复用 [AgentCompactionRecord](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Core/AgentTypes.swift#L1006-L1045)和 [AgentCompactionProjection](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentRunPersisting.swift#L164-L177)组装摘要＋近期原文。synthetic summary 只进入请求投影，不追加为真实用户消息。原 API 找不到有效锚点会返回原文；宿主仍须重新检查预算，不能把它当安全降级。
+4. 跨轮复用 cutIndex/summarize；固定版本 [末尾是 tool 时返回 nil](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentCompactionService.swift#L64-L72)。首版摘要只覆盖当前 prompt 前的已持久完整前缀，补安全边界选择和指纹验证，不宣称自动任意轮内压缩。
+5. 在 PhoneObservingModel.stream 的异步请求边界包装预算，并在 phone.prepare 加最新截图之后最终检查。当前轮增长先采用请求侧旧屏幕观察投影：保留真实动作 outcome/unknown/不重放标记和调用结果结构，失效的旧节点/屏幕细节不全量重复发送；不按年龄裁掉任意文件/网络结果。仍超预算且没有安全切点则明确停止，保存已完成结果，等待用户新轮继续。
+6. contextPipeline 继续保留原 chat repairs/snapshot 语义；新投影只变发送内容，不改 messages/modelText。摘要和原文均是参考数据，不是新的执行授权。
+7. **摘要用无工具、流式但有界的 AgentModelCompleting 适配器。** 默认 summarize→collectText→ProviderClient.complete 是收集完再返回，期间不通过宿主上报 chunk。适配器内部用原 client.stream，真实文字/推理到达时更新“整理上下文”和现有 workObserved/progress，不产生聊天消息、手机动作计数或假心跳；保留取消、输出上限和终态校验。系统仍可到期，不能保证流式输出就保活成功。
+8. 提交摘要前再核验 canonical message IDs/source digest。摘要失败/取消不覆盖原文，不重跑工具；同一来源失败结果缓存，避免普通模型重试重复触发摘要付费。将上下文准备错误与 provider 主请求重试区分，保留明确失败原因。
 
-| 端/共享层 | 是否受影响 | 原因与兼容 |
+### 当前任务与一个“下一件事”槽位
+
+保留 `jobs[sessionID]` 表示当前已接受任务，并为主入口增加一个 pendingNext。canSend 按输入目标判断：下一件事不依赖当前 job.ready，steer 仍按原 readiness/取消规则拒绝。已有全局 engine.busy/queuedPhone/phoneSessionID 保持一运行槽，不新增 TurnCoordinator。活动状态时输入目标可选“补充当前任务 / 下一件事”；普通发送默认下一件事，第二项待处理请求先留在草稿，不能覆盖已排队那项。
+
+| 情况 | 行为 | 数据边界 |
 |---|---|---|
-| PocketAgent iOS | 受影响 | UI、HistoryFile、上下文投影与本地记忆；新版本一次迁移当前安装数据 |
-| AgentKit | 适配层受影响 | 复用固定 revision 的公共接口，首版不要求升级依赖 |
-| iCloud portable sync | 主线体验需评估 | 现有历史/冲突保留规则继续生效；首版不新增记忆同步，不承诺双设备并发主线自动合并 |
-| Looktech Android/iOS App | 不受影响 | 本次仅改 PocketAgent 的助理组织方式，不改眼镜业务或 App↔设备协议 |
-| 蓝牙/ISP/Wi-Fi 固件 | 不受影响 | 不改变固件通信、媒体或电源契约 |
-| schema / rpc / lt-vad | 不受影响 | 无共享消息、音频算法或 binding 变化 |
+| 空闲发送 | 冻结配置、接受新的 ChatJob | 开跑前取历史/记忆，追加真实 prompt |
+| 补充当前任务 | runtime.steer | 保持当前配置与 steeringDelivered 顺序 |
+| 下一件事 | 存 pendingNext，冻结内存配置 | 显示待处理卡片，不把未执行 prompt 插入工具组 |
+| 前件正常结束 | 完整清理后、前台时开下一件 | 取前件实际完成历史；模型仍用入队冻结配置 |
+| 前件失败/取消 | pending 保留，等待用户继续 | 不因“取消当前”自动开始新动作 |
+| App 重启 | active/queued interrupted，pending needsResume | 不还原 secret/运行队列，不重放 |
 
-后续跨设备统一主线要先确定写入协调和冲突可见性。可考虑按内部任务保留独立分支、主入口聚合其结果；如果引入服务器，则可由服务器顺序化。继续采用现有同 session 前缀合并时，必须如实展示冲突，不能按时间拼接工具结果。Portable schema 如新增助理身份/记忆需显式版本化、保持删除语义和当前版本客户端兼容窗口；只升级单个客户端不能被当作已完成跨设备迁移。
+接受时冻结 provider/model/credential、项目、后端、剪贴板和附件；开跑时冻结有效历史与记忆。当前历史也在 ChatJob 构造时冻结，需要有意调整主入口队列：下一件事才能看到前一件真实结果。后续输入不提前进入该请求的 prior；prompt 激活时追加并保留原 ID，不能按 timestamp 排序。
 
-Apple 将当前后台 API 定义为前台用户动作发起的工作延续；本项目同时有 600 秒 watchdog 和系统 expiration 取消处理（`App/PhoneAgent.swift:83-87,138-154`）。它满足有限轮次延续的用途，不能被当作全天候调度设施。以后若加入主动跟进，可让受授权的云端/常在线 Mac 处理外部信息与提醒；手机动作仍需本机能力检查和新的屏幕观察。此扩展不阻塞本次单入口与记忆目标。
+恢复 pending 时保留原始内容和附件；只有当前草稿为空或仍符合 DraftRestore 的 revision 保护才回填，否则保留待处理卡片。缺失项目/附件或 BG 提交失败沿用未启动恢复规则；不悄悄替换模型、项目或清掉新草稿。
 
-### 当前模块到目标模块
+### 系统宿主、同步与长历史
 
-| 模块 | 关系 | 具体改造 |
+首版保留现有 BGContinuedProcessingTask 路径，包括普通聊天。DDI/WDA 连接已是 lazy；普通聊天不用先完成手机 ready，仍会显示系统任务表面并受提交/expiration/600 秒限制。独立入口不会自动带来同时聊天与操作手机、或后台常驻能力。
+
+后续若体验要求纯聊天没有系统任务表面，再抽共用 runtime factory 和前台聊天宿主，并新增接受时冻结的 phone capability。无手机能力不能注册手机工具，手机任务提交失败不能静默降级；这是可独立验证的后续改造，首版不需要。
+
+primarySessionID、memory、summary、pendingNext 和 scope 元数据均本地保存；实际主线消息沿用现有 portable session，同步查看但不承诺两设备同一助理身份。Provider 的输入预算也本地，portable schema 首版保持。
+
+applySync/delete 必须保留全部新本地字段；若现有 replaced 映射明确指向保留本地并发编辑的副本，可原子重映射主指针并提示。若主线已删除、分支归属不明或锚点不匹配，则摘要失效、显示恢复状态，由用户选主线后再执行；不任意挑 winner 或自动拼接时间线。多设备 memory tombstone/统一身份另行设计。
+
+长历史显示目标为近期完整消息组与向上分页。先测量主线原子写盘和全量预处理；若达目标预算则保持现有单文件/渲染，若不达则补显示窗口与有界索引缓存。分页不改变原消息或 tool 邻接，索引可重建，不成为事实源。
+
+| 端 / 共享层 | 影响 | 原因 |
 |---|---|---|
-| ChatRootView / ChatComposer | 迁移 | 固定主线入口、历史/记忆面板、执行期输入目标 |
-| ChatTranscriptView / ChatPolicies | 扩展 | 有界显示窗口、日期/任务锚点，保留工具行与原消息顺序 |
-| ChatSessions / ChatHistory | 扩展 | HistoryStore、主线身份、记忆/摘要、轮次映射与一次升级 |
-| ProviderConfig / ProviderStore | 扩展 | 可验证/可配置的上下文预算，入队时冻结 |
-| PhoneAgent / ToolCatalog | 扩展 | 记忆与历史搜索工具、模型请求预算层、摘要投影 |
-| AgentRunner / PhoneExecutor / Native | 保持 | 后台生命周期、串行动作、fresh snapshot、取消与不重放 |
-| PortableSync / CloudSync | 首版保持核心规则 | 显示已有冲突；新增 portable 语义另行实现与验证 |
+| PocketAgent iOS | 受影响 | 主入口、本地数据、记忆/摘要和输入队列；本次仅文档 |
+| AgentKit | 仅宿主适配受影响 | 固定 package 源码、循环和协议保持 |
+| PortableSync / iCloud Drive | 本地回写路径需回归 | portable 算法与 schema 保持，保护新字段/主指针 |
+| Looktech Android / iOS App | 不受影响 | 独立 PocketAgent 改造，不改眼镜业务 |
+| 蓝牙 / ISP / Wi-Fi 固件 | 不受影响 | 无通信、媒体或电源契约变更 |
+| schema / rpc / lt-vad | 不受影响 | 无共享消息、音频算法或 binding 改动 |
 
-### 验证范围
+### 文件落点与验收
 
-本次已完成官方公开资料、OpenClaw/Hermes 与表列 OpenMuse/nanoMuse 固定提交、PocketAgent 及固定 AgentKit revision 的静态核对，未运行新的 App 构建、安装、iCloud 或实机验收；上表均是设计，不能描述为已交付功能。
+| 现有文件 / 建议新增 | 关系 | 具体内容 |
+|---|---|---|
+| ChatRootView.swift、ChatComposer.swift | 扩展 | 默认助理、旧任务区、记忆面板入口、输入目标 |
+| ChatSessions.swift、Core/ChatHistory.swift | 扩展 | 唯一 writer 保持、一次迁移、主指针、ledger/摘要/pending、开跑快照 |
+| 建议新增 Core/AssistantContext.swift | 新增 | 轻量 ledger/摘要元数据/pending 形状，不建 Task 状态机 |
+| 建议新增 PocketMemoryAdapter.swift | 新增 | 内置记忆工具的 scope/source/事务适配、会话窗口检索 |
+| 建议新增 AgentContextBuilder.swift、BudgetedAgentModel.swift | 新增 | 预算、原生摘要投影、流式摘要进度与每请求 guard |
+| PhoneAgent.swift、Core/ToolCatalog.swift、ExecutionStatus.swift | 轻量扩展 | 记忆工具登记/显示、systemPrompt 注入、请求 wrapper/真实整理进度 |
+| Core/ProviderConfig.swift、ProviderStore.swift、ProviderViews.swift | 扩展 | 仅本机预算 overrides 与冻结配置 |
+| Core/PortableSync.swift、CloudSync.swift | 保持算法、补字段保护 | 指针映射/冲突恢复，不新增 portable memory |
+| ChatTranscriptView.swift、Core/ChatPolicies.swift | 测量后必要扩展 | 近期窗口、分页和待处理卡片 |
+| AgentRunner.swift、PhoneExecutor、PhoneControl / Native | 核心保持 | 现有后台生命周期、手机 owner、fresh snapshot、取消与不重放 |
 
-实现时需覆盖：当前安装数据的一次升级保留；重启回到主线；模型切换不丢记忆；跨天偏好/决定检索；中文关键词；忘记后不被摘要重新注入；一轮内与跨轮压缩不破坏工具邻接；摘要失败不重放；新请求和 steering 分流；长历史滚动/落盘性能；同步分叉仍可见。交付沿用 core tests、iOS build、IPA inspection 和指定真实设备 exercise。新增 portable 语义再增加真实 iCloud/双设备验证，不为只读设计运行无关构建。
+本次仅做静态方案，没有实现、构建、安装或实机测试。实现验收覆盖：升级旧记录完整保留、重启主入口稳定；记忆跨天/换模型和项目 scope；已知遗忘来源不被旧摘要重新引入；排队模型冻结且可见前件结果；摘要含截图预算、失败不重放；pending 恢复不覆盖新草稿；取消/失败/后台到期清理；sync 不丢新本地字段、冲突可见；长历史写盘/滚动性能。交付沿用 core tests、iOS build、IPA inspection 与指定真实设备 exercise，不把静态推断当实机证明。
+
+### 拒绝方案
+
+- 替换 AgentKit 为 OpenMinis loop：关键缺口在宿主，新 loop 仍需接入原手机执行和数据契约，当前没有必须替换的能力依据。
+- 只固定一个旧 session 或只加入口：有限上下文、记忆和输入分流仍需实现，导航变更不能单独满足目标。
+- 首版新增协调 agent/持久 worker/第二套仓库：扩大恢复与资源 owner；现有单槽、三种记忆工具和原生摘要投影已足够构造 MVP。
 
 </details>
 
+
 ## 4. 资源与交付计划
 
-实现方案确认后，推荐顺序为主线与迁移 → 上下文预算/压缩 → 记忆/历史检索 → 执行期输入分流与整体验证。四项组成单设备 MVP；多设备统一身份与主动后台工作单独规划。
+建议按“入口/数据 → 预算/摘要 → 显式记忆 → 输入分流与整体验证”落地。完成四项后交付单设备 MVP；普通聊天独立生命周期、自动学习、并行工作与多设备统一主线后置。各阶段只新增所需宿主接线，保持现有执行链。
 
-| 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
+| 阶段 / 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
-| 主线导航、显示窗口、一次数据迁移 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | 主线身份定义 |
-| 请求预算、压缩与来源失效 | PocketAgent / AgentKit 适配 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | 模型窗口配置、HistoryStore |
-| 本地长期记忆与旧历史检索 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | 原子存储、scope/遗忘语义 |
-| 当前任务/下一件事分流、交付验证 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | 轮次映射、已有手机队列 |
-| 双设备统一主线 / 记忆同步 | PocketAgent sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | portable 协议、并发协调 |
-| 主动跟进与持续语音 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 未纳入本次需求 | 新的运行与授权设计 |
+| P1 主入口、一次迁移、本地新字段 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | 主指针/ledger/摘要/pending 契约 |
+| P2 预算、摘要投影、每请求 guard 与真实整理进度 | PocketAgent / AgentKit 适配 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | P1、仅本机模型预算、来源边界 |
+| P3 显式记忆、历史检索、scope/来源/遗忘 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | P1/P2、registry/reducer、原子事务 |
+| P4 一个下一件事槽位、sync 字段保护、长历史测量/必要分页、完整验收 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 设计中；2026-10-14 | P1–P3 与指定设备 |
+| 自动学习候选 / 纠正 review | PocketAgent / AgentKit 适配 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | MVP 后续 | 显式记忆/遗忘稳定 |
+| 普通聊天前台宿主 | PocketAgent iOS | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续体验优化 | 冻结 phone capability、系统生命周期验证 |
+| 并行工作 / 自动委派 | PocketAgent 调度 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | 新 task owner、资源和结果回流契约 |
+| 多设备统一身份 / 记忆同步 | PocketAgent sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | portable 协议、并发协调、真实双设备验证 |
+| 主动跟进 / 持续语音 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 未纳入本次需求 | 新运行与授权设计 |
 
-已确认的用户选择：单入口＋长期记忆。可由实现者自行解决：上述本地存储、上下文、检索与输入路由。后续仅用户可决定的范围：是否增加主动跟进、持续语音与云端数据托管；这些选择不阻塞当前推荐路线。暂无新运行故障的根因结论，本次记录的是已确认的源码能力与目标缺口。
+已确认的用户选择是“单入口＋长期记忆”“先不改代码”，并要求 Opus 5.5 独立评估。保留 AgentKit、默认独立助理入口和本地单槽 MVP 是本轮推荐，状态仍为设计中，不把推荐写成用户已批准的实现决策。
+
+实现者可自行解决宿主接线、原子写入、预算、检索与输入路由。仅用户决定的后续产品范围是自动学习默认写入、并行工作、主动跟进、持续语音与云端托管；这些选择不阻塞显式记忆 MVP。记忆质量、系统后台行为和长历史性能还须实现后验证。

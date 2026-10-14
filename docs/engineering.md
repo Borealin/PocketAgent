@@ -7,8 +7,12 @@ records the user-confirmed 2026-10-14 direction, public information about Muse,
 Grok Bot and OpenAI dots, and fixed-revision architecture research for OpenClaw,
 Hermes, the OpenMuse variants, and nanoMuse/OpenMinis iOS. It distinguishes live
 composition from standalone modules, future design, and reused frameworks.
-The local-first implementation remains a proposal. It is design work only; the current multi-session behavior
-and execution contracts below remain the implemented baseline.
+The v1 proposal keeps the pinned AgentKit and the existing phone execution path,
+adds a default assistant entry, and extends the same ChatController-owned atomic
+history with explicit memory, compaction metadata, and one pending-next request.
+Opus 5.5 peer assessment and source-verified tradeoffs are recorded in that plan.
+This is documentation only; the current multi-session behavior and execution
+contracts below remain the implemented baseline.
 
 Native provider management on a dedicated page, provider/model selection per
 conversation, iCloud Drive synchronization of portable data, reproducible IPA
