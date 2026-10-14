@@ -188,6 +188,8 @@ struct AssistantSyncTests {
         let primary = file.assistant.primarySessionID
         let prompt = AgentTranscriptMessage(role: .user, text: "本地")
         try file.acceptRoot(prompt, attachments: [], in: primary, scope: .general)
+        try file.commitDispatchPermit(root: prompt.id, sessionID: primary, scope: .general)
+        try file.editSession(primary) { $0.state = .completed }
         _ = try file.applyMemoryEdit(.add(target: .memory, scope: .global, content: "本机记忆", origin: .panel,
                                           sourceRootPromptIDs: [], sourceMessageIDs: []))
         let base = portable(file.primary!)

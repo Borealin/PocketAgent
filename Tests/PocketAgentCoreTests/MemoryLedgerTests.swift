@@ -312,12 +312,16 @@ struct MemoryAdapterTests {
         let project = UUID()
         let general = AgentTranscriptMessage(role: .user, text: "上次在杭州买的龙井茶不错")
         try history.acceptRoot(general, attachments: [], in: primary, scope: .general)
+        try history.commitDispatchPermit(root: general.id, sessionID: primary, scope: .general)
         try history.appendEvent(AgentTranscriptMessage(role: .assistant, text: "记下了"), to: primary, root: general.id)
+        try history.editSession(primary) { $0.state = .completed }
         let other = ChatSession(title: "项目")
         history.sessions.append(other)
         let projectPrompt = AgentTranscriptMessage(role: .user, text: "项目里的龙井茶预算")
         try history.acceptRoot(projectPrompt, attachments: [], in: other.id, scope: .workspace(project))
+        try history.commitDispatchPermit(root: projectPrompt.id, sessionID: other.id, scope: .workspace(project))
         try history.appendEvent(AgentTranscriptMessage(role: .assistant, text: "预算三千"), to: other.id, root: projectPrompt.id)
+        try history.editSession(other.id) { $0.state = .completed }
         let box = Box(history)
         let adapter = PocketMemoryAdapter(scope: .general, currentRoot: UUID(), references: [],
                                           snapshot: { box.file }, register: { _, _, _ in })

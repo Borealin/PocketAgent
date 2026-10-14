@@ -39,6 +39,14 @@ extension ChatController {
         return receipt
     }
 
+    /// A request that has not started yet but may still start: queued or
+    /// preparing, or the pending request kept for an explicit decision.
+    func isAwaitingStart(_ root: UUID) -> Bool {
+        if jobs.values.contains(where: { $0.prompt.id == root && !$0.terminal }) { return true }
+        if case .promoted(let id)? = assistant.pendingNext?.prompt { return id == root }
+        return false
+    }
+
     /// The primary turn the engine is executing (preparing or running), if any.
     var activePrimaryRoot: UUID? {
         let job = runningJob.flatMap { jobs[$0.sessionID] === $0 ? $0 : nil }
