@@ -225,6 +225,8 @@ private struct SessionDrawer: View {
     let openSettings: () -> Void
     let openMemory: () -> Void
     @State private var pendingDelete: ChatSession?
+    @State private var confirmClear = false
+    @State private var clearBlocked: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -241,6 +243,13 @@ private struct SessionDrawer: View {
                     }
                     .listRowBackground(chat.isPrimary(chat.selectedID) ? Color.accentColor.opacity(0.14) : Color.clear)
                     .accessibilityIdentifier("assistantEntry")
+                    .swipeActions(allowsFullSwipe: false) {
+                        Button("清空", systemImage: "eraser") { requestClear() }.tint(.orange)
+                    }
+                    .contextMenu {
+                        Button("清空对话，保留记忆…", systemImage: "eraser", role: .destructive) { requestClear() }
+                            .accessibilityIdentifier("clearAssistantConversation")
+                    }
                     Button(action: openMemory) { Label("记忆 · \(chat.assistant.memory.active.count)", systemImage: "brain") }
                         .accessibilityIdentifier("drawerMemory")
                 }
@@ -287,6 +296,22 @@ private struct SessionDrawer: View {
             }
             Button("取消", role: .cancel) { pendingDelete = nil }
         } message: { _ in Text("会话及其本机图片将从这台设备删除；已开启同步时其他设备也会删除。") }
+        .confirmationDialog("清空“你的助理”的对话？", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("清空对话，保留记忆", role: .destructive) { withAnimation { chat.clearPrimaryConversation() } }
+                .accessibilityIdentifier("confirmClearAssistant")
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将删除助理主线的全部对话、草稿、引用、对话摘要和只属于这些对话的图片，不能撤销；已开启同步时其他设备也会删除。"
+                 + "已保存的记忆、遗忘记录、当前模型与项目、模型服务和其他任务都会保留。")
+        }
+        .alert("暂时不能清空", isPresented: Binding(get: { clearBlocked != nil }, set: { if !$0 { clearBlocked = nil } })) {
+            Button("好", role: .cancel) { clearBlocked = nil }
+        } message: { Text(clearBlocked ?? "") }
+    }
+
+    /// Asks for confirmation, or explains what has to be stopped or handled first.
+    private func requestClear() {
+        if let blocker = chat.clearPrimaryBlocker { clearBlocked = blocker } else { confirmClear = true }
     }
 
     private var primarySubtitle: String {
