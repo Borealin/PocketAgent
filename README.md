@@ -130,12 +130,41 @@ changes discard it. An expired phone operation is never replayed automatically.
 The default path label can show unavailable while the local VPN still works.
 
 
+## Your assistant, tasks and memory
+
+The app opens on **你的助理**, one continuing conversation that you come back to
+across topics, model changes and days. Earlier work stays in its original
+messages; the assistant sends a bounded context (recent same-project history,
+a checked summary of older finished work and the memory you saved) instead of
+the whole history. Independent conversations live under **任务 / 历史** in the
+list (new task, rename, delete); they keep their own history and model.
+
+Memory is only what you explicitly save: type `记住：<内容>` (or
+`/remember <内容>`) to save the exact text without starting a turn, tap
+**存为记忆** on a message, or use the brain icon (记忆) to add, correct or forget
+entries. Corrections apply from the next model request. Forgetting shows how
+many related conversations will be excluded from the assistant's context before
+you confirm; the original messages stay visible on this device. The assistant can
+search saved memory and same-project history but cannot write memory itself.
+Memory, summaries and the assistant's scope data stay on this device.
+
+While the assistant is working, the input queues one **下一件事** that starts
+after the current turn completes in the foreground; switch the picker to
+**追加到本轮** to steer the running turn instead. After Stop, a failure or an app
+restart, the waiting request shows **继续 / 移回草稿 / 放弃** and never starts by
+itself. In a task conversation, **引用到你的助理** (long press a message) lets the
+assistant read that exact finished part of history once.
+
+This release stores data in a new `assistant-v1` format: it starts with an
+empty assistant and does not read or convert earlier conversations or provider
+settings, which stay untouched on the device. Set up the model service again;
+pairing and phone settings are kept.
+
 ## Conversations and providers
 
-Use the list icon to open conversations and Settings. Tap the chat title to
-rename it, or use the conversation's menu in the list. The top-right icon starts
-a new conversation. The model chip above the input chooses this conversation's
-provider and model.
+Use the list icon to open the assistant, memory, tasks and Settings. Tap a task
+title to rename it, or use its menu in the list. The model chip above the input
+chooses the current conversation's provider and model.
 The concrete model name appears first; the picker shows API information beneath it.
 Settings → 外观 chooses 跟随系统, 浅色 or 深色; the choice stays on this device.
 
@@ -172,6 +201,12 @@ by your key's group. Common routes use `/v1`; Antigravity uses explicit
 preset starts with Responses; change the protocol if your group requires it.
 Existing addresses and keys stay unchanged. Advanced custom addresses remain
 available for services with different inference and catalog routes.
+
+Each model has an optional local **本机上下文预算** in the provider editor: a
+confirmed context window or an input ceiling becomes a hard limit for the
+assistant's requests; without one the assistant only keeps to a soft target of
+about 24k estimated tokens. Older context is summarized in the foreground for
+at most 30 seconds in this version.
 
 Choose a provider and model for each conversation. Accepted turns capture
 their selection and credential before joining the serial phone action queue.
@@ -230,8 +265,12 @@ selects an exact folder without creating another child. Choose the same
 provider configuration. Local folders do not sync across devices. Each device
 needs its own API keys, pairing record, runner settings and folder permission.
 
-Portable snapshots contain conversation text, tool calls/results, model
-selection, image-presence metadata and nonsecret provider settings. Image bytes,
+Portable snapshots (in an `assistant-v1` subfolder of the chosen location;
+earlier sync files beside it are left alone) contain conversation text, tool
+calls/results, model selection, image-presence metadata and nonsecret provider
+settings. Memory, summaries, the pending request and local budgets are not
+synchronized; if another device deletes or diverges the assistant's
+conversation, the app asks which conversation to continue instead of choosing. Image bytes,
 screenshots, keys, pairing records, drafts and running jobs are kept local.
 An image synced from another device appears unavailable unless its bytes are
 already on this device. A synced conversation
@@ -353,7 +392,9 @@ download without a GitHub account.
 ## Development
 
 Read [AGENTS.md](AGENTS.md) and [the engineering design](docs/engineering.md).
-Core tests cover migrations, frozen model selection and portable merge rules;
+Core tests cover the strict assistant-v1 format, commit gates, memory and
+forgetting, context building, the pending state machine, frozen model selection
+and portable merge rules;
 distribution tests cover feed updates. Real-device checks are required for phone
 automation and actual iCloud folder access. Build or unit-test success alone does
 not establish those behaviors.
