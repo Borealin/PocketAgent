@@ -419,7 +419,7 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
 
-Verification scope (2026-10-14): Core suite (267 tests, mock transports) passes
+Verification scope (2026-10-14; follow-ups 2026-10-15): Core suite (312 tests, mock transports) passes
 on the Mac host, including the commit gates through the pinned AgentRuntime,
 crash points of the pending state machine, 12k-root dependency chains, earlier
 version-1 settings files keeping IDs/origins/default/budgets, the summary
@@ -459,8 +459,18 @@ confirmed clear left an empty line with the same model and project, unchanged
 tasks, memory and settings, the cleared marker was not found by the model's
 history search after a relaunch, and memory recall continued. The in-flight
 sync plan, same-ID remote refill, conflict-copy and failed-write boundaries are
-host-tested only. Remaining gaps and the
-2026-10-15 device results for the six follow-ups are listed in the plan. Long-history numbers are host
+host-tested only. On 2026-10-15 (12 mini, real UI and model) the six follow-ups
+were exercised: a memory saved before midnight was recalled after it (one day
+boundary, not multi-day stability), remember mode, the candidate sheet (five long
+entries with the keyboard up, forget/correct/cancel/send as message, no match,
+an ordinary "我忘记带钥匙" message), recall after a correction, a memory added
+during a run used by the same run, read-only observation, the frozen budget line,
+the host refusal at a 1000-token ceiling (restored afterwards), Stop and restart
+without replay, and clearing the conversation on the final build. Device
+long-history numbers (launch argument, sandbox file, real history untouched):
+per-event write p95 0.08 s at 10k and 0.55 s at 50k messages. Remaining
+boundaries (bare SSE error objects at the pinned SDK, lexical recall precision,
+oversized single segments, model-change recall) are listed in the plan. Long-history numbers are host
 measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
 (110 MB file), transcript paging renders 400 messages per page.
 
