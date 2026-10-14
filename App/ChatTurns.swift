@@ -41,6 +41,8 @@ final class ChatJob {
     let scope: WorkScope
     let references: [HistoryReference]
     let primary: Bool
+    /// The frozen context budget shown with this job's status (primary line only).
+    var statusBudget: ContextBudgetPolicy? { primary ? config.budget : nil }
     /// The startup permit committed; from here on nothing is restored or resumed.
     var permitted = false
     /// AgentKit emitted runStarted.
@@ -396,7 +398,7 @@ extension ChatController {
                                                 supportsImages: job.config.supportsImages, load: attachmentFiles.data)
         phoneSessionID = job.sessionID
         runningJob = job
-        statuses[job.sessionID] = ExecutionStatus(modelLabel: job.config.label)
+        statuses[job.sessionID] = ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         let gates = TurnGates(epoch: job.epoch, barrier: owner.barrier, promptID: job.prompt.id,
                               permit: { [weak self, weak job] in
                                   guard let self, let job else { throw CancellationError() }
@@ -476,7 +478,7 @@ extension ChatController {
 
     /// A request that never received its startup permit.
     private func notStarted(_ job: ChatJob, _ message: String, cancelled: Bool, warning: String = "") {
-        var status = statuses[job.sessionID] ?? ExecutionStatus(modelLabel: job.config.label)
+        var status = statuses[job.sessionID] ?? ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         if !status.phase.isTerminal { status.failure = message; status.finish(successful: false, cancelled: cancelled) }
         if jobs[job.sessionID] === job { statuses[job.sessionID] = status }
         switch NotStartedRoute.route(pendingOrigin: job.isPendingOrigin, cancelled: cancelled) {
@@ -563,7 +565,7 @@ extension ChatController {
         job.cancelled = true; job.ready = false
         if queuedPhone.contains(where: { $0 === job }) {
             queuedPhone.removeAll { $0 === job }
-            var status = ExecutionStatus(modelLabel: job.config.label)
+            var status = ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
             status.finish(successful: false, cancelled: true)
             statuses[id] = status
             notStarted(job, "已取消排队任务。", cancelled: true)

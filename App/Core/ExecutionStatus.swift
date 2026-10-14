@@ -60,12 +60,30 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     var failure: String?
     /// Context maintenance outcome of the primary line (for example no summary this turn).
     var contextNote: String?
+    /// The primary line's context budget, frozen with the turn (nil for other turns).
+    let budget: ContextBudgetPolicy?
+    /// Estimate of the latest complete model request (after phone preparation,
+    /// images, the current memory block and old-observation projection); kept
+    /// after the turn ends. Not provider usage.
+    var requestEstimate: Int?
     private var terminalState: AgentRunState?
     /// Visible labels of nodes in the latest observation, for action text.
     private var elements: [Int: String] = [:]
 
-    init(modelLabel: String = "", phase: ExecutionPhase = .connecting) {
-        self.modelLabel = modelLabel; self.phase = phase
+    init(modelLabel: String = "", phase: ExecutionPhase = .connecting, budget: ContextBudgetPolicy? = nil) {
+        self.modelLabel = modelLabel; self.phase = phase; self.budget = budget
+    }
+
+    /// The frozen budget and the latest request estimate. An unknown window
+    /// is shown as a soft maintenance target, never as the model's limit.
+    var contextLabel: String? {
+        guard let budget else { return nil }
+        let limit = switch budget.source {
+        case .knownWindow(let window): "输入上限 \(budget.hardCeiling ?? budget.target) token（已确认窗口 \(window)）"
+        case .explicitCeiling(let ceiling): "本机输入上限 \(ceiling) token"
+        case .unknown: "窗口未知：按约 \(budget.target) token 软目标整理，不是模型上限"
+        }
+        return [requestEstimate.map { "本轮请求估计约 \($0) token" }, limit].compactMap { $0 }.joined(separator: " · ")
     }
 
     mutating func apply(_ event: AgentEvent, now: Date = Date()) {

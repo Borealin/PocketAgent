@@ -33,6 +33,8 @@ final class AssistantTurnSupport {
     private var lastRawEstimate: Int?
     /// Outcome of context maintenance this turn (shown in the status detail).
     private(set) var maintenanceNote: String?
+    /// Receives the estimate of every complete request, before the ceiling check.
+    var onEstimate: (@MainActor (Int) -> Void)?
     private var calibrationKey: EstimatorCalibration.Key {
         .init(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
     }
@@ -121,6 +123,7 @@ final class AssistantTurnSupport {
                                                   hasMemoryTools: request.tools.contains { $0.name == "memory_search" })
         let estimator = EstimatorCalibration.shared.estimator(calibrationKey)
         let estimate = estimator.estimate(prepared)
+        onEstimate?(estimate)
         if let ceiling = config.budget.hardCeiling, estimate > ceiling {
             throw ContextBudgetError.overHardCeiling(estimated: estimate, ceiling: ceiling, source: config.budget.label)
         }
