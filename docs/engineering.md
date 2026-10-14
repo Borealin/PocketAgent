@@ -1081,8 +1081,18 @@ no-replay boundary. Native regressions cover refusal versus uncertain effect,
 failed release and exact fractional-frame JSON round trips; Core regressions cover
 the wire outcome, optional-null policy, placeholder ambiguity and Gemini projection.
 Temporary Git-fixture regressions cover patch upgrades, interrupted staging and
-preservation of unknown edits. Full iOS/IPA and selected-device verification must
-be renewed for this implementation; prior branch acceptance is not its device gate.
+preservation of unknown edits. This implementation has renewed Core/native tests,
+iOS archive and signed-IPA inspection. On the wired portrait iPhone 12 mini,
+the production executor's pre-effect refusal leaves later input usable; optional-null
+paste, clipboard denial with explicit AX, placeholder ambiguity and selectable WDA
+were checked against an independent receiver. Lease revocation released the received
+touch, and a new turn accepted input; the same-turn poison guard remains covered by
+native tests rather than that device case. The same-identity update retained existing
+IDs, messages, order, deletion records and provider/workspace/rule configuration. A
+real configured Responses-model turn completed one read-only observation of the
+receiver. This scope does not certify live Gemini requests, arbitrary custom fields,
+unplugged startup or active Dynamic Island surface preparation. Success artifacts and
+transcripts remain in the private local handoff.
 
 The transcript dismissed the keyboard during interactive scrolling but had no
 tap-to-dismiss path. A transcript-only simultaneous tap now clears the root's

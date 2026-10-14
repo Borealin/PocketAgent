@@ -430,8 +430,9 @@ Real-search checks exposed two further limits in the current implementation:
   its native regression preserves the exact fractional-frame bits. No frame tolerance
   is introduced; fresh identity, foreground, complete graph and exact hit checks stay
   required. This fixes the reproduced transport defect but does not prove that the
-  earlier Maps refusal was caused only by numeric drift; revised-device acceptance
-  remains required.
+  earlier Maps refusal was caused only by numeric drift; Maps-specific acceptance
+  of that failure remains required. The renewed controlled-field and main-app
+  compatibility scope is recorded in engineering.md under confirmed integration fixes.
 - App Store and Safari submission can return AX foreground has no readable hit
   point after Return was issued. App Store later permits read-only observation
   of the actual search page. One initial page instead showed Cannot Connect; a
