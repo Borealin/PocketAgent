@@ -443,7 +443,8 @@ extension ChatController {
         statuses[job.sessionID] = status
         if !job.permitted {
             // Nothing was dispatched for this request.
-            notStarted(job, status.failure ?? "本轮未开始。", cancelled: job.cancelled, warning: cleanupWarning)
+            let reason = job.revoked ? ContextSourceRevoked().errorDescription : status.failure
+            notStarted(job, reason ?? "本轮未开始。", cancelled: job.cancelled, warning: cleanupWarning)
         } else {
             let reason = (status.failure.map { "原因：\($0)" } ?? "").trimmingCharacters(in: .whitespaces)
             let state: ChatState = successful ? .completed : (job.cancelled ? .interrupted : .failed)

@@ -77,6 +77,7 @@
 		F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6EC72EE2D00391C3C55564C /* NativeTools.swift */; };
 		F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */ = {isa = PBXBuildFile; fileRef = 383A79C611AE1573F3276AA9 /* ish-root.tar.gz */; };
 		F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */; };
+		F7493659461238130C24AB4D /* SummaryMaintenance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63FEC8E86A7377406E9127B /* SummaryMaintenance.swift */; };
 		F887E531FDE10E1EFD4C5B72 /* HistoryStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF3646323BE7793B3B8697E9 /* HistoryStorage.swift */; };
 		FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F24A784103BF8F2532963F /* ChatHistory.swift */; };
 		FCD0F1007FC746B9806DAB48 /* AssistantTurnSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1064B279B527E66B105C75F2 /* AssistantTurnSupport.swift */; };
@@ -135,6 +136,7 @@
 		ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingEdits.swift; sourceTree = "<group>"; };
 		B5507EA1F8D4F7602AAC5689 /* MemoryLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryLedger.swift; sourceTree = "<group>"; };
 		B5663978DEBD3F751D7210B1 /* TranscriptCommitBarrier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCommitBarrier.swift; sourceTree = "<group>"; };
+		B63FEC8E86A7377406E9127B /* SummaryMaintenance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryMaintenance.swift; sourceTree = "<group>"; };
 		B6EC72EE2D00391C3C55564C /* NativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTools.swift; sourceTree = "<group>"; };
 		B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSequence.swift; sourceTree = "<group>"; };
 		BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneConnectionStatus.swift; sourceTree = "<group>"; };
@@ -244,6 +246,7 @@
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
 				925006F86E0B486805C14187 /* StreamingSummary.swift */,
+				B63FEC8E86A7377406E9127B /* SummaryMaintenance.swift */,
 				7F385985B41CF2BDD68B588A /* SyncApply.swift */,
 				7F4597769ADE790DBCF5243A /* TextInputRequest.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
@@ -455,6 +458,7 @@
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 				73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */,
+				F7493659461238130C24AB4D /* SummaryMaintenance.swift in Sources */,
 				531747ABA296FFBD9252BB24 /* SyncApply.swift in Sources */,
 				CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,

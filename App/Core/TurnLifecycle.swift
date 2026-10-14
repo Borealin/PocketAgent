@@ -46,3 +46,14 @@ nonisolated enum NotStartedRoute: Equatable, Sendable {
         return cancelled ? .abandon : .hold
     }
 }
+
+/// The primary root an explicit forget may stop: only the primary turn the
+/// engine is executing, while it prepares context (before its permit, when
+/// maintenance already reads history) or runs. A queued primary request has
+/// read nothing yet, and a running independent task is never stopped by it.
+nonisolated enum ForgetStopPolicy {
+    static func activeRoot(primaryID: UUID, runningSessionID: UUID?, runningRoot: UUID?, terminal: Bool) -> UUID? {
+        guard runningSessionID == primaryID, !terminal else { return nil }
+        return runningRoot
+    }
+}

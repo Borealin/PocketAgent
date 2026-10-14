@@ -327,7 +327,9 @@ nonisolated enum AssistantContext {
             let tokens = ContextEstimator.textTokens(serialized(segment.messages))
             if tokens > foldBudget { return nil } // one safe group is larger than a summarizer input
             if !current.isEmpty, size + tokens > foldBudget {
-                folds.append(current); current = []; size = 4_000 // a folded summary carries forward
+                // A folded summary carries forward; its real size is checked
+                // with the complete request before each dispatch (SummaryMaintenance).
+                folds.append(current); current = []; size = 4_000
             }
             current.append(segment); size += tokens
         }

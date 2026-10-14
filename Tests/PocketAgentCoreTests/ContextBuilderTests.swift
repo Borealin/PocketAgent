@@ -4,7 +4,7 @@ import Testing
 @testable import PocketAgentCore
 
 struct ContextBuilderTests {
-    private struct Fixture {
+    fileprivate struct Fixture {
         var file = HistoryFile.initial(selection: nil)
         var primary: UUID { file.assistant.primarySessionID }
 
@@ -217,4 +217,197 @@ struct ContextBuilderTests {
 
 struct AllowEverything: AgentApprovalHandling {
     func authorize(_ request: AgentApprovalRequest, mode: AgentPermissionMode) async -> AgentApprovalDecision { .allow }
+}
+
+private final class PreviewSeen: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen = false
+    var value: Bool { lock.withLock { seen } }
+    func set(_ new: Bool) { lock.withLock { seen = new } }
+}
+
+private final class ProducerCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func next() -> Int { lock.withLock { value += 1; return value } }
+}
+
+/// Checks right before every maintenance dispatch: the complete request
+/// against the frozen budget, storage health and explicit forgets.
+@MainActor
+struct SummaryDispatchGuardTests {
+    private typealias Fixture = ContextBuilderTests.Fixture
+
+    private func turn(_ fixture: Fixture, prompt: UUID, budget: ContextBudgetPolicy = .unknown) -> SummaryMaintenance.Turn {
+        .init(sessionID: fixture.primary, promptID: prompt, scope: .general, budget: budget, estimator: ContextEstimator(),
+              summaryModel: "m")
+    }
+
+    private func producer(_ calls: ProducerCalls,
+                          onCall: @escaping @Sendable (Int) async throws -> Void = { _ in }) -> StreamingSummary.Producer {
+        { _, onEvent in
+            let call = calls.next()
+            try await onCall(call)
+            try onEvent(.textDelta("## Goal\n第\(call)段摘要"))
+            try onEvent(.finished(.completed))
+        }
+    }
+
+    /// Two older rounds, the current prompt and the plan's two single-round folds.
+    private func twoFolds() throws -> (Fixture, UUID, [ContextSegment], SummaryPlan) {
+        var fixture = Fixture()
+        _ = try fixture.turn("第一轮")
+        _ = try fixture.turn("第二轮")
+        let prompt = AgentTranscriptMessage(role: .user, text: "当前")
+        try fixture.file.acceptRoot(prompt, attachments: [], in: fixture.primary, scope: .general)
+        let segments = AssistantContext.eligibleSegments(fixture.file, sessionID: fixture.primary, before: prompt.id, scope: .general)
+        return (fixture, prompt.id, segments,
+                SummaryPlan(sessionID: fixture.primary, scope: .general, predecessor: nil, folds: [[segments[0]], [segments[1]]]))
+    }
+
+    @Test func foldsWithinBudgetAreSentAndChained() async throws {
+        let (fixture, prompt, segments, plan) = try twoFolds()
+        let owner = HistoryOwner(file: fixture.file, writer: { _ in })
+        let calls = ProducerCalls()
+        try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: owner, producer: producer(calls),
+                                         deadline: MaintenanceDeadline(turnRemaining: 600))
+        #expect(calls.count == 2)
+        #expect(owner.file.assistant.compactions.map(\.sourceRootPromptIDs) == [[segments[0].root], [segments[1].root]])
+        #expect(owner.file.assistant.compactions[1].predecessorID == owner.file.assistant.compactions[0].id)
+    }
+
+    /// Counterexample: the planner reserves a fixed amount for a carried
+    /// summary, but a stored 60 KB Chinese summary makes the real fold request
+    /// larger than the soft target or a known window's ceiling. Nothing is sent.
+    @Test func aLargeChinesePreviousSummaryIsRefusedBeforeAnyProducerCall() async throws {
+        var fixture = Fixture()
+        _ = try fixture.turn("第一轮")
+        _ = try fixture.turn("第二轮")
+        _ = try fixture.turn("第三轮", reply: String(repeating: "近", count: 5_000))
+        let prompt = AgentTranscriptMessage(role: .user, text: "当前")
+        try fixture.file.acceptRoot(prompt, attachments: [], in: fixture.primary, scope: .general)
+        let segments = AssistantContext.eligibleSegments(fixture.file, sessionID: fixture.primary, before: prompt.id, scope: .general)
+        let large = try fixture.candidate(covering: [segments[0]], predecessor: nil,
+                                          summary: "## Goal\n" + String(repeating: "摘", count: 20_000))
+        #expect(large.record.summary.utf8.count <= SummaryResponse.maximumBytes)
+        try fixture.file.commitSummary(large)
+        let plan = try #require(AssistantContext.build(fixture.input(prompt: prompt.id)).plan)
+        #expect(plan.predecessor?.id == large.id && plan.folds.map { $0.map(\.root) } == [[segments[1].root]])
+        let known = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "m", contextWindow: 32_768))
+        for budget in [ContextBudgetPolicy.unknown, known] {
+            let owner = HistoryOwner(file: fixture.file, writer: { _ in })
+            let calls = ProducerCalls()
+            await #expect(throws: SummaryPreparationError.self) {
+                try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt.id, budget: budget), owner: owner,
+                                                 producer: producer(calls), deadline: MaintenanceDeadline(turnRemaining: 600))
+            }
+            #expect(calls.count == 0 && owner.file.assistant.compactions.map(\.id) == [large.id])
+            // An ordinary preparation failure: the turn continues without a new summary.
+            #expect(!SummaryMaintenance.stopsTurn(SummaryPreparationError(detail: "")))
+        }
+    }
+
+    @Test func aForgetDuringMaintenanceStopsTheTurnBeforeDisclosingMore() async throws {
+        let (fixture, prompt, segments, plan) = try twoFolds()
+        // After the first fold, the user forgets the second fold's round.
+        let owner = HistoryOwner(file: fixture.file, writer: { _ in })
+        let calls = ProducerCalls()
+        await #expect(throws: ContextSourceRevoked.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: owner,
+                producer: producer(calls) { call in
+                    guard call == 1 else { return }
+                    try await MainActor.run {
+                        try owner.transact {
+                            try $0.assistant.scopeIndex.mask(root: segments[1].root, by: UUID())
+                            $0.assistant.memory.forgetEpoch += 1
+                        }
+                    }
+                }, deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(calls.count == 1)
+        #expect(owner.file.assistant.compactions.map(\.sourceRootPromptIDs) == [[segments[0].root]])
+        // A forget of the fold's own source while it streams: its result is discarded.
+        let during = HistoryOwner(file: fixture.file, writer: { _ in })
+        let again = ProducerCalls()
+        await #expect(throws: ContextSourceRevoked.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: during,
+                producer: producer(again) { _ in
+                    try await MainActor.run {
+                        try during.transact { try $0.assistant.scopeIndex.mask(root: segments[0].root, by: UUID()) }
+                    }
+                }, deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(again.count == 1 && during.file.assistant.compactions.isEmpty)
+        #expect(SummaryMaintenance.stopsTurn(ContextSourceRevoked()))
+    }
+
+    @Test func storageFailureStopsTheTurnBeforeTheNextDispatch() async throws {
+        let (fixture, prompt, _, plan) = try twoFolds()
+        let dirty = HistoryOwner(file: fixture.file, health: .saveDirty("磁盘已满"), writer: { _ in })
+        let none = ProducerCalls()
+        await #expect(throws: StorageCommitError.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: dirty, producer: producer(none),
+                                             deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(none.count == 0)
+        // The read registration before the first dispatch cannot be written: nothing is sent.
+        let unwritable = HistoryOwner(file: fixture.file, writer: { _ in throw CocoaError(.fileWriteOutOfSpace) })
+        let zero = ProducerCalls()
+        await #expect(throws: StorageCommitError.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: unwritable, producer: producer(zero),
+                                             deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(zero.count == 0 && unwritable.file.assistant.scopeIndex.scopedRoot(prompt)?.dependencies.rootReads.isEmpty == true)
+        // Registration written, then the first fold's commit fails: the second fold is never sent.
+        var writes = 0
+        let failing = HistoryOwner(file: fixture.file, writer: { _ in
+            writes += 1
+            if writes > 1 { throw CocoaError(.fileWriteOutOfSpace) }
+        })
+        let one = ProducerCalls()
+        await #expect(throws: StorageCommitError.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: failing, producer: producer(one),
+                                             deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(one.count == 1 && failing.file.assistant.compactions.isEmpty)
+        #expect(SummaryMaintenance.stopsTurn(StorageCommitError.storageUnavailable) && SummaryMaintenance.stopsTurn(TurnDeadlineReached()))
+    }
+
+    /// The fold's reads are registered for the turn's root before dispatch, so
+    /// a forget confirmed while the fold streams previews the preparing turn as
+    /// affected, and committing it stops the turn before anything more is sent.
+    @Test func aForgetPreviewDuringMaintenanceShowsThePreparingTurnAsAffected() async throws {
+        var (fixture, prompt, segments, plan) = try twoFolds()
+        let receipt = try fixture.file.applyMemoryEdit(.add(target: .memory, scope: .global, content: "第一轮里说的偏好",
+            origin: .chatChip, sourceRootPromptIDs: [segments[0].root], sourceMessageIDs: []))
+        let entry = try #require(receipt.entryIDs.first)
+        // Before maintenance read anything, the queued turn is not a reader.
+        #expect(try fixture.file.forgetPreview([entry], activeRoot: prompt).stopsActiveRoot == false)
+        let owner = HistoryOwner(file: fixture.file, writer: { _ in })
+        let calls = ProducerCalls()
+        let seen = PreviewSeen()
+        await #expect(throws: ContextSourceRevoked.self) {
+            try await SummaryMaintenance.run(plan, turn: turn(fixture, prompt: prompt), owner: owner,
+                producer: producer(calls) { _ in
+                    try await MainActor.run {
+                        let preview = try owner.file.forgetPreview([entry], activeRoot: prompt)
+                        seen.set(preview.stopsActiveRoot && preview.affectedRoots.contains(prompt))
+                        try owner.transact { _ = try $0.commitForget(preview, activeRoot: prompt) }
+                    }
+                }, deadline: MaintenanceDeadline(turnRemaining: 600))
+        }
+        #expect(seen.value && calls.count == 1 && owner.file.assistant.compactions.isEmpty)
+        #expect(owner.file.assistant.scopeIndex.isMasked(root: prompt))
+    }
+
+    /// Only the primary turn the engine executes can be stopped by a forget.
+    @Test func forgetStopsOnlyTheExecutingPrimaryTurn() {
+        let primary = UUID(), root = UUID(), task = UUID()
+        #expect(ForgetStopPolicy.activeRoot(primaryID: primary, runningSessionID: primary, runningRoot: root, terminal: false) == root)
+        // An independent task is running while a primary request waits in the queue.
+        #expect(ForgetStopPolicy.activeRoot(primaryID: primary, runningSessionID: task, runningRoot: UUID(), terminal: false) == nil)
+        #expect(ForgetStopPolicy.activeRoot(primaryID: primary, runningSessionID: nil, runningRoot: nil, terminal: true) == nil)
+        #expect(ForgetStopPolicy.activeRoot(primaryID: primary, runningSessionID: primary, runningRoot: root, terminal: true) == nil)
+    }
 }

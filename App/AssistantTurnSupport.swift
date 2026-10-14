@@ -53,10 +53,9 @@ final class AssistantTurnSupport {
             do {
                 try await summarize(plan, provider: provider, deadline: deadline, onWork: onWork)
                 prepared = build(prompt: prompt, systemPrompt: systemPrompt, tools: tools)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let error as TurnDeadlineReached {
-                // The turn's own deadline: stop the turn, no main request.
+            } catch where SummaryMaintenance.stopsTurn(error) {
+                // Stop, system expiry, the turn deadline, storage or an explicit
+                // forget of a source: stop the turn, no main request.
                 throw error
             } catch {
                 // No summary this turn and no automatic retry; a known or
@@ -82,43 +81,21 @@ final class AssistantTurnSupport {
     }
 
     /// Tool-free summary folds over AgentKit's bounded `consume` (transport
-    /// bytes, SSE line and event count capped; terminal required), each
-    /// committed by CAS against the latest eligible history; a changed source
-    /// discards the candidate. All folds share one 150 s maintenance deadline
-    /// that never passes the turn deadline; idle is 45 s per attempt.
+    /// bytes, SSE line and event count capped; terminal required). Each fold is
+    /// checked before dispatch (storage, forgets, eligibility, complete request
+    /// estimate against the frozen budget) and committed by CAS. All folds
+    /// share one 150 s maintenance deadline that never passes the turn
+    /// deadline; idle is 45 s per attempt.
     private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
                            onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
-        let maintenance = MaintenanceDeadline(turnRemaining: deadline.remaining)
-        let progress = ProgressCoalescer(deliver: onWork)
         let producer: StreamingSummary.Producer = { request, onEvent in
             try await provider.consume(request, limits: .maintenance, onEvent: onEvent)
         }
-        var predecessor = plan.predecessor
-        for fold in plan.folds {
-            let messages = fold.flatMap(\.messages)
-            guard let last = messages.last else { continue }
-            let attachments = owner.file.session(sessionID)?.attachments ?? [:]
-            let input = try AssistantContext.inputDigest(messages: messages, attachments: attachments, scope: scope,
-                                                         parent: predecessor)
-            let text = try await StreamingSummary.run(
-                SummaryRequest.make(messages: messages, previous: predecessor?.record.summary),
-                producer: producer, deadline: maintenance, progress: progress)
-            let ids = messages.map(\.id)
-            let record = AgentCompactionRecord(summaryMessageID: UUID(), compactedThroughMessageID: last.id,
-                                               sequence: (predecessor?.record.sequence ?? 0) + 1, summary: text,
-                                               summarizedTokens: messages.reduce(0) { $0 + ContextEstimator.messageTokens($1) },
-                                               keptTokens: 0, displayAnchor: last.createdAt)
-            let candidate = StoredCompaction(
-                id: record.id, record: record, sessionID: sessionID, scope: scope, sourceRootPromptIDs: fold.map(\.root),
-                sourceMessageIDs: ids, predecessorID: predecessor?.id, predecessorDigest: predecessor?.recordDigest,
-                inputDigest: input,
-                recordDigest: try AssistantContext.recordDigest(inputDigest: input, record: record, sourceIDs: ids,
-                                                                parentRecordDigest: predecessor?.recordDigest),
-                builderVersion: AssistantContext.builderVersion, summaryPromptVersion: AssistantContext.summaryPromptVersion,
-                forgetEpoch: owner.file.assistant.memory.forgetEpoch, summaryModel: config.label)
-            try owner.transact { try $0.commitSummary(candidate) }
-            predecessor = candidate
-        }
+        try await SummaryMaintenance.run(
+            plan, turn: .init(sessionID: sessionID, promptID: promptID, scope: scope, budget: config.budget,
+                              estimator: EstimatorCalibration.shared.estimator(calibrationKey), summaryModel: config.label),
+            owner: owner, producer: producer, deadline: MaintenanceDeadline(turnRemaining: deadline.remaining),
+            progress: ProgressCoalescer(deliver: onWork))
     }
 
     // MARK: Every request

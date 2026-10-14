@@ -39,10 +39,11 @@ extension ChatController {
         return receipt
     }
 
-    /// The running primary turn's root, if any.
+    /// The primary turn the engine is executing (preparing or running), if any.
     var activePrimaryRoot: UUID? {
-        guard let job = jobs[primaryID], job.permitted, !job.terminal else { return nil }
-        return job.prompt.id
+        let job = runningJob.flatMap { jobs[$0.sessionID] === $0 ? $0 : nil }
+        return ForgetStopPolicy.activeRoot(primaryID: primaryID, runningSessionID: job?.sessionID,
+                                           runningRoot: job?.prompt.id, terminal: job?.terminal ?? true)
     }
 
     func forgetPreview(_ entryIDs: [UUID]) -> ForgetPreview? {
@@ -59,7 +60,8 @@ extension ChatController {
         do { try owner.transact { receipt = try $0.commitForget(preview, activeRoot: active) } }
         catch { notice = error.localizedDescription; return false }
         memoryNotice = receipt?.result ?? ""
-        if preview.stopsActiveRoot, let job = jobs[primaryID] {
+        // Only the primary run the engine is executing is stopped, never another task.
+        if preview.stopsActiveRoot, let job = runningJob, job.primary, job.prompt.id == active {
             job.revoked = true
             if assistant.pendingNext != nil { transact { try $0.holdPending("当前任务因遗忘停止；确认后再继续。") } }
             engine.cancel()
