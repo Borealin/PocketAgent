@@ -124,6 +124,15 @@ enum LongHistoryBenchmark {
                 modes[store.lastMode?.rawValue ?? "none", default: 0] += 1
             }
             guard durable else { throw Failure(detail: "写入失败") }
+            // A warm whole write (as every 512 patches, on overflow or after an
+            // outside change): touching the file changes its identity.
+            guard utimes(storage.url.path, nil) == 0 else { throw Failure(detail: "无法更新文件时间") }
+            var wholeDurable = false
+            let warmWhole = seconds {
+                wholeDurable = owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "整体写"), to: primary, root: root) }
+            }
+            let warmWholeMode = store.lastMode?.rawValue ?? "none"
+            guard wholeDurable, store.lastMode == .wholeAfterIdentityChange else { throw Failure(detail: "整体写未按预期发生") }
             // Complete bytes: the file is exactly the published layout's whole
             // image, and decodes to the owner's state.
             let onDisk = try Data(contentsOf: storage.url)
@@ -152,6 +161,7 @@ enum LongHistoryBenchmark {
                             "decodeSeconds": decode, "roots": allRoots.count, "registerReadsSeconds": register,
                             "forgetPreviewSeconds": preview, "forgetClosureRoots": closure, "validateGraphSeconds": validate,
                             "firstRecordSeconds": firstRecord, "firstRecordMode": firstMode,
+                            "warmWholeRecordSeconds": warmWhole, "warmWholeRecordMode": warmWholeMode,
                             "recordP50Seconds": percentile(events, 0.5), "recordP95Seconds": percentile(events, 0.95),
                             "recordMaxSeconds": events.max() ?? 0,
                             "planP50Seconds": percentile(plans, 0.5), "planP95Seconds": percentile(plans, 0.95),
