@@ -438,7 +438,7 @@ enum PendingState: Codable { case queued, held(reason: String), needsResume }
 
 ### scope、召回和记忆权限
 
-接受根prompt记录scope；steer继承活动job的root/scope，即使UI切项目；assistant/tool按job根归属。membership写入与真实事件同事务。切片以root段且包含完整call/result组，不能把每条user（含steer）当新段，也不能按timestamp排序。当前scope只自动读取同scope完整段；global个人偏好可跨scope注入。general不自动吸入其他项目。unknown只在用户明确选择历史/引用时授权读取；模型自行指定session_id不能越过此边界。HistoryReference冻结进AcceptedJob和pending，精确限定用户选定的完整call/result安全窗口并校验内容digest；不把整旧session自动授权。unknown原文以带来源/状态的quoted reference数据读取，不猜工作scope、不作为新的执行请求、不放sessionContext。scope只控制信息归属，不授予文件/手机能力。
+接受根prompt记录scope；steer继承活动job的root/scope，即使UI切项目；assistant/tool按job根归属。membership写入与真实事件同事务。切片以root段且包含完整call/result组，不能把每条user（含steer）当新段，也不能按timestamp排序。当前scope只自动读取同scope、已提交启动许可（真正开始过）的完整段；permit前失败、未启动的待处理请求和已放弃请求的原文保留可见，但不进自动上下文、摘要与自动历史检索（显式引用时标“未开始执行”），草稿归还后重发的同文本只按新ID出现一次；permit后失败的真实结果与未知结果仍保留并按确定性修复投影。global个人偏好可跨scope注入。general不自动吸入其他项目。unknown只在用户明确选择历史/引用时授权读取；模型自行指定session_id不能越过此边界。HistoryReference冻结进AcceptedJob和pending，精确限定用户选定的完整call/result安全窗口并校验内容digest；不把整旧session自动授权。unknown原文以带来源/状态的quoted reference数据读取，不猜工作scope、不作为新的执行请求、不放sessionContext。scope只控制信息归属，不授予文件/手机能力。
 
 MVP 的记忆写入由宿主完成：
 - 记忆面板直接add/replace/remove，用户选择scope/target和具体记录。
@@ -566,11 +566,8 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - portable 消息/会话仍沿用旧格式字节：可空键省略、缺失 attachments 回填。改为严格当前格式（显式 null、必需键、attachments 必有），规范字节与冲突副本 ID 已固定并独立复算。
 - 摘要规划为后续fold固定预留4,000 token，但上一摘要最多64 KiB；fold发送前未按完整请求估算，约60 KB中文上一摘要会超过已知窗口上限仍被发出。改为每个fold发送前估算完整SummaryRequest并对照冻结预算，超出不发送；同时发送前检查存储与显式遗忘，避免第二个fold再披露已撤销来源。
 - promoted未授权请求在项目A失败后，用户改到项目B再显式继续：重排只更新pending.workspaceID，root仍记在A，permit也不核对scope；同ID任务读写B的内容却归属A，A之后的自动上下文/检索可能读到B的结果。改为重排时把未授权root原子移到确认的scope，permit校验job.scope；回归覆盖A→B与A→无项目（原ID一条，A的上下文与检索读不到该轮）。
+- 普通发送在permit前失败（如启动失败注入）时草稿归还，但原prompt仍是eligible root：设备上重发后模型看到两遍并标注重复，该prompt也进入了随后的摘要。根因：eligibility只排除 `abandonedUnstarted`。改为自动上下文/摘要/自动检索只使用已提交permit的root；旧摘要若覆盖未启动root即不再有效（重新整理）；回归覆盖归还+同文本新ID重发只投影一次、旧摘要失效、permit后失败结果保留、显式引用标注未开始执行。
 - 维护期间读取未登记且active root只认permit后的轮次，遗忘预览看不到正在准备的轮次，提交后却因来源被屏蔽停轮。改为发送前原子登记fold与父摘要coverage roots，active root包含引擎正在执行的主线（准备或运行中），遗忘只停止该主线轮次。
-
-### 开放问题
-
-- 普通发送在permit前失败（如启动失败注入）时草稿归还，但原prompt仍是自动上下文的eligible root：设备上重新发送后模型看到两遍并在回复中标注重复，该prompt也进入了随后生成的摘要。根因已确认：eligibility只排除 `abandonedUnstarted`，restoreDraft路由不设置它。建议：草稿确实归还时把该root按未启动放弃处理（原文保留、退出自动上下文），与待处理请求的放弃语义一致；需确认后实施。
 
 ### 拒绝方案
 

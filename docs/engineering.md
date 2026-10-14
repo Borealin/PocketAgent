@@ -340,7 +340,10 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   dispatch waits for its assistant call and per-call result watermarks of earlier
   calls (local result saved or provider-answered). One turn deadline; effects
   require the job to still own its session and run.
-- Context: same-scope complete segments, deterministic interruption repairs,
+- Context: same-scope complete segments of requests that actually started
+  (permit committed; a request that failed before it, an unstarted pending or an
+  abandoned one stays visible but is not context, summary input or automatic
+  search result), deterministic interruption repairs,
   summaries accepted only when coverage, digests and parent chain recompute
   (CAS commit), fresh memory block per request, forget filtering, stale phone
   screens projected, one estimator with bounded per-model usage calibration;
