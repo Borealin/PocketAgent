@@ -96,6 +96,20 @@ struct PendingLifecycleTests {
         #expect(NotStartedRoute.route(pendingOrigin: true, cancelled: false) == .hold)
     }
 
+    /// iOS expiring the task while context maintenance runs (before any
+    /// permit): the turn ends unstarted with the system cause, a pending
+    /// request is held with that cause, and nothing is dispatched or replayed.
+    @Test func systemExpiryDuringMaintenanceEndsTheTurnUnstartedWithItsCause() {
+        var status = ExecutionStatus(modelLabel: "m")
+        status.phase = .preparingContext
+        status.markSystemExpired()
+        status.finish(successful: false, cancelled: true)
+        #expect(status.phase == .failed && status.failure == ExecutionStatus.systemExpiredMessage)
+        // Not a user Stop: an ordinary send gets its draft back, a pending request is held (not abandoned).
+        #expect(NotStartedRoute.route(pendingOrigin: false, cancelled: false) == .restoreDraft)
+        #expect(NotStartedRoute.route(pendingOrigin: true, cancelled: false) == .hold)
+    }
+
     @Test func barrierClosedForReplacedJobFailsItsWaitersImmediately() async throws {
         let barrier = TranscriptCommitBarrier()
         barrier.open(epoch: 1)

@@ -361,7 +361,10 @@ its immutable revision; default stream/complete and the loop are unchanged.
 Summary folds stream through it into the Core collector under one 150-second
 maintenance deadline shared by up to three folds and capped by the turn
 deadline, a 45-second idle limit refreshed only by new real content, coalesced
-real progress and cancellation propagated as cancellation. Host integration
+real progress and cancellation propagated as cancellation. A system expiry
+during maintenance ends the turn before its permit (draft returned or pending
+request held, nothing dispatched); progress reflects only real increments, so a
+provider that stays silent for about 30 seconds can still be expired by iOS. Host integration
 tests drive the real `consume` through a URL protocol stub; device-side
 summarization has not run yet.
 
