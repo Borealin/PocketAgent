@@ -1,8 +1,8 @@
 # 单入口与长期记忆技术方案
 
-> 状态：已决定待开发；采用用户明确授权的 breaking change 数据边界；公开调研及核心架构已审查，本轮仅修订方案，未修改应用代码
+> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），Core 测试与 iOS 构建通过；指定设备验收见第 3 节“验证范围”，依赖真实模型的场景待设备上配置模型服务后验证；AgentKit 窄 bounded API 已备好补丁、待发布审批，App 暂用标注的 ≤30 秒前台整理 fallback
 >
-> 最后核对：2026-10-14
+> 最后核对：2026-10-14（实现与验证范围）
 >
 > 面向读者：PocketAgent iOS、AgentKit 集成与测试开发者
 >
@@ -29,9 +29,9 @@
 | OpenMuseAgent 后继 | [nanoMuse](https://github.com/nano-muse/nanoMuse) | Python、OpenMinis iOS 与桌面 Harness 分别核验 |
 | iOS 生命周期 | [Apple：BGContinuedProcessingTaskRequest](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtaskrequest) | 用户在前台发起、可继续到后台的工作 |
 
-用户已明确“目前不需要做版本兼容，迁移什么的可以不做，直接 breakingchange”。本期按新格式从空助理主线开始，不自动迁入旧聊天、草稿、选择或配置；旧版本本地文件与云端目录不作为新版本数据源。仍然“先不改代码”。此前多模型审查中的旧记录升级与兼容约束已撤销；本轮按用户新决定由主审修订，未重复多模型审查。
+用户已明确“目前不需要做版本兼容，迁移什么的可以不做，直接 breakingchange”。本期按新格式从空助理主线开始，不自动迁入旧聊天、草稿、选择或配置；旧版本本地文件与云端目录不作为新版本数据源。此前多模型审查中的旧记录升级与兼容约束已撤销。用户随后授权按本方案完整实现 P1–P4（2026-10-14），由 Opus 5.5 xhigh 实施、主会话只读核验。
 
-用户此前要求是“先不改代码”，由主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 整体讨论，再由 GPT-6 Astra xhigh 与 Fable 5.1 xhigh 审查并确定技术细节及实施步骤。本次交付为源码依据与具体方案，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
+方案阶段由主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 整体讨论，再由 GPT-6 Astra xhigh 与 Fable 5.1 xhigh 审查并确定技术细节及实施步骤；实施阶段的主会话核验问题与修复见第 3 节“已确认问题与修复”。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
 
 ## 2. 公开项目调研与结论
 
@@ -41,11 +41,11 @@
 2. 重点借鉴 nanoMuse/OpenMinis iOS 的主会话指针与非破坏摘要投影、Hermes 的小型偏好记忆与历史检索、OpenClaw 的 Home/工作 thread 分层。CopilotKit OpenMuse 的 rich chat/worker 适合作为应用分层参考，但当前依赖外部 Intelligence。
 3. OpenClaw与Hermes的当前两个固定版本都支持原位压缩；Hermes 当前默认 `in_place=true`。没有依据要求 PocketAgent 在每次压缩时建立新 session，也不应按旧教程默认每日清空。
 4. 记忆学习、历史检索和压缩分别有触发与预算。保存事实由实际工具写入完成；记忆文件、摘要或模型声称“已记住”不能互相替代。
-5. PocketAgent 已有固定 AgentKit 的记忆/压缩原语。下文给出已收敛的宿主适配契约；按用户“先做好调研”的要求，当前不开始实现，不引入新的后台服务。
+5. PocketAgent 已有固定 AgentKit 的记忆/压缩原语。下文的宿主适配契约已按此实现，未引入新的后台服务。
 
 ### 本轮收敛：入口、记忆与执行引擎分别选型
 
-建议采用“独立助理入口＋现有 AgentKit＋宿主补齐长期记忆”。用户本轮要求先形成具体改造方案，已授权技术方案收敛，未授权代码实现。
+采用“独立助理入口＋现有 AgentKit＋宿主补齐长期记忆”，并已按此实现。
 
 | 路线 | 改动与收益 | 主要代价 | 本轮建议 |
 |---|---|---|---|
@@ -248,7 +248,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 | 旧格式自动迁入/升级 | 用户明确采用breaking；删除旧版本decoder、字段回填、去重迁入及升级副本，当前格式严格校验 |
 | 主线被删/分叉任意挑分支 | 显示恢复态，用户选保留分支或新空主线；不同步本机主指针/记忆 |
 
-实际调用与报告、冻结稿hash和审查闭环引用只保留本地，未把模型原始输出、配置或成功证明放进Git。首版关键规则与测试契约在下文；接口仍是新增设计。
+实际调用与报告、冻结稿hash和审查闭环引用只保留本地，未把模型原始输出、配置或成功证明放进Git。首版关键规则、实际落地形状与测试契约在下文。
 
 ### 当前能力与具体缺口
 
@@ -301,7 +301,9 @@ ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。�
 | 模型循环 | AgentRuntime、provider编码/解析、steer/cancel、工具调度/语法修复 | ContextBuilder、统一Estimator、每请求wrapper、无工具摘要编排与真实进度 |
 | 记忆/搜索 | AgentMemoryAccessing、Operation/Scanner/applying、SearchQuery、只读工具 | ID/revision定位、scope/来源、已知副本遗忘、exact宿主写入与受限搜索 |
 | 手机执行 | PhoneExecutor串行owner、DDI/WDA、fresh snapshot、脚本lease、取消清理 | commit gate接到所有入口，同一deadline；不替换后端/loop |
-| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口，限制响应并回报真实事件；独立依赖提交和pin升级 |
+| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口（`consume(_:limits:onEvent:)`）已在独立clone实现并测试，待发布审批后升级pin；当前App用≤30秒前台buffered整理fallback |
+
+实现状态：P1–P4 已落在 `App/Core`（纯逻辑与可 fake 的 owner/屏障）和 `App/`（ChatController 扩展与界面），Core 测试覆盖格式、事务、屏障（经真实 AgentRuntime）、scope/DAG/遗忘、上下文与摘要、记忆与搜索、pending 崩溃点与 sync 交叉。模型请求的 bounded streaming 维护目标尚未满足：AgentKit 窄 API 补丁未发布前，摘要整理只走标注的 ≤30 秒前台 fallback，不在后台路径假定可保活。
 
 ```mermaid
 flowchart TD
@@ -368,7 +370,10 @@ struct ScopedRoot: Codable {
     var dependencies: RootDependencies
     var abandonedUnstarted: Bool
     var dispatchAuthorized: Bool // permit提交点置true，不依赖runStarted UI回调
+    var verified: Bool // 段digest/来源不符或源历史已删但仍被读者引用时为false：只保身份/图，不作自动上下文
 }
+// ScopeIndex另有 maskedRoots / maskedMessages 两组 MaskRow{id, tombstoneID}：遗忘按ID屏蔽，覆盖冲突副本
+// decoder拒绝重复行、成员指向不存在的root、root的原始请求属于其他root、依赖边指向不存在root或成环（迭代Kahn校验）
 struct RootDependencies: Codable {
     var memoryReads: [MemoryReadRevision] // entryID + revision
     var rootReads: [UUID] // 直接依赖DAG，不每轮复制全量祖先
@@ -389,14 +394,16 @@ struct MemoryTombstone: Codable {
     var id: UUID; var entryID: UUID; var throughRevision: UInt64
     var target: AgentMemoryTarget; var scope: MemoryScope
     var contentDigest: String; var sourceRootPromptIDs: [UUID]; var sourceMessageIDs: [UUID]; var revision: UInt64
-    // 不保content；当前进程撤销缓存在内存
+    var forgottenAt: Date // 不保content
 }
 struct StoredCompaction: Codable {
     var id: UUID; var record: AgentCompactionRecord; var sessionID: UUID
     var scope: WorkScope; var sourceRootPromptIDs: [UUID]; var sourceMessageIDs: [UUID]
     var predecessorID: UUID?; var predecessorDigest: String?
     var inputDigest: String; var recordDigest: String
-    var builderVersion: Int; var forgetEpoch: UInt64
+    var builderVersion: Int; var summaryPromptVersion: Int
+    var forgetEpoch: UInt64 // 仅记录生成时信息
+    var summaryModel: String
 }
 struct PendingNext: Codable {
     var sessionID: UUID; var prompt: PendingPrompt
@@ -404,6 +411,7 @@ struct PendingNext: Codable {
     var backend: PhoneBackendKind; var clipboardAllowed: Bool
     var acceptedOrdinal: UInt64; var state: PendingState
     var references: [HistoryReference] // 非portable，UI明确引用范围
+    var acceptedAt: Date
 }
 struct MemoryReceipt: Codable {
     var id: UUID; var entryIDs: [UUID]; var action: String
@@ -469,9 +477,11 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 
 旧屏幕投影只针对phone工具已知screen/element内容，最多保留最新2个完整观察；旧结果保ok/error/code/message/action_issued/action_outcome/replay_allowed/input_method/input_verified和工具结构，删除旧snapshot节点/坐标并明确“过期观察，重新observe”。不能裁其他file/network/script结果；最新screen仍唯一动作依据，projection不改PhoneExecutor授权。
 
-固定AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2有一个窄依赖变更：在AgentKit provider层新增可选 `consume(request, limits, onEvent)`（callback in producer task、不累计事件数组）/等效bounded maintenance API，复用现有request encoder/parser/网络；默认stream/loop不变，不复制provider解码器。总transport16MiB、单SSE line256KiB、最多65,536 events、tool/reasoning/provider payload及时限制或拒绝；进度只通过至多一待处理MainActor通知的coalescer，不每个delta新Task排队。回调同步throwing可以立即拒绝异常事件，summary aggregation只保text64KiB，不保reasoning/providerItems。textDelta追加、textSnapshot覆盖当前text；reasoningDelta/Snapshot只计真实工作不保正文。只接受finished(.completed)，finished(toolCalls/length/cancelled/error)、drop、任何toolcall/overflow拒绝；首版`.length`一律拒绝，九标题存在不能证明尾部事实完整。允许用户调整输出预算后新一次整理，不把截断摘要当成功。上下文整理总deadline150秒（含最多3段折叠）、idle45秒工程初值，可配置；只有真实文本/推理增量刷新idle。整轮600秒只使用一个TurnDeadline，由现有TurnStatus.started作为起点传入PhoneExecutor、watchdog、summary准备及script lease；包含规则加载/整理/运行，不能各自Date()或runtime.start时重置。PhoneExecutor.remainingTime/checkDeadline与watchdog使用相同deadline，BG到期更早则以它为准。
+固定AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2需要一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete不变，不新增本地化字符串（超事件数复用responseTooLarge）。该补丁已在独立clone（基于 `8108c9b`）实现并通过新增4项与AgentKit全量测试，尚未发布，PocketAgent的pin因此仍为 `8108c9b`。
 
-`StreamingSummaryModel: AgentModelCompleting` 通过这个callback API返回一个textSnapshot+finished(.completed)，不用client.complete累积所有事件；onWork只在真实文字/推理到达时增加workObserved:Int（节流但保真实计数），执行阶段.preparingContext不增chat modelResponses/phoneActions，不生成live消息/伪心跳。Model.cancel在runtime尚未建立时也取消宿主contextPreparationTask；URLSession任务终止、取消传递与terminal校验要测试。摘要编排复用公开AgentCompaction.serialized/systemPrompt/Record，但不直接采用Service.summarize末尾prefix(16_384)的静默截断；宿主校验完整结果后保存。AgentKit窄API不能及时落地时P2仅用现有bounded complete作前台短整理的临时方案（deadline≤30秒，失去前台就取消），明确无流式维护进度，不在BG路径假定150秒可保活，不能宣称完成该流式目标或偷偷改依赖checkout。该complete临时整理超时等于本轮无摘要、不重试；known/显式窗口仍由hardguard清晰报错，unknown按软目标继续主请求，OS取消或整轮deadline已到则整轮停止。
+宿主侧 `StreamingSummary`/`SummaryCollector`（Core）已实现并测试：只保text（≤64KiB，textDelta追加、textSnapshot覆盖），reasoning只计真实工作，tool call/超限立即拒绝并停止producer，只接受finished(.completed)（`.length`/缺终态/空文本拒绝），总deadline（默认150秒且不超过整轮剩余）与idle 45秒仅由真实文本/推理刷新，进度经ProgressCoalescer至多一个待处理MainActor通知。它对已打补丁AgentKit的 `consume` 接线已在本地临时包中端到端验证；pin发布前App不启用它。摘要编排复用AgentCompaction.serialized与AgentCompactionService.systemPrompt，宿主校验完整结果后经CAS保存，不采用Service.summarize的静默截断。
+
+当前App路径（明确标注的临时方案）：`AssistantTurnSupport.summaryText` 用现有buffered `complete`（16MiB上限、要求终态）做前台短整理，deadline取30秒与整轮剩余的较小值，App进入后台即取消，无流式维护进度，不在BG路径假定150秒可保活，因此不能宣称已满足bounded streaming维护目标。整理失败/超时等于本轮无摘要、不重试；known/显式窗口仍由hardguard清晰报错，unknown按软目标继续主请求，OS取消或整轮deadline已到则整轮停止。整轮600秒只使用一个TurnDeadline（TurnStatus.started起算），PhoneExecutor.remainingTime/checkDeadline、watchdog、摘要准备与脚本lease共用；准备阶段显示.preparingContext，不增modelResponses/phoneActions，不生成伪心跳。
 
 ### 一个下一件事的状态机
 
@@ -494,76 +504,61 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 
 已有sync在后台基于snapshot生成plan：deferred集合在出发和apply两端重查（generation+currentjob/pending/preparation）；新pending/运行在sync飞行期间出现，不能apply过期覆盖。必要时标rerun，不自行改merge算法；所有保留字段/失效摘要/指针回写一次事务。attachments GC必须在成功apply与运行终态后重新取当前引用集，不能用旧snapshot删除新pending附件。
 
-### 文件拆分、实施次序与验收
+### 实施落点与测试
 
+| 阶段 | 主要文件 | Core 测试（`Tests/PocketAgentCoreTests`） |
+|---|---|---|
+| P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
+| P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、ContextEstimatorTests、ProviderConfigTests、StreamingSummaryTests |
+| P3 记忆/搜索/遗忘 | `Core/MemoryLedger.swift`、`PocketMemoryAdapter.swift`、`ToolCatalog.swift`（ToolKind.memory）、`ExecutionStatus.swift`；`App/ChatMemory.swift`、`AssistantViews.swift`（面板/预览） | MemoryLedgerTests（含12k根长链）、MemoryAdapterTests |
+| P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
 
-P1 当前格式/保存/身份（含两条steer归属路径及现有PhoneObservingModel的ACK await）：Core/AssistantState.swift形状与validators、HistoryCodec严格schema、空主线一次初始化与新命名空间；删除旧HistoryMigration/adopt/backfill路径、legacy ProviderStore/Keychain-ID桥接；ChatController事务/保存失败禁执行，主线入口/恢复态，scope归属，当前数据同步字段保护。先core初始化/strict roundtrip/拒绝非当前格式/failure tests，再UI入口。主线只创建一次、损坏文件不覆盖、跨当前conflict重复消息合法、所有必填字段写回不丢。不做旧记录升级或多版本测试矩阵。
+实现与原形状的差异：ScopedRoot增加 `verified`；屏蔽集合为ScopeIndex的maskedRoots/maskedMessages行；StoredCompaction增加summaryPromptVersion/summaryModel；PendingNext增加acceptedAt；MemoryTombstone增加forgottenAt。工具调度的保存水位是逐call `ResultKey(runID, callID)`（本地结果保存或provider-native ACK），而非依赖结果消息UUID。启动失败的设备复现用仅限启动参数 `-PocketAgentInjectStartFailure` 的注入（App内不可开启）。
 
-P2 上下文/预算/摘要（同步落地RootDependencies登记/闭包，P3开始前已有来源基础）：Core/ContextBudget.swift + AgentContextBuilder.swift + BudgetedAgentModel.swift；ProviderConfig/ProviderStore/Views本机override；AgentKit窄callback维护API（单独依赖commit并更新pin，不更换loop）；PhoneAgent上下文准备Task/Status，AgentRunner/PhoneExecutor同一deadline。验证snapshot不会重注memory、modelText不丢、source/父digest/锚点失效、forget并发drop、trailingtool边界、tool grammar、未知软目标/显式hardcap标签、schema/截图纳预算、summary overflow/缺terminal/toolcall/length/取消、慢消费者内存上限、真实progress不冒充phone。
-
-P3 显式记忆/搜索（使用P2来源基础，新增memory版本边及forget交互）：PocketMemoryAdapter、MemoryLedger纯逻辑、MemoryViews/Composer模式、readonly工具登记+ToolKind.memory/reducer。验证同文本跨scope、UI CAS、no grant拒绝写、中文零命中、存储失败回滚、墓碑无明文、known-source在raw/summary/search都屏蔽、跨模型/重启召回、再次记住旧mask不解除、global/user与project隔离。
-
-P4 输入排队/性能/全链路：ChatSessions/Composer/Policies单pending和序号；现有ChatSessions:483提前置running移入permit唯一事务，:452/:467/:498三处restoreDraft按origin短路；cancel排队promoted未permit任务走abandonUnstarted（保raw/解除槽/无draft覆盖），:228/:231项目/删除保护计pending，:427–431/:527–530两条steer归属已在P1完成，P4仅补lease/GC/闭幕结算。AgentRunner.beginAgent改为明确Result/失败回调，busy拒绝不可静默return（:16），owner保receipt/释放占用；补齐finish/cancel/start边界、GC/deferral，长历史渲染窗口。先state reducer fake tests所有crashpoint，再设备任务。长历史先量测10k/50k真实shape synthetic messages和附件索引：主线程单次prepare/JSONencode/写盘p95预算与10k滚动frame budget在实施第一天测定并录本机指标；未达则加显示分页/有界索引，不静默改成数据库。功能一项项完成再完整gate，避免重复编译。
-
-关键集成矩阵：空命名空间初始化、非当前格式明确拒绝、新旧云目录隔离、必填字段缺失/坏类型、当前格式crash恢复；pending接受save失败、激活save失败、激活后BG失败/summary失败、清receipt write失败、commitDispatchPermit前后forcequit、Stop-vs-completed race、第二pending拒绝、模型/secret编辑livefreeze、重启explicitreaccept、sync flying期间新pending、主线delete/diverge/replaced、GC保留pending附件。任何可能已发phone请求都不得自动resume；不把模型provider成功当手机成功。
-交付仍需core tests、iOS build、IPA inspection、指定真实设备使用（多天/改模型/phone取消+fresh observe/遗忘+重启/中文检索/长主线）；当前只有静态方案。Looktech Android/iOS业务、BT/ISP/WiFi、schema/rpc/lt-vad不受影响，无共享通信变更。资源负责人/人日/版本/提测待确认，不猜测排期。
-
+Looktech Android/iOS业务、BT/ISP/WiFi、schema/rpc/lt-vad不受影响，无共享通信变更。资源负责人/人日/版本/提测待确认，不猜测排期。
 
 ### 闸控编码与错误路由
 所有闸控摘要值（summary input/record、segmentDigest、HistoryReference expectedContentDigest、barrier content receipt）统一使用同一版本化 throwing canonical UTF8+SHA256。不能调用现有StableHash.canonical空Data fallback或FNV digest；UUID字典只用于内存，磁盘authority index用可检查duplicate的rows后重建map，hash用稳定有序rows/规范UUID字符串。failed encode中止gate。
 
 wrapper.shouldRetry先判ContextBudgetError/ContextSourceRevoked/StorageCommitError/SummaryPreparationError为false，再转发client.shouldRetry。sourceMessageID已由AgentToolInvocation公开，hooks参数已由AgentRuntime.init公开；无需复制loop。summary systemPrompt已是public static，复用可核验。核心测试增加：改core资料不中断current turn但下次请求用新revision；explicitforget显示closure数量并只在最终面板提交；取消queued promoted不restoreDraft；detached编码零图片字节；segment/reference/barrier digest跨进程稳定和encode失败拒绝；job替换waiters即时失败。
 
-### 宿主接口与文件落点
+### 宿主接口
 
-以下是实现时的最小接口形状，不是已存在API；原生协议名和DTO接口按锁定源码接线。
+ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已确认状态、校验、写盘成功后才发布；`record` 记录已发生事件，写失败保留可见事件、置saveDirty、令全部屏障等待失败并停止当前轮，之后即便写成功也只有显式重试（flush）恢复存储能力。`TranscriptCommitBarrier` 与 `CommitGatedModel`/`CommitGatedApproval` 在Core中可fake测试；`commitPermit` 在 `runtime.start` 前提交；`AssistantTurnSupport` 负责准备期上下文、每请求记忆刷新/遗忘过滤/旧屏投影/估算与hardguard/读集登记，以及只读 `memory_search`/`session_search`（AgentKit原生工具 + `PocketMemoryAdapter`，`applyMemory` 恒拒绝）。记忆写入只经 `editMemory`（面板/对话chip）与严格 `记住：`/`/remember` 命令，遗忘经 `forgetPreview` → `commitForget`（提交时重算，任何差异拒绝并刷新面板）。
 
-```swift
-@MainActor // ChatController是唯一writer；屏障位于Core以便fake-owner测试
-protocol AssistantOwner {
-    func transact(_ edit: (inout HistoryFile) throws -> Void) throws
-    func waitForCommitted(_ input: CommitRequirements, job: JobToken) async throws
-    func commitDispatchPermit(job: JobToken, reads: SourceReadSet) throws -> DispatchPermit
-    func registerReads(_ reads: SourceReadSet, job: JobToken) throws
-    func previewForget(_ targets: [MemoryTargetRevision]) throws -> ForgetPreview
-    func editMemory(_ edit: UserMemoryEdit, expecting: MemoryEditPrecondition) throws -> MemoryReceipt
-    func commitSummary(_ candidate: StoredCompaction, expecting: SummaryPrecondition) throws
-    func abandonUnstarted(promptID: UUID) throws
-}
-// PocketMemoryAdapter.applyMemory 对模型入口恒拒绝；宿主直接editMemory。
-// waitForCommitted 在任何await后再查storage/Stop/jobEpoch，所有失败解除等待。
-```
-
-必要原文IDs只包含实际进入raw history的消息。provider-native结果沿用现有不append本地tool消息的规则，不把其派生toolResultID加入等待集；相关真实assistant/provider payload仍须按实际保存回执确认。逐call水位与原文水位分开，不能等待不存在的消息。实现测试覆盖native与本地tool混合序列。ForgetPreview CAS失效就刷新同一面板；活跃任务的membership/read-set会改变预览，不把旧影响数量当有效。
-
-| 现有文件 / 建议新增 | 关系 | 内容 |
-|---|---|---|
-| Core/ChatHistory.swift、ChatSessions.swift | 替换codec/扩展owner | 严格当前格式与空主线初始化，删除旧迁移/字段回填；唯一保存、prompt/steer事件归属、permit/pending、late-callback保护 |
-| 建议Core/AssistantState.swift、MemoryLedger.swift、TranscriptCommitBarrier.swift | 新增 | 本地DTO/validators、ID-CAS及依赖闭包、可fake的保存水位与执行闸；不建TaskStore |
-| 建议Core/ContextBudget.swift、AgentContextBuilder.swift | 新增 | 同一预算口径、有效prefix/摘要验证、scope/来源投影；纯逻辑进入现有Core测试target |
-| 建议PocketMemoryAdapter.swift、BudgetedAgentModel.swift | 新增 | 只读协议适配、真实请求边界、summary编排与进度coalescer |
-| PhoneAgent.swift、AgentRunner.swift、Core/ToolCatalog.swift、ExecutionStatus.swift | 扩展 | memory只读类型/policy、保存ACK、唯一deadline、prepare/主请求次序、busy明示失败 |
-| ProviderConfig.swift、ProviderStore.swift、ProviderViews.swift | 替换旧codec/扩展 | 当前格式配置重新设置，删除旧endpoint/model/Keychain-ID迁入；本机预算字段/保存/sync保留、接受时freeze |
-| ChatRootView.swift、ChatComposer.swift、ChatTranscriptView.swift、Core/ChatPolicies.swift | 扩展 | 主入口/任务区、引用chip、面板/回执、输入目标、pending恢复与长历史显示 |
-| Core/PortableSync.swift、CloudSync.swift | 复用算法/替换格式边界 | assistant-v1目录/严格envelope隔离旧schema；本地字段带回、两端deferral重查、主线分支恢复、当前引用GC |
-| AgentKit Providers/AgentProviderClient.swift 与 SSEStream.swift | 窄新增API | producer callback限额、终态/取消；默认loop/stream行为保持，SDK独立测试 |
-| Package.swift、Package.resolved、Xcode SwiftPM Package.resolved | 固定依赖升级 | 窄API完成后统一新commit pin；不直接修改.build/checkouts |
-| PhoneControl / Native / DDI / WDA | 执行契约保持 | 现有动作owner、fresh snapshot、结果真实性与不重放 |
-
-MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命令与用户点击的chat chip。新增DTO都须通过roundtrip/严格类型校验；正确性hash只用版本化有序DTO，不用文件整体编码顺序。原子历史仍是唯一权威；可重建索引不是另一writer，不建旧格式迁入/升级副本。
+必要原文IDs只包含实际进入raw history的消息。provider-native结果不append本地tool消息，以逐call ACK推进水位；相关assistant/provider payload随assistant消息的保存回执确认（请求视图digest含providerItems与图片附件ID）。
 
 ### 影响面与验证边界
 
 | 端 / 共享层 | 影响 | 原因 |
 |---|---|---|
-| PocketAgent iOS | 受影响 | 入口、唯一历史数据、上下文、记忆、输入调度；本次仅文档 |
-| AgentKit | 窄provider API受影响 | 新维护callback并升级pin，现有loop/手机后端保留 |
+| PocketAgent iOS | 受影响 | 入口、唯一历史数据、上下文、记忆、输入调度；已实现 |
+| AgentKit | 窄provider API受影响 | `consume` 补丁已在独立clone实现/测试，待发布审批后升级pin；现有loop/手机后端保留 |
 | PortableSync / iCloud Drive | 新格式隔离与apply回归 | 新目录/generation仅接同格式客户端，不同步助理身份/ledger/scope/屏蔽集 |
 | Looktech Android / iOS App | 不受影响 | 独立PocketAgent，不改眼镜业务 |
 | 蓝牙 / ISP / Wi-Fi | 不受影响 | 无设备通信、媒体、电源或固件变化 |
 | schema / rpc / lt-vad | 不受影响 | 无共享消息、音频算法或binding变化 |
 
-当前证明层仅为固定源码与方案审查。实施后才运行Core tests、iOS build、IPA inspection和指定真实设备exercise；真实电话动作、跨天记忆、背景到期、中文召回和大历史性能均未在本次验证。系统任务与进度仍受OS到期约束，首版没有常驻保证。
+验证范围（2026-10-14）：
+
+| 层 | 结果 | 范围 |
+|---|---|---|
+| Core 测试 | 通过 | 240+ 项（macOS 主机）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值 |
+| iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
+| 指定设备（iPhone 12 mini） | 部分 | 同身份覆盖安装、首次启动一次初始化空主线、旧格式文件不变已验证；其余设备场景因另一会话同时操作该机暂停 |
+| 依赖真实模型的设备场景 | 未验证 | 改模型后召回、中文检索、纠正/遗忘对模型上下文的影响、fresh observe 不重放：需在新命名空间配置模型服务 |
+| 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
+| bounded streaming 维护 | 未满足 | AgentKit API 未发布；App 用 ≤30 秒前台 fallback |
+
+跨天使用、后台到期与 iOS 系统任务行为没有虚构证明；系统任务与进度仍受 OS 到期约束，首版没有常驻保证。
+
+### 已确认问题与修复
+
+- 增量写入按会话字节中第一个 `"messages":[]` 定位消息数组；附件字典存在名为 `messages` 的键时，随 JSONEncoder 进程内键序不同，写出的文件下次启动 `keyNotFound`（主会话独立进程复现 10/20）。改为每次写入唯一 sentinel 且必须恰出现一次，否则整段重新编码；回归覆盖嵌套同名键、冲突副本和嵌套键在前的字节布局。
+- 写失败后，后续事件写成功会自动解除 saveDirty。改为只有显式 flush 解除，已失败的 epoch 不复用。
+- 源历史删除后 prune 删掉仍被其他 root 读取的源 root，丢失传递遗忘边。改为保留身份与边（unverified），解码校验边存在且无环。
+- 每请求记忆相关度取最后一条 user 消息，在手机轮实际是追加的截图说明。改为取已记录的最新真实用户消息。
+- 摘要重复/交替/空 snapshot 被计为真实进度并刷新 idle。改为只计新的非空内容。
 
 ### 拒绝方案
 
@@ -575,16 +570,16 @@ MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命
 
 ## 4. 资源与交付计划
 
-按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施。各阶段用已有Core测试结构验证契约，完成四项及指定设备验收才交付MVP。本轮只定技术方案，不开始写应用代码。
+按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施，四项代码均已完成并由 Core 测试覆盖。MVP 交付仍以指定设备验收为门禁；依赖真实模型的设备场景与 AgentKit pin 发布见下表依赖列。
 
 | 阶段 / 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
-| P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
-| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
-| P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1/P2、完整来源注册与撤销 |
-| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1–P3、指定设备与长历史样本 |
+| P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；Core/构建通过，设备部分验证；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
+| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；AgentKit补丁待发布审批；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
+| P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1/P2、完整来源注册与撤销 |
+| P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1–P3、指定设备与长历史样本 |
 | 自动学习候选、普通聊天前台宿主 | PocketAgent | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | MVP后续 | 显式记忆/遗忘、能力冻结/生命周期稳定 |
 | 并行委派、多设备身份/记忆同步 | PocketAgent调度/sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | 新资源owner、portable并发与双设备验证 |
 | 主动跟进、持续语音、云端常驻 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 本期未纳入 | 新需求/运行与授权设计 |
 
-用户已确认“单入口＋长期记忆”“先不改代码”，并明确“直接 breakingchange”，并明确要求多模型讨论后确定实现细节。上文是技术方案决定，本轮继续只交付方案。负责人、人日、版本与提测日期仍待实际排期；不阻塞契约收敛。自动学习默认写入、并行/主动任务和云端托管属于新的产品范围，未纳入本期。
+用户已确认“单入口＋长期记忆”与“直接 breakingchange”，并授权完整实现。负责人、人日、版本与提测日期仍待实际排期。自动学习默认写入、并行/主动任务和云端托管属于新的产品范围，未纳入本期。

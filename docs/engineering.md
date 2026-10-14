@@ -2,32 +2,24 @@
 
 ## Requirements and scope
 
-The [single-entry and long-term memory exploration](long-lived-assistant.md)
-records the user-confirmed 2026-10-14 direction, public information about Muse,
-Grok Bot and OpenAI dots, and fixed-revision architecture research for OpenClaw,
-Hermes, the OpenMuse variants, and nanoMuse/OpenMinis iOS. It distinguishes live
-composition from standalone modules, future design, and reused frameworks.
-The implementation contract continues the AgentKit loop and the existing phone
-execution path. It adds a default assistant entry and defines a new strictly decoded
-ChatController-owned atomic history with local scope/dependency rows, explicit
-memory, validated compaction metadata and one pending-next request. Startup
-permits and awaited transcript commit barriers preserve the no-replay boundary.
-Memory correction refreshes the next request; explicit forgetting shows its
-known dependency impact before excluding sources. Model memory writes remain
-host-controlled. Context preparation needs one narrow bounded provider callback
-API, without replacing the loop. Opus 5.5 xhigh, DeepSeek Flash high and Grok 4.7
-high completed two discussion rounds; GPT-6 Astra xhigh and Fable 5.1 xhigh
-reviewed the preceding contract and closed its design blockers. The user then
-authorized a clean breaking data format without legacy compatibility or
-migration; that scope update is now recorded in the plan. File locations, failure
-paths and P1–P4 implementation/acceptance steps are recorded in that plan. This
-is documentation only; the current multi-session behavior and execution contracts below remain
-the implemented baseline.
+The [single-entry and long-term memory design](long-lived-assistant.md)
+records the user-confirmed 2026-10-14 direction, the public research behind it
+and the implemented P1–P4 contract: a default "你的助理" entry on the existing
+AgentKit loop and phone execution path, one MainActor-owned strictly decoded
+assistant-v1 history with scope/dependency rows, explicit host-written memory,
+validated summaries and one pending-next request. Startup permits and awaited
+transcript commit barriers preserve the no-replay boundary; correction
+refreshes the next request; explicit forgetting shows its known dependency
+impact before excluding sources. Status and verification scope are in
+"Long-lived assistant (assistant-v1)" below. The user authorized a clean
+breaking data format without legacy compatibility or migration, and then the
+full implementation.
 
 Native provider management on a dedicated page, provider/model selection per
-conversation, iCloud Drive synchronization of portable data, reproducible IPA
+conversation (the primary line and independent tasks alike), iCloud Drive
+synchronization of portable data, reproducible IPA
 builds and AltStore Classic/SideStore source publication. Borealin/PocketAgent is
-public following the user's authorization on 2026-10-11. The planned assistant
+public following the user's authorization on 2026-10-11. The assistant
 release uses an empty assistant-v1 namespace with mandatory current-schema
 fields. Old history and provider settings are not automatically adopted; new
 provider IDs use current Keychain references without legacy-ID migration. Siri
@@ -95,9 +87,9 @@ one-to-six-line composer, removable image thumbnails and Photos, camera and
 user-initiated paste. Replies use native block Markdown and attachment views. Real
 model/tool phases must remain visible both in the chat and through the system
 task surface while another app is foreground. The review proposes native SwiftUI
-components over the existing AgentKit events. Attachment metadata extends the
-current history with optional fields while retaining its current version;
-image bytes remain outside portable synchronization. The earlier teardown fix
+components over the existing AgentKit events. Attachment metadata is a required
+field of the assistant-v1 session record; image bytes remain outside portable
+synchronization. The earlier teardown fix
 did not include this UI rewrite.
 
 The assistant release is an explicitly authorized breaking change. It supersedes
@@ -284,11 +276,15 @@ remove sideload signing, the separate automation companion or device setup.
 
 ## Architecture and compatibility
 
-App: SwiftUI sessions/provider/sync views. AgentKit: model protocols and agent
+App: SwiftUI assistant entry, task/history list, memory panel, provider/sync views. AgentKit: model protocols and agent
 loop. Native: Rust FFI RP/DDI preparation, then owned DDI service primitives or selectable WDA runner/HTTP tools.
-Run configuration is captured before enqueue; changing a session selection does
-not alter work already accepted. Existing transcript event order and tool result
-IDs are preserved. Restart interrupts active work, never replays it.
+Run configuration (provider, model, key, local context budget, project,
+backend, clipboard policy, attachments) is captured at acceptance; changing a
+selection does not alter accepted work. `HistoryOwner` is the only writer of
+`assistant-v1/history.json`; run events are recorded in event order with their
+root membership, tool result IDs are preserved, and model requests and tool
+dispatches wait for the saved request view of their inputs. Restart interrupts
+active work and asks before any pending request continues; nothing is replayed.
 
 Every turn that starts automation owns its runner PID. Retain the tunnel and
 reopen the Instruments control channel for teardown because the launch channel
@@ -304,6 +300,83 @@ model or Keychain-ID migration is required for the assistant release. Production
 defaults contain no private gateway or company identity. Local build overrides
 preserve the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
+
+## Long-lived assistant (assistant-v1)
+
+Status: P1–P4 implemented on `codex/long-lived-assistant-implementation`;
+Core tests and the iOS Release build/IPA inspection pass; device acceptance
+is partial (see below). Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
+
+- Data: one strict `assistant-v1/history.json` (explicit nulls, no legacy
+  decoder), `assistant-v1/providers.json` with local per-model context budgets,
+  `assistant-v1/Attachments`, and an `assistant-v1/` subfolder in the sync
+  location with a generation-tagged portable envelope. Earlier files and folders
+  are never read, converted or removed. An unreadable current file blocks
+  writes until an explicit reset moves it aside.
+- Owner: transactions publish only after a successful write; run events stay
+  visible when their write fails, storage becomes dirty, every gate fails and
+  only an explicit retry restores storage (never the stopped run). The writer
+  re-encodes only changed messages and splices them at a unique per-write
+  sentinel.
+- Gates: a startup permit is committed before `runtime.start`; each model
+  request waits for the saved request view (text/modelText, calls, provider
+  items, image identity) of every real message since its prompt; each tool
+  dispatch waits for its assistant call and per-call result watermarks of earlier
+  calls (local result saved or provider-answered). One turn deadline; effects
+  require the job to still own its session and run.
+- Context: same-scope complete segments, deterministic interruption repairs,
+  summaries accepted only when coverage, digests and parent chain recompute
+  (CAS commit), fresh memory block per request, forget filtering, stale phone
+  screens projected, one estimator with bounded per-model usage calibration;
+  known windows/explicit ceilings are hard guards, unknown windows only a soft
+  target.
+- Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`), model
+  read-only (`memory_search`/`session_search` through AgentKit's protocol),
+  correction by ID/revision CAS, forgetting through a recomputed preview over
+  the known read graph (iterative, linear).
+- Pending: one detached → promoted request with fair ordinals, Stop epoch,
+  held/needsResume states, explicit same-ID continuation only before the permit,
+  abandon-unstarted, sync deferral and attachment retention.
+
+Verification scope (2026-10-14): Core suite 240+ tests pass on the Mac host,
+including the commit gates through the pinned AgentRuntime, crash points of the
+pending state machine and 12k-root dependency chains. Release build and IPA
+inspection pass. On the iPhone 12 mini the dev build installed over the existing
+identity and its first launch created the empty primary line once while the
+earlier-format files stayed unchanged; further device scenarios were paused
+because another session was operating that phone. Scenarios that need a model
+(recall after model change, Chinese search through tools, correction/forget in
+model context, fresh observation without replay) need a provider configured in
+the new namespace on the device and are not yet verified. Long-history numbers
+are host measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at
+50k (110 MB file), transcript paging renders 400 messages per page.
+
+AgentKit dependency: the bounded maintenance API
+(`AgentProviderClient.consume(_:limits:onEvent:)`) is implemented and tested in a
+separate clone of the pinned revision but not published; the pin is unchanged
+and the app uses a labeled foreground summary fallback of at most 30 seconds,
+so the bounded streaming maintenance goal is not yet met. The Core streaming
+collector is implemented and verified against the patched clone.
+
+Confirmed problems found during implementation review and fixed:
+
+- The incremental writer located the messages array by the first
+  `"messages":[]` in a session's bytes. A session whose attachments map had a
+  key named `messages` produced, depending on JSONEncoder's per-process key
+  order, a file that decoded with `keyNotFound` (reproduced in 10 of 20
+  processes). Splicing now uses a per-write sentinel pair that must occur
+  exactly once (else a full re-encode); regressions cover nested same-named
+  keys, conflict copies and a nested-key-first byte layout.
+- A later event written successfully after a failed write cleared the dirty
+  state by itself. Only an explicit flush clears it now; failed epochs stay failed.
+- Pruning removed roots whose source history was deleted even when another root
+  still read them, losing transitive forget edges. Such roots now keep identity
+  and edges (unverified); decoding validates edges and rejects cycles.
+- Per-request memory relevance used the last user message, which on phone turns
+  is the appended screenshot caption. It now uses the latest recorded real user
+  message.
+- Repeated, alternating or empty summary snapshots counted as maintenance
+  progress and refreshed the idle timer; only new non-empty content counts now.
 
 ## Device Hub backend feasibility
 
@@ -816,10 +889,10 @@ container path is resolved at use time. A project frozen by a queued or running
 turn cannot be deleted (the store asks the chat controller), nor can files
 be deleted from it in the file browser (a running script's run folder would
 vanish under it; model file tools and editing stay available), and the queue
-rechecks the frozen root before starting a turn instead of substituting another. `ChatSession.workspaceID` is an optional
-local field (decoded if present, so current history keeps every ID, message,
-draft, selection and attribution); portable sync never carries it and applying a
-synchronized snapshot keeps it. `send` freezes a `WorkspaceSnapshot` into the
+rechecks the frozen root before starting a turn instead of substituting another. `ChatSession.workspaceID` is a
+required nullable local field of the assistant-v1 record; portable sync never
+carries it and applying a synchronized snapshot keeps it. The project also sets
+the work scope of each accepted request (general without a project). `send` freezes a `WorkspaceSnapshot` into the
 job beside the model configuration; a deleted project stops the send with an
 explicit notice instead of falling back. External folders are copied in through
 the system picker; export writes a copy. AgentKit scratch is not used.
@@ -1119,9 +1192,11 @@ because this introduces no glasses-device contract or algorithm change.
 ## Delivery and rejected alternatives
 
 Owner: Codex integrator and Opus 5.5 app developer.
-For the assistant release, verify empty initialization, strict current-format
+For the assistant release, empty initialization, strict current-format
 roundtrips/rejection, restart recovery, session isolation, provider selection
-capture, sync generation isolation, deletion and concurrent history conflicts, build/install and actual model/tool execution.
+capture, sync generation isolation, deletion and concurrent history conflicts
+are covered by Core tests; build/install on the reference phone and actual
+model/tool execution remain release gates (status in the section above).
 IPA/source and repository scans precede GitHub push. Success-only evidence stays
 in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
