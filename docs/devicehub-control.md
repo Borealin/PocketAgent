@@ -381,8 +381,9 @@ renewed core/native/build/IPA and exact-device acceptance are complete on the
 selected iPhone 12 mini. Initial research scope
 is the selected iPhone 12 mini on iOS 27.0, with USB attached for preparation/readback;
 supplementary Mac/AX controls on the same phone isolate callback differences
-and the paste-refusing fixture. This is not a model-turn integration gate,
-disconnected startup proof or arbitrary-app acceptance.
+and the paste-refusing fixture. Those prototype controls alone were not a
+model-turn integration gate, disconnected startup proof or arbitrary-app acceptance;
+the later integrated model/shared-executor gates are described below.
 
 Confirmed compatibility problems constrain adoption:
 
@@ -403,6 +404,32 @@ Confirmed compatibility problems constrain adoption:
 - A later connection initialization times out before any input is issued. The
   precise setup stage and root cause are not isolated. This research demonstrates
   a scoped input path, not reliable repeated startup or production acceptance.
+
+Real-search checks exposed two further limits in the current implementation:
+
+- Maps' unfocused half-height search card is rejected with
+  AX replacement target frame changed, and a fresh field read still shows its
+  placeholder. Expanding the search page and freshly observing its ordinary field
+  allows AX input and submission; default paste also accepts the half-height entry.
+  The production serde_json 1.0.149 build enables default/std without
+  float_roundtrip. A local Swift JSONSerialization to Rust counterexample with
+  the observed fractional frame changes one coordinate by one f64 ULP, so strict
+  Geometry equality can reject a numerically unchanged field. This transport
+  defect is reproduced locally; the exact expected/fresh operands from the failed
+  device call were not captured, so concurrent layout motion is not fully excluded
+  for that specific failure. Enabling float_roundtrip makes that local bridge
+  counterexample bit-stable; it has not been applied to or device-validated in the
+  production archive. Resolve number fidelity before considering any frame
+  tolerance; retain fresh identity, foreground, complete graph and exact hit checks.
+- App Store and Safari submission can return AX foreground has no readable hit
+  point after Return was issued. App Store later permits read-only observation
+  of the actual search page. One initial page instead showed Cannot Connect; a
+  separate fresh AX case reached the same app listing as paste. Safari retains
+  the query in its address/search display, but both AX and paste cases remain
+  loading with repeated foreground-read failure; neither final webpage result is
+  confirmed. The service/loading root cause remains unisolated, and these errors
+  do not demonstrate missing AX text callbacks. Read the current page after a
+  submitted error; never repeat input or Return merely because observation failed.
 
 The implementation retains type_text and press_keys, and adds an optional
 explicit DDI method (ax or paste) to type_text. Old calls retain their

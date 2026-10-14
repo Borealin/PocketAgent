@@ -612,7 +612,11 @@ state and the AX result reports target_focused without inferring it from the set
 acknowledgement. The model
 confirms focus or uses node-bound press_keys before submission. Callback and
 empty-value compatibility limits, and completed selected-device acceptance, are recorded in
-[devicehub-control.md](devicehub-control.md#ax-final-text-route). A later Mac-side UniversalHID bench check confirmed
+[devicehub-control.md](devicehub-control.md#ax-final-text-route). Real search also exposed a fractional-frame
+round-trip counterexample that can falsely trip AX's strict frame check, and a
+unreadable App Store/Safari foreground after submission. These are recorded as
+compatibility/observation limits; submitted errors require a fresh read, never replay.
+A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard
 access. This is input-method feasibility, not an integrated on-phone input mode.
