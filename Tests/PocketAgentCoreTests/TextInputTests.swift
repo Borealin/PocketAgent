@@ -21,6 +21,53 @@ struct TextInputTests {
         #expect(explicit.method == .paste)
     }
 
+    @Test func nullMethodBehavesExactlyLikeOmittedMethod() throws {
+        var null = arguments()
+        null["method"] = .null
+        for backend in PhoneBackendKind.allCases {
+            for clipboardAllowed in [true, false] {
+                let make: ([String: AgentJSONValue]) -> Result<TextInputRequest, any Error> = { values in
+                    Result { try TextInputRequest(arguments: values, backend: backend, clipboardAllowed: clipboardAllowed) }
+                }
+                let omitted = make(arguments()), explicitNull = make(null)
+                switch (omitted, explicitNull) {
+                case let (.success(a), .success(b)):
+                    #expect(a.method == .paste && b.method == .paste)
+                    #expect(a.text == b.text && a.clear == b.clear)
+                case let (.failure(a), .failure(b)):
+                    #expect(a as? TextInputRequest.Issue == b as? TextInputRequest.Issue)
+                default:
+                    Issue.record("null and omitted method diverged for \(backend), clipboard \(clipboardAllowed)")
+                }
+            }
+        }
+        // Frozen clipboard denial still governs default paste on DDI; WDA's
+        // paste route is unchanged.
+        #expect(throws: TextInputRequest.Issue.pasteClipboardDenied) {
+            try TextInputRequest(arguments: null, backend: .ddi, clipboardAllowed: false)
+        }
+        #expect(try TextInputRequest(arguments: null, backend: .wda, clipboardAllowed: false).method == .paste)
+        #expect(try TextInputRequest(arguments: null, backend: .ddi, clipboardAllowed: true).method == .paste)
+    }
+
+    @Test func explicitMethodsKeepTheirRoutesAndNonStringMethodsFail() throws {
+        #expect(throws: TextInputRequest.Issue.pasteClipboardDenied) {
+            try TextInputRequest(arguments: arguments(method: "paste"), backend: .ddi, clipboardAllowed: false)
+        }
+        #expect(try TextInputRequest(arguments: arguments(method: "paste"), backend: .ddi, clipboardAllowed: true).method == .paste)
+        #expect(try TextInputRequest(arguments: arguments(method: "ax"), backend: .ddi, clipboardAllowed: false).method == .ax)
+        #expect(throws: TextInputRequest.Issue.axRequiresDDI) {
+            try TextInputRequest(arguments: arguments(method: "ax"), backend: .wda, clipboardAllowed: true)
+        }
+        for invalid: AgentJSONValue in [.bool(true), .string(""), .string("PASTE"), .array([]), .object([:])] {
+            var values = arguments()
+            values["method"] = invalid
+            #expect(throws: TextInputRequest.Issue.invalidMethod) {
+                try TextInputRequest(arguments: values, backend: .ddi, clipboardAllowed: true)
+            }
+        }
+    }
+
     @Test func axRequiresDDIAndWholeFieldReplacementWithinByteLimit() throws {
         let ax = try TextInputRequest(arguments: arguments(text: "天气", method: "ax"), backend: .ddi, clipboardAllowed: false)
         #expect(ax.method == .ax)

@@ -55,4 +55,18 @@ struct DDINodeMappingTests {
         #expect(DDINodeMapping.confirmsInput(["value": "Search", "placeholder": "Search"], text: ""))
         #expect(DDINodeMapping.confirmsInput(["value": "你好🌟"], text: "你好🌟"))
     }
+    @Test func placeholderValueNeverConfirmsNonemptyInput() throws {
+        // Counterexample: a refused paste leaves the empty search field
+        // reporting its placeholder as AX value. Requested text equal to that
+        // placeholder must remain unconfirmed.
+        let refused = try #require(try DDINodeMapping.attributes(node(["45": 15, "51": 1, "42": "Search", "53": "Search"])))
+        #expect(refused["value"] == "Search" && refused["placeholder"] == "Search")
+        #expect(!DDINodeMapping.confirmsInput(refused, text: "Search"))
+        #expect(!TextInputRequest.confirmsAXInput(refused, text: "Search"))
+        #expect(DDINodeMapping.confirmsInput(refused, text: "")) // Clear-only behavior is retained.
+        let typed = try #require(try DDINodeMapping.attributes(node(["45": 15, "51": 1, "42": "Search", "53": "Search shoes"])))
+        #expect(DDINodeMapping.confirmsInput(typed, text: "Search shoes"))
+        #expect(!DDINodeMapping.confirmsInput(["value": "Search", "placeholder": "Search"], text: "Search"))
+        #expect(DDINodeMapping.confirmsInput(["value": "", "placeholder": "Search"], text: ""))
+    }
 }

@@ -45,7 +45,9 @@ nonisolated struct TextInputRequest: Sendable {
         if let rawMethod = arguments["method"]?.stringValue {
             guard let parsed = TextInputMethod(rawValue: rawMethod) else { throw Issue.invalidMethod }
             method = parsed
-        } else if arguments["method"] == nil {
+        } else if arguments["method"] == nil || arguments["method"] == .null {
+            // The pinned AgentKit validator accepts null optional fields as
+            // omission; null therefore selects the same default paste route.
             method = .paste
         } else {
             throw Issue.invalidMethod

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 49BF9B5D946340940F5C4C82 /* RustLicenses */; };
+		037E5381B669DED7A34CA611 /* ProviderToolSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */; };
 		0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */; };
 		095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */; };
 		0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */ = {isa = PBXBuildFile; fileRef = 21C75A8C07B02E84366B00D3 /* PocketISH.m */; settings = {COMPILER_FLAGS = "-I$(SRCROOT)/.build/ish/sources/ish -I$(SRCROOT)/.build/ish/sources/ish/app"; }; };
@@ -53,6 +54,7 @@
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
 		EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */; };
 		F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */; };
+		F2FDE3B2136A4DD8384EB4E1 /* DDIOperationFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */; };
 		F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6EC72EE2D00391C3C55564C /* NativeTools.swift */; };
 		F6774F41313AE31CEA4EAF72 /* ish-root.tar.gz in Resources */ = {isa = PBXBuildFile; fileRef = 383A79C611AE1573F3276AA9 /* ish-root.tar.gz */; };
 		F70616E01082CC5D64A50177 /* ChatRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8EA7A7751315A2BC8D2B1A /* ChatRootView.swift */; };
@@ -92,6 +94,8 @@
 		8D84987315C6121941984C15 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
+		9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIOperationFailure.swift; sourceTree = "<group>"; };
+		AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderToolSchema.swift; sourceTree = "<group>"; };
 		B6EC72EE2D00391C3C55564C /* NativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTools.swift; sourceTree = "<group>"; };
 		B905767CE0B0943ABBA88653 /* KeyboardSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSequence.swift; sourceTree = "<group>"; };
 		BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneConnectionStatus.swift; sourceTree = "<group>"; };
@@ -168,6 +172,7 @@
 				8D84987315C6121941984C15 /* Attachments.swift */,
 				59F24A784103BF8F2532963F /* ChatHistory.swift */,
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
+				9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				21B9777F694312D830BE8C77 /* HTTPTool.swift */,
 				1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */,
@@ -179,6 +184,7 @@
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
+				AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */,
 				130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */,
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
@@ -343,6 +349,7 @@
 				166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */,
 				72018019477198B62A047CE7 /* CloudSync.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
+				F2FDE3B2136A4DD8384EB4E1 /* DDIOperationFailure.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
@@ -360,6 +367,7 @@
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
 				A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
+				037E5381B669DED7A34CA611 /* ProviderToolSchema.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
 				DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */,
 				D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */,

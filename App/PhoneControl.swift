@@ -134,6 +134,16 @@ final class DDIControl: PhoneControl {
         }
         try cancellationCheck?()
         guard let object = try JSONSerialization.jsonObject(with: result) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
+        if let failure = try DDIOperationFailure.decode(object) {
+            if ["snapshot", "foreground"].contains(requestObject["op"] as? String ?? ""),
+               failure.message.contains("AX foreground or root changed") ||
+               (failure.message.contains("AX request type") && failure.message.contains("refused: 8")) {
+                throw PhoneObservationIssue.foregroundChanged
+            }
+            if ["snapshot", "foreground"].contains(requestObject["op"] as? String ?? ""),
+               failure.message.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
+            throw failure
+        }
         return object
     }
     func activeApp() async throws -> String { try await call(["op": "foreground"])["app"] as? String ?? "" }

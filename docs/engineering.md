@@ -539,13 +539,31 @@ unidentified surfaces fail before coordinate input. WDA still owns its runner PI
 and HTTP session, and is never selected automatically after an uncertain action.
 
 Native source lives in Native/ddi and bootstrap copies it into the pinned idevice
-FFI checkout. AX keyed archives remain data, with size, depth, cycle, reference
+FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
+new managed checkout instead of reapplying a new patch to the old patched tree;
+unknown edits are refused and preserved. Corresponding-source packaging resolves
+that same checkout for upstream sources and crate vendoring. AX keyed archives remain data, with size, depth, cycle, reference
 expansion and message limits. One semantic request is outstanding at a time; a
 failed AX socket is closed before fresh read-only recovery. Cancellation has a
 separate atomic handle. Touch/button releases and empty key reports precede queue
 release; the turn owns its virtual keyboard until cancellation or finalization,
 then confirms its removal. No media stream is opened. Finalization returns to the
 assistant and closes owned DDI services before releasing the tunnel.
+
+Native calls now return effect-phase metadata through FFI. Pre-effect refusals
+remain eligible for read-only recovery and a separately planned action; an uncertain
+effect or failed input release still disables input and explicitly requires a new
+turn. Composite Swift tools retain any earlier clipboard, focus or clear effect in
+their outcome. No branch replays input or switches routes. The shared installed-app
+catalog is loaded before native DDI readiness is published, so a failed inventory
+read can resume instead of turning a live session into an empty-catalog result.
+
+Optional type_text method=null follows the existing omitted-method paste default
+and frozen policy on both backends. Nonempty paste cannot be confirmed from a
+placeholder-equal AX value. Gemini receives a wire-only OpenAPI schema projection
+without additionalProperties or uniqueItems; AgentKit's registered runtime schema
+and the executor's sequence, duplicate-modifier and clipboard validation remain
+unchanged. The other provider schemas retain their original declarations.
 
 Confirmed integration fixes: decoding AX UID zero as an empty string changed the
 translation token's null fields and the device refused its attributes request.
@@ -1052,6 +1070,19 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+The PR #1 compatibility review reproduced optional-null rejection and nonempty
+paste false confirmation using the compiled Core code, and old-patch bootstrap
+upgrade failure using an isolated checkout of the pinned idevice revision. Source
+inspection also found that native pre-effect refusals poisoned all later input,
+and that opening DDI before a failed shared inventory read let later preparation
+skip the inventory. The fixes preserve the default routes, current stored data and
+no-replay boundary. Native regressions cover refusal versus uncertain effect,
+failed release and exact fractional-frame JSON round trips; Core regressions cover
+the wire outcome, optional-null policy, placeholder ambiguity and Gemini projection.
+Temporary Git-fixture regressions cover patch upgrades, interrupted staging and
+preservation of unknown edits. Full iOS/IPA and selected-device verification must
+be renewed for this implementation; prior branch acceptance is not its device gate.
 
 The transcript dismissed the keyboard during interactive scrolling but had no
 tap-to-dismiss path. A transcript-only simultaneous tap now clears the root's

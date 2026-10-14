@@ -48,9 +48,12 @@ nonisolated enum DDINodeMapping {
     }
 
     static func confirmsInput(_ node: [String: String], text: String) -> Bool {
-        if node["value"] == text { return true }
-        guard text.isEmpty else { return false }
-        guard let value = node["value"], let placeholder = node["placeholder"] else { return false }
-        return value == placeholder
+        guard let value = node["value"] else { return false }
+        let placeholder = node["placeholder"]
+        // An empty field can report its placeholder as AX value, e.g. after a
+        // refused paste; that value cannot confirm nonempty input.
+        guard text.isEmpty else { return value == text && value != placeholder }
+        // Clear-only keeps its existing placeholder-or-empty confirmation.
+        return value == text || value == placeholder
     }
 }

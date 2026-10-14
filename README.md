@@ -296,6 +296,12 @@ complete corresponding source next to the IPA.
 
 ## Build
 
+Bootstrap keeps patched idevice sources under `.deps/idevice-pocketagent/`, keyed
+by pinned revision and the digest of `Native/idevice.patch`. Changing the patch
+creates a new checkout; an existing legacy `.deps/idevice` is left untouched.
+Managed checkouts with unknown local edits are refused rather than reset. Put
+maintained native changes in `Native/ddi` or `Native/idevice.patch`.
+
 On macOS, install Xcode 26.2 or later, XcodeGen, Rust 1.95.0, meson and lld, plus
 Docker able to run linux/386 containers for the script rootfs. Select the full
 Xcode developer directory, then run from the repository root:

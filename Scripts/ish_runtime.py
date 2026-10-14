@@ -18,6 +18,7 @@ import getpass
 import gzip
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -35,6 +36,13 @@ SOURCES = OUT / 'sources'
 PATCHES = ROOT / 'Native/ish/patches'
 LIBRARIES = ['liblinux', 'libiSHLinux', 'libiSHLinuxUser', 'libfakefs', 'libish_emu', 'libarchive']
 EPOCH = 1767225600  # fixed archive timestamps
+
+
+def idevice_source_path():
+    spec = importlib.util.spec_from_file_location('pocketagent_bootstrap', Path(__file__).with_name('bootstrap.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.idevice_checkout_path(ROOT)
 
 
 def run(args, **kwargs):
@@ -402,7 +410,8 @@ def source_archive(strict=False):
             if checkouts.is_dir() else None
         modules.append((pin['identity'], checkout, pin['state']['revision']))
     idevice = pins()['idevice']
-    modules.append(('idevice', ROOT / '.deps/idevice', idevice['revision']))
+    idevice_checkout = idevice_source_path()
+    modules.append(('idevice', idevice_checkout, idevice['revision']))
     missing = [name for name, checkout, _ in modules if checkout is None or not checkout.is_dir()]
     if missing and strict:
         raise SystemExit('Corresponding source missing for: ' + ', '.join(missing))
@@ -432,7 +441,7 @@ def source_archive(strict=False):
                 vendor = Path(directory) / 'vendor'
                 # The iOS build downloads only that target's crates; the
                 # corresponding source is every crate in the lock.
-                manifest = ROOT / '.deps/idevice/Cargo.toml'
+                manifest = idevice_checkout / 'Cargo.toml'
                 run(['cargo', 'fetch', '--locked', '--manifest-path', manifest], stdout=subprocess.DEVNULL)
                 run(['cargo', 'vendor', '--offline', '--locked', '--manifest-path', manifest, vendor],
                     stdout=subprocess.DEVNULL)

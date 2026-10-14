@@ -179,7 +179,8 @@ private struct PhoneObservingModel: AgentModelStreaming {
             let task = Task {
                 do {
                     let enriched = try await phone.prepare(request)
-                    for try await event in client.stream(enriched) { continuation.yield(event) }
+                    let wire = ProviderToolSchema.prepare(enriched, format: phone.config.format)
+                    for try await event in client.stream(wire) { continuation.yield(event) }
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
@@ -508,8 +509,13 @@ final class PhoneExecutor {
         }
         func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
+            let earlierEffect = issued
             issued = true
-            try await operation()
+            do { try await operation() }
+            catch let failure as DDIOperationFailure {
+                issued = failure.actionWasIssued(after: earlierEffect)
+                throw failure
+            }
             try proceed()
         }
         control.cancellationCheck = proceed
@@ -645,7 +651,8 @@ final class PhoneExecutor {
                     break
                 }
                 if backend == .ddi {
-                    try await effect { try await control.prepareText(text) }
+                    if text.isEmpty { try await control.prepareText(text) }
+                    else { try await effect { try await control.prepareText(text) } }
                     // Revalidate the target after clipboard preparation; no effect is replayed.
                     a = try await node(args, base: base, proceed: proceed)
                 }
@@ -753,6 +760,25 @@ final class PhoneExecutor {
             invalidateObservation()
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
+            if let failure = error as? DDIOperationFailure {
+                var result: [String: Any] = ["ok": false, "code": failure.code,
+                    "message": failure.message + (failure.requiresNewTurn
+                        ? " 本轮输入已停用，请结束本轮并在新回合重新观察；不要重试或切换输入方式。"
+                        : " 请读取新屏幕后重新规划；本工具不会重放或自动切换输入方式。"),
+                    "action_issued": issued, "action_outcome": issued ? "unconfirmed" : "not_started",
+                    "requires_new_turn": failure.requiresNewTurn, "requires_replan": !failure.requiresNewTurn,
+                    "replay_allowed": false]
+                if let textInput { result["input_method"] = textInput.method.rawValue; result["input_verified"] = false }
+                // Read-only recovery is allowed even when input is disabled.
+                do { result["screen"] = try await observe(proceed: proceed, prepareSurface: false) }
+                catch {
+                    if error is ActionStopped || error is CancellationError || Task.isCancelled || model.pendingAgentCancellation {
+                        throw ActionStopped(issued: issued, reason: "本轮已取消。")
+                    }
+                    result["recovery"] = "observe_screen_required"
+                }
+                return try Self.result(result, error: true)
+            }
             if textInput?.method == .ax, !(error is PhoneObservationIssue) {
                 return try Self.result(["ok": false, "code": (error as? TextInputRequest.Issue)?.code ?? "ax_input_failed",
                     "message": "\(error.localizedDescription) 请读取新屏幕；不能重放或自动切换输入方式。",

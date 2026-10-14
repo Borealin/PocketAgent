@@ -145,6 +145,7 @@ final class DeviceConnection {
         guard let output else { throw failure("DDI 返回为空。") }
         defer { idevice_string_free(output) }
         guard let result = try JSONSerialization.jsonObject(with: Data(String(cString: output).utf8)) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
+        if let failure = try DDIOperationFailure.decode(result) { throw failure }
         return result
     }
     func closeDDI() throws {
@@ -605,12 +606,16 @@ final class Model: ObservableObject {
         guard !pendingAgentCancellation else { throw CancellationError() }
         let device = try await preparePhoneTransport()
         guard device.ddi == nil else { return }
+        // Do not publish native readiness before the shared app catalog exists.
+        // A failed catalog read leaves no DDI session that can skip this stage.
+        installedApps = try await ffi { try device.installedApplications() }
+        try Task.checkCancellation()
+        guard !pendingAgentCancellation else { throw CancellationError() }
         try await runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
             try await self.ffi { try device.openDDI() }
         }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
-        installedApps = try await ffi { try device.installedApplications() }
         log("ddi_services_ready")
     }
     func prepareWDA() async throws -> String {

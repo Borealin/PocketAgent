@@ -181,6 +181,12 @@ retry an action after discovering that its outcome is unknown.
 - An action whose outcome is unknown, such as a closed handle or a timeout, is never
   replayed; the next step observes first. A closed HID connection does not prove that
   the event did not land.
+- Native failures carry the actual effect phase. A refusal before the first input,
+  app activation or clipboard write reports not_started and leaves input available
+  for a separately planned action after observation. An uncertain effect or failed
+  owned release disables further input and explicitly requires a new turn. Swift
+  preserves earlier effects in composite clear/paste tools; it never treats a later
+  refusal as proof that the whole tool had no effect. Neither outcome authorizes replay.
 - Clipboard preparation does not activate the assistant. Input uses the same verified foreground, geometry and node checks in installed apps and observed system search. Unknown foreground identities still fail.
 - System dialogs and paste permission prompts are reported as needing the user's action
   on the phone. Gap 2's root cause is open, and this design does not depend on it.
@@ -335,6 +341,9 @@ generic concepts only; the repository contracts were checked locally afterward.
 - type_text keeps its existing required parameters and final-text intent for old scripts.
   Optional method defaults to paste. WDA uses the existing value request; DDI uses
   clipboard paste by default or explicit method=ax for eligible whole-field replacement.
+  Provider-neutral null for the optional method is equivalent to omission, including
+  the frozen clipboard denial policy. Nonempty paste confirmation excludes a value
+  equal to the placeholder: an empty field can expose that value after refusing paste.
 - press_keys(node, keys, modifiers, snapshot_id) represents 1–32 physical US-key
   positions/chords, not final Unicode text. Modifiers apply separately to each
   key and are released after each chord. Only DDI exposes this new primitive;
@@ -411,16 +420,18 @@ Real-search checks exposed two further limits in the current implementation:
   AX replacement target frame changed, and a fresh field read still shows its
   placeholder. Expanding the search page and freshly observing its ordinary field
   allows AX input and submission; default paste also accepts the half-height entry.
-  The production serde_json 1.0.149 build enables default/std without
+  The original serde_json 1.0.149 build enabled default/std without
   float_roundtrip. A local Swift JSONSerialization to Rust counterexample with
   the observed fractional frame changes one coordinate by one f64 ULP, so strict
   Geometry equality can reject a numerically unchanged field. This transport
   defect is reproduced locally; the exact expected/fresh operands from the failed
   device call were not captured, so concurrent layout motion is not fully excluded
-  for that specific failure. Enabling float_roundtrip makes that local bridge
-  counterexample bit-stable; it has not been applied to or device-validated in the
-  production archive. Resolve number fidelity before considering any frame
-  tolerance; retain fresh identity, foreground, complete graph and exact hit checks.
+  for that specific failure. The revised FFI manifest enables float_roundtrip and
+  its native regression preserves the exact fractional-frame bits. No frame tolerance
+  is introduced; fresh identity, foreground, complete graph and exact hit checks stay
+  required. This fixes the reproduced transport defect but does not prove that the
+  earlier Maps refusal was caused only by numeric drift; revised-device acceptance
+  remains required.
 - App Store and Safari submission can return AX foreground has no readable hit
   point after Return was issued. App Store later permits read-only observation
   of the actual search page. One initial page instead showed Cannot Connect; a

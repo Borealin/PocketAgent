@@ -73,9 +73,21 @@ pub struct PocketDDISession {
     touch: Option<(u16, u16)>,
     home_down: bool,
     poisoned: bool,
+    effect_started: bool,
 }
 fn error(message: impl Into<String>) -> IdeviceError {
     IdeviceError::InternalError(message.into())
+}
+fn request_failure(message: String, effect_started: bool, poisoned: &mut bool,
+                   release_failed: bool, read_only: bool) -> Json {
+    *poisoned |= effect_started || release_failed;
+    let code = if release_failed { "ddi_cleanup_unconfirmed" }
+        else if effect_started { "ddi_effect_unconfirmed" }
+        else if *poisoned { "ddi_session_poisoned" }
+        else if read_only { "ddi_observation_failed" }
+        else { "ddi_preflight_refused" };
+    json!({"ok":false,"code":code,"message":message,"action_issued":effect_started,
+        "requires_new_turn":*poisoned,"replay_allowed":false})
 }
 async fn bounded<T, E: std::fmt::Display>(
     f: impl std::future::Future<Output = Result<T, E>>,
@@ -349,6 +361,7 @@ impl PocketDDISession {
             touch: None,
             home_down: false,
             poisoned: false,
+            effect_started: false,
         })
     }
     fn proceed(&self) -> Result<(), IdeviceError> {
@@ -522,6 +535,7 @@ impl PocketDDISession {
                 (from.0 as f64 + (to.0 as f64 - from.0 as f64) * t).round() as u16,
                 (from.1 as f64 + (to.1 as f64 - from.1 as f64) * t).round() as u16,
             );
+            self.effect_started = true;
             self.touch = Some(p); // Before write: failure may have delivered contact.
             bounded(self.hid.send_touchscreen(0xC2, p.0, p.1, None)).await?;
             if i < steps {
@@ -545,6 +559,7 @@ impl PocketDDISession {
             bounded(client.do_handshake()).await?;
             self.keyboard_hid = Some(UniversalHidServiceClient::new(client));
             self.proceed()?;
+            self.effect_started = true; // A failed constructor can have created an owned service.
             self.keyboard = Some(
                 self.keyboard_hid.as_mut().ok_or_else(|| error("DDI keyboard channel missing"))?
                     .create_main_keyboard()
@@ -560,6 +575,7 @@ impl PocketDDISession {
         }
         for code in codes {
             self.proceed()?;
+            self.effect_started = true;
             bounded(
                 self.keyboard_hid.as_mut().ok_or_else(|| error("DDI keyboard channel missing"))?.main_keyboard_key_down(
                     self.keyboard
@@ -650,6 +666,7 @@ impl PocketDDISession {
             let bundle = v["bundle_id"]
                 .as_str()
                 .ok_or_else(|| error("DDI return bundle missing"))?;
+            self.effect_started = true;
             bounded(
                 self.apps
                     .launch_application(bundle, &[], false, false, None, None, None),
@@ -727,7 +744,11 @@ impl PocketDDISession {
                     return Err(error("AX replacement target is covered or changed"));
                 }
                 self.proceed()?;
-                self.ax().await?.set_text(&token, text).await.map_err(error)?;
+                // Reconnection is read preparation; the setter is the effect.
+                self.ax().await?;
+                self.effect_started = true;
+                self.ax.as_mut().ok_or_else(|| error("AX session missing"))?
+                    .set_text(&token, text).await.map_err(error)?;
                 self.proceed()?;
                 Ok(json!({"action_issued":true,"replay_allowed":false,"route":"ax-set-value"}))
             }
@@ -746,6 +767,7 @@ impl PocketDDISession {
                 let mut client = PasteboardServiceClient::new(client);
                 if op == "clipboard_set" {
                     self.proceed()?;
+                    self.effect_started = true;
                     bounded(client.set_text(expected, "general")).await?;
                     self.proceed()?;
                 }
@@ -770,6 +792,7 @@ impl PocketDDISession {
                 // Activate an existing process; never terminate the target or
                 // the assistant whose turn owns this session.
                 self.proceed()?;
+                self.effect_started = true;
                 bounded(
                     self.apps
                         .launch_application(bundle, &[], false, false, None, None, None),
@@ -797,6 +820,7 @@ impl PocketDDISession {
             }
             "home" => {
                 self.proceed()?;
+                self.effect_started = true;
                 self.home_down = true;
                 bounded(self.buttons.send_button(12, 64, ButtonState::Down)).await?;
                 self.wait(80).await?;
@@ -950,48 +974,39 @@ pub unsafe extern "C" fn pocket_ddi_call(
         Err(_) => return ffi_err!(IdeviceError::FfiInvalidArg),
     };
     let session = unsafe { &mut *handle };
+    session.effect_started = false;
     let result = run_sync_local(async {
         let result = tokio::time::timeout(Duration::from_secs(35), session.call(&value))
             .await
-            .map_err(|_| error("DDI operation deadline"));
+            .map_err(|_| error("DDI operation deadline"))
+            .and_then(|r| r);
         let cleanup = session
             .cleanup_input(session.cancel.load(Ordering::Acquire))
             .await;
         if let Err(e) = cleanup {
             let _ = session.close_ax().await;
-            return Err(e);
+            return request_failure(e.to_string(), session.effect_started, &mut session.poisoned, true, false);
         }
         match result {
-            Ok(Ok(v)) => Ok(v),
-            other => {
+            Ok(mut v) => {
+                v["ok"] = json!(true);
+                v["action_issued"] = json!(session.effect_started);
+                v["replay_allowed"] = json!(false);
+                v
+            },
+            Err(e) => {
                 // Abort semantic AX correlation after any failed operation.
                 // Read-only recovery may reconnect; uncertain effects never replay.
                 let _ = session.close_ax().await;
                 let op = value["op"].as_str().unwrap_or("");
-                if !["apps", "foreground", "snapshot", "clipboard_verify"].contains(&op) {
-                    session.poisoned = true;
-                }
-                match other {
-                    Ok(Err(e)) | Err(e) => Err(e),
-                    _ => unreachable!(),
-                }
+                let read_only = ["apps", "foreground", "snapshot", "clipboard_verify"].contains(&op);
+                request_failure(e.to_string(), session.effect_started, &mut session.poisoned, false, read_only)
             }
         }
     });
-    match result {
-        Ok(v) => match serde_json::to_string(&v)
-            .ok()
-            .and_then(|s| CString::new(s).ok())
-        {
-            Some(s) => {
-                unsafe {
-                    *out = s.into_raw();
-                }
-                null_mut()
-            }
-            None => ffi_err!(error("DDI result encoding")),
-        },
-        Err(e) => ffi_err!(e),
+    match serde_json::to_string(&result).ok().and_then(|s| CString::new(s).ok()) {
+        Some(s) => { unsafe { *out = s.into_raw(); } null_mut() },
+        None => ffi_err!(error("DDI result encoding")),
     }
 }
 /// # Safety
@@ -1066,6 +1081,52 @@ pub unsafe extern "C" fn pocket_ddi_close(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refused_preflight_remains_usable_but_uncertain_effect_does_not() {
+        let mut poisoned = false;
+        let refused = request_failure("field frame changed".into(), false, &mut poisoned, false, false);
+        assert_eq!(refused["code"], "ddi_preflight_refused");
+        assert_eq!(refused["action_issued"], false);
+        assert_eq!(refused["requires_new_turn"], false);
+        assert!(!poisoned);
+        let uncertain = request_failure("setter reply timed out".into(), true, &mut poisoned, false, false);
+        assert_eq!(uncertain["code"], "ddi_effect_unconfirmed");
+        assert_eq!(uncertain["action_issued"], true);
+        assert_eq!(uncertain["requires_new_turn"], true);
+        assert!(poisoned);
+        let blocked = request_failure("input disabled".into(), false, &mut poisoned, false, false);
+        assert_eq!(blocked["code"], "ddi_session_poisoned");
+        assert_eq!(blocked["action_issued"], false);
+        assert_eq!(blocked["requires_new_turn"], true);
+        assert_eq!(blocked["replay_allowed"], false);
+    }
+
+    #[test]
+    fn failed_owned_release_disables_input_even_after_a_read_only_request() {
+        let mut poisoned = false;
+        let failure = request_failure("key release failed".into(), false, &mut poisoned, true, true);
+        assert_eq!(failure["code"], "ddi_cleanup_unconfirmed");
+        assert_eq!(failure["requires_new_turn"], true);
+        assert_eq!(failure["action_issued"], false);
+        assert!(poisoned);
+    }
+
+    #[test]
+    fn fractional_target_frames_keep_the_exact_swift_json_round_trip() {
+        // Real AX coordinate that previously moved by one f64 ULP under the
+        // default serde_json parser, falsely refusing an unchanged field.
+        let expected = 23.317333333333334_f64;
+        let frame: Json = serde_json::from_str(
+            r#"{"x":23.317333333333334,"y":94.66666666666667,"width":328.36533333333335,"height":36.666666666666664}"#
+        ).unwrap();
+        assert_eq!(frame["x"].as_f64().unwrap().to_bits(), expected.to_bits());
+        let encoded = serde_json::to_string(&frame).unwrap();
+        let decoded: Json = serde_json::from_str(&encoded).unwrap();
+        for key in ["x", "y", "width", "height"] {
+            assert_eq!(frame[key].as_f64().unwrap().to_bits(), decoded[key].as_f64().unwrap().to_bits());
+        }
+    }
     #[test]
     fn ax_replacement_eligibility_requires_enabled_visible_ordinary_single_line_field() {
         let screen = Geometry { x: 0.0, y: 0.0, width: 390.0, height: 844.0 };
