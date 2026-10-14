@@ -310,8 +310,9 @@ and runner/VPN settings are local to each device.
 ## Long-lived assistant (assistant-v1)
 
 Status: P1–P4 implemented on `codex/long-lived-assistant-implementation`;
-Core tests, the iOS Release build/IPA inspection and the real-model device
-scenarios on the iPhone 12 mini pass; uncovered items are listed below.
+Core and DDI native tests, the iOS Release build/IPA inspection and the
+real-model device scenarios on the iPhone 12 mini pass, including observation of
+PocketAgent's own pages; uncovered items are listed below.
 Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
 
 - Data: one strict `assistant-v1/history.json` (explicit nulls, no legacy
@@ -367,35 +368,39 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
 
-Verification scope (2026-10-14): Core suite (258 tests, mock transports) passes
+Verification scope (2026-10-14): Core suite (260 tests, mock transports) passes
 on the Mac host, including the commit gates through the pinned AgentRuntime,
 crash points of the pending state machine, 12k-root dependency chains, earlier
 version-1 settings files keeping IDs/origins/default/budgets, the summary
 dispatch checks (a large Chinese previous summary never reaches the producer),
-cross-scope continuation, and never-started requests staying out of context.
-Release build and IPA inspection pass. On the iPhone 12 mini (dev builds over
-the existing identity) the assistant used the model already configured in
-Settings without setup; with real model calls it answered from memory, did not
-recover a forgotten fact through Chinese memory/history search, kept state across
-relaunch, advanced and held the next request as specified, continued an
-unstarted promoted request in the project chosen afterwards (root moved, same ID
-once), and committed real summary folds through the bounded `consume` path. On
-the final build, a send failed by start-failure injection returned its draft;
-resent under a new ID it was answered once and the model counted it once, and
-new summaries exclude the unstarted request. With the existing local VPN
-connected, a task listed installed apps, opened Settings and observed it fresh;
-an app killed mid-turn left the task interrupted with no action replayed.
-Open boundary: observing PocketAgent's own chat screens (long primary line or an
-almost empty task) fails in the DDI AX graph check (`AX graph identity/size/depth
-limit`: cross-PID, repeated identity, depth > 32 or ≥ 512 nodes, one combined
-error). The same screen reads as 110 nodes at depth 15 without duplicate IDs
-through ipb, so an out-of-process element or a repeated identity (for example
-the system paste control) is the likely trigger; this is unconfirmed, predates
-this work, and the limits were not changed. Not verified on the device: recall
-after a model change (one model configured), over-budget fold refusal, forgets
-during maintenance and the 150/600 s limits (host tests only). Long-history
-numbers are host measurements: per-event write p95 0.05 s at 10k messages and
-0.2 s at 50k (110 MB file), transcript paging renders 400 messages per page.
+cross-scope continuation, never-started requests staying out of context, strict
+outside-app counts and preparation effects; the DDI native unit tests (24, host
+`cargo test`) cover graph admission, point ownership and the status-band
+gesture bounds. Release build and IPA inspection pass. On the iPhone 12 mini (dev
+builds over the existing identity) the assistant used the model already
+configured in Settings without setup; with real model calls it answered from
+memory, did not recover a forgotten fact through Chinese memory/history search,
+kept state across relaunch, advanced and held the next request as specified,
+continued an unstarted promoted request in the project chosen afterwards,
+committed real summary folds through the bounded `consume` path, and answered a
+draft resent after a pre-permit failure once. On the final build, with the
+keyboard's paste suggestion on screen, observing the primary line and a new
+empty task succeeded (one outside-app element); a `tap_point` on the suggestion
+was refused before any touch and reported as not executed; a Settings
+navigation observed every result; a kill mid-turn and Stop during a phone turn
+left the turn interrupted with no further action, and a new request observed
+fresh. A test task kept calling `wait` (85 calls in 22 responses, below the
+per-turn caps) until the 600 s turn deadline stopped it at 600.2 s with nothing
+replayed; the watchdog now reports that deadline as the cause instead of a
+generic failure. Not verified on the device: recall after a model change (the
+configured provider has one model and no model catalog address, so the app
+cannot discover another without a newly entered endpoint), over-budget fold refusal, forgets during maintenance,
+the 150 s maintenance limit, and the Dynamic Island task-surface gesture (native
+bounds tests only). Weather's first-run welcome appears without a Weather app
+process: its launch returns CoreDevice 10004 (reported unconfirmed) and
+observation refuses the unidentified foreground. Long-history numbers are host
+measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
+(110 MB file), transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
@@ -409,8 +414,8 @@ real progress and cancellation propagated as cancellation. A system expiry
 during maintenance ends the turn before its permit (draft returned or pending
 request held, nothing dispatched); progress reflects only real increments, so a
 provider that stays silent for about 30 seconds can still be expired by iOS. Host integration
-tests drive the real `consume` through a URL protocol stub; device-side
-summarization has not run yet.
+tests drive the real `consume` through a URL protocol stub; real summary folds
+also ran on the iPhone 12 mini (see the verification scope above).
 
 Confirmed problems found during implementation review and fixed:
 
@@ -732,7 +737,20 @@ FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
 new managed checkout instead of reapplying a new patch to the old patched tree;
 unknown edits are refused and preserved. Corresponding-source packaging resolves
 that same checkout for upstream sources and crate vendoring. AX keyed archives remain data, with size, depth, cycle, reference
-expansion and message limits. One semantic request is outstanding at a time; a
+expansion and message limits. The AXChildren graph keeps 512 nodes, depth 32 and
+no repeated element as hard limits, each with its own reason. A child hosted by
+another process (the keyboard's system paste suggestion appears after a send or
+any pasteboard write) is counted, at most 32, and skipped: never read, traversed
+or returned as a node; the observation reports `outside_app_elements` with a note.
+Coordinate effects (tap, hold, drag) are bound to the last successful snapshot of
+the same DDI session, which is cleared when a snapshot starts and consumed by
+every screen effect: the observed app must still be foreground and own the
+element at the point, and a point without an AX element passes only when that
+snapshot read the whole screen. These refusals happen before any touch and are
+reported as not executed (`target_covered`). The executor's own status-band swipe
+that compacts the task surface on Dynamic Island layouts uses a separate internal
+operation bounded to a short leftward swipe in the top 5% of the display; no
+model tool reaches it and ordinary drags keep the ownership check. One semantic request is outstanding at a time; a
 failed AX socket is closed before fresh read-only recovery. Cancellation has a
 separate atomic handle. Touch/button releases and empty key reports precede queue
 release; the turn owns its virtual keyboard until cancellation or finalization,
@@ -754,7 +772,11 @@ without additionalProperties or uniqueItems; AgentKit's registered runtime schem
 and the executor's sequence, duplicate-modifier and clipboard validation remain
 unchanged. The other provider schemas retain their original declarations.
 
-Confirmed integration fixes: decoding AX UID zero as an empty string changed the
+Confirmed integration fixes: observing PocketAgent's own chat page failed with a
+combined AX graph limit whenever the keyboard showed the system paste suggestion,
+a control of another process listed among the app's children; the same page read
+completely with the keyboard dismissed. Out-of-process children are now skipped
+and counted as above. Decoding AX UID zero as an empty string changed the
 translation token's null fields and the device refused its attributes request.
 Null references now remain null and a regression covers that wire shape. The
 initial all-app inventory setup timed out; the streaming inventory completed

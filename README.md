@@ -37,7 +37,10 @@ by the device, with explicit ambiguity handling and no guessed bundle IDs.
 Phone tools support observed search fields, ordinary scrolling and coordinate
 swipes for nested lists or edge-back gestures. Changed foreground apps and stale
 nodes return a fresh observation when possible; interrupted actions are never
-replayed. System search uses the same observed taps, swipes and text input as other pages. The advanced endpoint hint
+replayed. Screen parts drawn by another system process, such as the keyboard's
+paste suggestion, are reported as present but not read; a tap that would land on
+them, or on a point whose app cannot be confirmed, is refused before touching.
+System search uses the same observed taps, swipes and text input as other pages. The advanced endpoint hint
 always shows the embedded default even when an override is saved.
 
 On the tested iPhone 15 Pro, initial developer TCP connections are refused when
