@@ -99,7 +99,9 @@ final class AssistantTurnSupport {
     /// deadline; idle is 45 s per attempt.
     private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
                            onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
+        let hold = DeviceSettings.maintenanceDispatchHold   // local acceptance launch argument only
         let producer: StreamingSummary.Producer = { request, onEvent in
+            if let hold { try await Task.sleep(for: hold) }
             do { try await provider.consume(request, limits: .maintenance, onEvent: onEvent) }
             catch { throw ProviderContextLimit.classify(error, path: .summary) ?? error }
         }
