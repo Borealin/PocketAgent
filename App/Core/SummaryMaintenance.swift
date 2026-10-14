@@ -22,10 +22,11 @@ enum SummaryMaintenance {
     }
 
     /// Errors that stop the whole turn; any other maintenance error only
-    /// means no new summary this turn (no retry).
+    /// means no new summary this turn (no retry). A summary request the
+    /// service rejected as too large stops it too: the main request would be larger.
     nonisolated static func stopsTurn(_ error: any Error) -> Bool {
         error is CancellationError || error is TurnDeadlineReached || error is StorageCommitError
-            || error is ContextSourceRevoked
+            || error is ContextSourceRevoked || error is ProviderContextLimit
     }
 
     static func run(_ plan: SummaryPlan, turn: Turn, owner: HistoryOwner, producer: @escaping StreamingSummary.Producer,

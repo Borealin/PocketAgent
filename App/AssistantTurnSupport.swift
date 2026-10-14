@@ -93,7 +93,8 @@ final class AssistantTurnSupport {
     private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
                            onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
         let producer: StreamingSummary.Producer = { request, onEvent in
-            try await provider.consume(request, limits: .maintenance, onEvent: onEvent)
+            do { try await provider.consume(request, limits: .maintenance, onEvent: onEvent) }
+            catch { throw ProviderContextLimit.classify(error, path: .summary) ?? error }
         }
         try await SummaryMaintenance.run(
             plan, turn: .init(sessionID: sessionID, promptID: promptID, scope: scope, budget: config.budget,

@@ -6,6 +6,7 @@ nonisolated enum TurnGateErrors {
     static func isTerminal(_ error: any Error) -> Bool {
         error is StorageCommitError || error is ContextBudgetError || error is ContextSourceRevoked
             || error is SummaryPreparationError || error is RequestCommitRequirement.MissingPrompt
+            || error is ProviderContextLimit
     }
 }
 
@@ -25,7 +26,8 @@ nonisolated struct SummaryPreparationError: LocalizedError, Equatable {
 /// Every actual model request of a gated run passes here: first the awaited
 /// save acknowledgement of every real message since this run's prompt, then
 /// the host's per-request preparation (memory refresh, projections, budget,
-/// phone observation), then the provider. Gate errors are never retried.
+/// phone observation), then the provider. Gate errors are never retried; a
+/// provider context-limit rejection becomes `ProviderContextLimit`.
 nonisolated struct CommitGatedModel: AgentModelStreaming {
     let base: any AgentModelStreaming
     let barrier: TranscriptCommitBarrier
@@ -44,7 +46,11 @@ nonisolated struct CommitGatedModel: AgentModelStreaming {
                                                                          synthetic: synthetic())
                     try await barrier.wait(epoch: epoch, .messages(required), timeout: commitTimeout)
                     let prepared = try await prepare(request)
-                    for try await event in base.stream(prepared) { continuation.yield(event) }
+                    do {
+                        for try await event in base.stream(prepared) { continuation.yield(event) }
+                    } catch {
+                        throw ProviderContextLimit.classify(error, path: .main) ?? error
+                    }
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
