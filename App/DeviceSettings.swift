@@ -49,6 +49,9 @@ enum DeviceSettings {
     /// history write path on a synthetic file in a temporary directory and write
     /// `Documents/long-history-benchmark.json`. The real history is not touched.
     static var longHistoryBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentLongHistoryBenchmark") }
+    /// Local launch argument only: the real transcript view over synthetic long
+    /// histories in a read-only controller (`ViewportBenchmarkRoot`).
+    static var viewportBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentViewportBenchmark") }
 
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {

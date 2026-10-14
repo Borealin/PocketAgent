@@ -780,8 +780,12 @@ struct ControllerApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
-                .task { await DeviceSettings.runLongHistoryBenchmarkIfRequested() }
+            if DeviceSettings.viewportBenchmark {
+                ViewportBenchmarkRoot(engine: model, providers: providers, workspaces: workspaces)
+            } else {
+                ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
+                    .task { await DeviceSettings.runLongHistoryBenchmarkIfRequested() }
+            }
         }
     }
 }
