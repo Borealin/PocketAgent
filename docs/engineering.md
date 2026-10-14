@@ -374,8 +374,10 @@ existing identity) the assistant used the model already configured in Settings
 without setup; with real model calls it answered from memory, did not recover a
 forgotten fact through Chinese memory/history search, kept state across
 relaunch, advanced and held the next request as specified, restored the draft
-under start-failure injection, and completed one real summary fold through the
-bounded `consume` path. Not verified on the device: recall after a model change
+under start-failure injection, continued an unstarted promoted request in the
+project chosen afterwards (root moved, same ID once), and committed real summary
+folds through the bounded `consume` path (a killed app during maintenance
+replayed nothing). Not verified on the device: recall after a model change
 (one model configured), phone actions/fresh observation (the local VPN tunnel
 was not connected), over-budget fold refusal, forgets during maintenance and the
 150/600 s limits (host tests only). Long-history numbers are host measurements:
