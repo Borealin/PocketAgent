@@ -4,7 +4,9 @@
 
 The [single-entry and long-term memory exploration](long-lived-assistant.md)
 records the user-confirmed 2026-10-14 direction, public information about Muse,
-Grok Bot and OpenAI dots, and fixed-revision OpenClaw/Hermes source research.
+Grok Bot and OpenAI dots, and fixed-revision architecture research for OpenClaw,
+Hermes, the OpenMuse variants, and nanoMuse/OpenMinis iOS. It distinguishes live
+composition from standalone modules, future design, and reused frameworks.
 The local-first implementation remains a proposal. It is design work only; the current multi-session behavior
 and execution contracts below remain the implemented baseline.
 
