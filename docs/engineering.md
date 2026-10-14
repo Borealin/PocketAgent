@@ -361,6 +361,18 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   the known read graph (iterative, linear). A forget can stop only the primary
   turn the engine is executing (preparing or running), never a queued primary
   request or another task.
+- Clear the conversation, keep memory: the drawer's assistant row (swipe or
+  menu) asks with an alert (清空对话，保留记忆 / 取消) that names what goes and
+  what stays. One transaction replaces the primary line with an empty one (new
+  ID, same title, model and project) and tombstones the old line, so a synced
+  or in-flight copy cannot bring it back (an empty line is replaced too: an empty
+  local session is not exported and a same-ID remote copy would refill it). Its
+  summaries go, scope membership is pruned and roots whose source line is gone
+  become unknown even inside a conflict copy. Memory entries, revisions,
+  sources, tombstones and masks, other conversations, providers and pairing
+  stay. Refused in UI and Core while the line prepares, queues, runs or settles
+  steering, has a pending request or a recovery notice; a failed write changes
+  nothing; unreferenced files are collected afterwards.
 - Pending: one detached → promoted request with fair ordinals, Stop epoch,
   held/needsResume states, explicit same-ID continuation only before the permit,
   abandon-unstarted, sync deferral and attachment retention. Continuing moves an
@@ -368,7 +380,7 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
 
-Verification scope (2026-10-14): Core suite (260 tests, mock transports) passes
+Verification scope (2026-10-14): Core suite (267 tests, mock transports) passes
 on the Mac host, including the commit gates through the pinned AgentRuntime,
 crash points of the pending state machine, 12k-root dependency chains, earlier
 version-1 settings files keeping IDs/origins/default/budgets, the summary
@@ -401,7 +413,15 @@ tests only), and coordinate taps on a system overlay hosted by SpringBoard while
 an app is the observed foreground (now refused by the ownership check). Weather's
 first-run welcome appears without a Weather app process: its launch returns
 CoreDevice 10004 (reported unconfirmed) and observation refuses the unidentified
-foreground. Long-history numbers are host
+foreground. Clearing the conversation (code f65aba9) was exercised on the
+12 mini with the real model: Cancel changed no content, clearing was refused
+while the line prepared context and while a held pending request existed, a
+confirmed clear left an empty line with the same model and project, unchanged
+tasks, memory and settings, the cleared marker was not found by the model's
+history search after a relaunch, and memory recall continued. Known gaps
+against the plan (remember mode in the composer, multi-target candidate cards,
+rebuilding a 128-deep summary chain, provider context-limit mapping, per-turn
+estimate display, Chinese recall evaluation) are listed in the plan. Long-history numbers are host
 measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
 (110 MB file), transcript paging renders 400 messages per page.
 

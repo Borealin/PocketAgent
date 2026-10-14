@@ -506,6 +506,8 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 
 首版primary/memory/summary/pending/scope/budget均本地；portable复用原文前缀/冲突/tombstone合并算法，但使用assistant-v1目录及严格generation/schema envelope（主线消息仍同步），不读取旧目录或保留旧schema兼容，不承诺双设备一助理。同generation导入需严格验证；旧generation/缺标识/未知schema只报不支持，不转换、不合并。applySync从最新local fullfile起复制再合入portable session，不新建只含旧字段的HistoryFile。若明确replaced[primary]（远端删本地编辑另存copy），显示恢复态和本地copy选项；不自动切指针。若出现conflictOf==primary的副本，或主线不是本地历史的严格前缀延长，主线notice阻止自动advance/新执行，提供原/本机copy选择。changedSinceBase可以保本地原ID或远端原ID，不能把原ID总归remote当事实。原主线被远端删无本地编辑或无法确认归属，显示恢复态，用户可建立新空主线（记忆保留，旧主线留任务/历史、旧compactions失效，待处理请求先明确放弃或留旧会话，不能隐式搬目标）或选择有效session；不静默赢家。选择后scopeIndex按root/sourceID与整个段segmentDigest一致才保留；仅ID相同而内容变化也归unknown，远端新增段unknown；旧summary全部重验。mask以rootPromptID为键，原与conflict copy仍生效。
 
+“清空对话，保留记忆”：抽屉中“你的助理”行的左滑与长按菜单提供入口，确认用 alert 同时显示“清空对话，保留记忆”与“取消”，并写明删除范围（主线全部对话、草稿、引用、对话摘要与只属于它的图片，不可撤销，同步时其他设备也删除）和保留范围（已保存记忆、遗忘记录、当前模型与项目、模型服务、其他任务）。主线正在准备/排队/运行或正在结算追加消息、存在待处理请求、有恢复提示或存储不可用时，UI给出原因、Core同样拒绝。一次事务（`HistoryFile.clearPrimaryConversation`）用新ID的空主线替换（沿用标题、模型、项目），旧主线写会话tombstone；空主线同样替换，因为本地空会话不导出，同ID远端或飞行中的旧计划会把历史并入原地清空的空会话。删除旧主线摘要，按现存消息修剪scope成员，并做来源核对：来源会话已不存在的root（即使冲突副本仍含同ID消息）标为unknown，不进自动上下文与历史检索，身份与读取边保留供遗忘闭包。记忆条目、版本、来源、tombstone与mask、其他会话、provider/Keychain/配对不变；写入失败不发布任何变化；事务后按当前引用回收附件。清空前算好的同步计划在清空后应用时，本地tombstone使旧主线不被重新加入；下一轮合并用tombstone覆盖远端旧副本。
+
 已有sync在后台基于snapshot生成plan：deferred集合在出发和apply两端重查（generation+currentjob/pending/preparation）；新pending/运行在sync飞行期间出现，不能apply过期覆盖。必要时标rerun，不自行改merge算法；所有保留字段/失效摘要/指针回写一次事务。attachments GC必须在成功apply与运行终态后重新取当前引用集，不能用旧snapshot删除新pending附件。
 
 ### 实施落点与测试
@@ -515,7 +517,7 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 | P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
 | P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`、`SummaryMaintenance.swift`（逐fold发送前检查与读集登记）；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`（通用设置文件与 `ProviderSettingsStorage`）/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、SummaryDispatchGuardTests（大中文上一摘要不调用producer、遗忘/存储失败不再发送）、ContextEstimatorTests、ProviderConfigTests（早期version-1文件ID/origin/默认/预算保留）、StreamingSummaryTests、ConsumeIntegrationTests（fork真实 `consume`） |
 | P3 记忆/搜索/遗忘 | `Core/MemoryLedger.swift`、`PocketMemoryAdapter.swift`、`ToolCatalog.swift`（ToolKind.memory）、`ExecutionStatus.swift`；`App/ChatMemory.swift`、`AssistantViews.swift`（面板/预览） | MemoryLedgerTests（含12k根长链）、MemoryAdapterTests |
-| P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`（重排时root随确认scope移动）、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests（含跨scope继续）、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
+| P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`（重排时root随确认scope移动）、`ClearPrimary.swift`（清空对话保留记忆）、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests（含跨scope继续）、ClearPrimaryTests、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
 
 实现与原形状的差异：ScopedRoot增加 `verified`；屏蔽集合为ScopeIndex的maskedRoots/maskedMessages行；StoredCompaction增加summaryPromptVersion/summaryModel；PendingNext增加acceptedAt；MemoryTombstone增加forgottenAt。工具调度的保存水位是逐call `ResultKey(runID, callID)`（本地结果保存或provider-native ACK），而非依赖结果消息UUID。启动失败的设备复现用仅限启动参数 `-PocketAgentInjectStartFailure` 的注入（App内不可开启）。
 
@@ -547,16 +549,35 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 260 项/56 组（macOS 主机，mock transport）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
+| Core 测试 | 通过 | 267 项/57 组（macOS 主机，mock transport）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
 | 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 代码ae324d3的开发包上：主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；第一次真实整理。代码841d3c0的最终开发包上：未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理经 `consume` 完成并CAS提交（第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume）。最终包（代码7fd93a8）上：启动失败注入→草稿归还且该prompt未授权，正常重启后同文本以新ID重发，真实模型只回答一次，追问“此前该消息出现几次”答1；新生成的摘要来源不含未启动root，覆盖未启动root的旧摘要不再采用；连接已有LocalDevVPN后，独立任务中真实读取应用清单（find_apps）、打开“设置”并新鲜观察首页成功；执行中途杀进程后任务为interrupted，25秒内无任何新动作（不重放） |
 | DDI 自身页面观察（修复包 5250b2d→7169080→最终2c47dcf，同一原生库） | 通过（物理UI＋真实模型） | 键盘显示系统粘贴建议时，长主线与全新空任务的 observe_screen 均成功（outside_app_elements=1，约50节点；三个包都跑过，最终包复测）；5250b2d：打开“设置”、滑动、点进“通用”每步后观察成功；7169080：让模型 tap_point 粘贴建议位置被触摸前拒绝（target_covered，未执行，随后新观察，输入框无粘贴），手机任务中途杀进程→interrupted、25秒内无新动作，新请求只做新观察，运行中Stop（按新截图确认停止键可见才点）→已取消、之后无动作、未打开设置 |
+| 清空对话，保留记忆（Core＋设备，代码f65aba9） | 通过 | Core：清空范围与保留字段、上下文/检索/飞行中同步计划/下一轮合并不复活、冲突副本root转unknown、清空后记忆召回与遗忘、运行/待处理/恢复提示拒绝、写失败原子、空主线同ID远端不回填（对照组会回填）、当前格式重启往返。12 mini物理UI＋真实模型：alert取消后内容不变（仅主线updatedAt不同）；准备中与待处理请求挂起时均被拒绝并显示原因；确认后主线换新ID且为空、模型与项目不变、3个独立任务与验收前备份一致、记忆账本与遮罩不变、设置文件原有键值不变；杀进程重启仍为空，真实模型按记忆答出测试口令；模型三次 session_search 均未找回清空对话的标记并回答没有；新消息只出现一次，只读观察成功；测试记忆已遗忘，验收后再次清空（第二次同样新ID） |
 | 整轮600秒期限（设备） | 通过 | 测试数据任务持续调用wait（每次回复4个，均低于本轮请求/工具上限）：7169080上85次调用/22次回复在600.2秒停止，原因显示笼统；最终包2c47dcf上84次/21次在600.6秒停止，原因为“本轮已达到 10 分钟上限”；未完成的wait报已取消、无重放 |
 | 设备未覆盖 / 边界 | 未验证或环境边界 | 改模型后召回：设备上的服务商只配置1个模型且没有模型目录地址，App内“连接并加载模型”不可用；要发现第二个模型只能新填目录地址（等于编造端点并改动用户配置），未做；超预算摘要拒发、维护中遗忘、150秒维护期限只在主机验证（600秒整轮期限已在设备上触发，见下一行）；灵动岛机型的任务面板收起手势只有原生边界测试（未用灵动岛设备）；被观察App在前台时SpringBoard系统弹窗上的坐标点击现在会被归属检查拒绝，未实测。“天气”首次运行欢迎页没有天气App进程：启动返回CoreDevice 10004（报为未确认），前台进程无法识别时观察按设计拒绝 |
 | 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
 | bounded streaming 维护 | 主机＋设备 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备上一次真实整理成功 |
 
 跨天使用、后台到期与 iOS 系统任务行为没有虚构证明；系统任务与进度仍受 OS 到期约束，首版没有常驻保证。
+
+### 未实现与待验收（对照本节与第4节逐条核对）
+
+本期确认未实现：
+- 输入框“记住”模式（打开带预填内容的记忆面板）：只有严格 `记住：`/`/remember` 命令（`MemoryCommand.parse`）、输入框提示文字、面板“+”和用户消息上的“存为记忆”chip；用户需写准确前缀或进面板。
+- 自然语言修改/忘记有多个目标时的候选卡：没有接线；修改与遗忘只能在记忆面板中按条目操作。
+- 摘要链达到128层时先重建一条完整有效prefix摘要：未实现。`validSummary` 只接受≤128层，规划始终以有效链尾为前驱，第129条候选被CAS拒绝（本地最小构造复现：128层链尾有效、规划以它为前驱、提交被拒、下一轮再次同样规划），此后不再产生新摘要，原文上下文持续增长直至已知/显式上限拒绝请求。
+- provider实际上下文超限的明确报错与建议（降低本机上限或新轮整理）：provider错误按原文透传，没有专门映射。
+- 每轮“估算值与已验证窗口标签”指标展示：只在超出硬上限的错误与本机上下文预算页中出现，没有每轮估算显示。
+
+已实现但未验收：
+- 中文FTS/文本与语义检索的实际召回对照评估（本节及第2节结论要求）：实现为AgentKit `AgentSearchQuery`（NLTokenizer）分词＋中文二元组与子串打分，无embedding；只有少量真机样本，没有对照评估。这是评估缺口，不等于需要补向量库。
+- 改模型后召回：设备上的服务商只有1个模型且未配置模型目录地址，未测。
+- 记忆版本变化后下一次请求使用新revision：账本层有测试，App层每请求刷新没有定向集成测试；脚本内部phone helper的存储/撤销闸同样缺定向测试与设备证据。
+- 超预算摘要拒发、维护中遗忘、150秒维护期限：仅主机测试；灵动岛任务面板收起手势：仅原生边界测试；被观察App前台时SpringBoard弹窗上的坐标点击（现被归属检查拒绝）未实测。
+- 设备侧长历史（50k消息）性能与跨天使用未测；分页与写入性能为主机量测。
+
+原方案明确后置（不计入P1–P4漏实现）：跨设备统一助理、自动学习候选、并行与全天候/主动提醒、模型写记忆工具（exact grant）、向量检索。
 
 ### 已确认问题与修复
 
