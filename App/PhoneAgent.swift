@@ -227,6 +227,9 @@ final class PhoneTree: NSObject, XMLParserDelegate {
     var nodes: [[String: String]] = []
     var frame = CGRect.zero
     var bundleID: String?
+    /// Elements on screen hosted by another process (for example the keyboard's
+    /// system paste suggestion): not read and not offered as nodes.
+    var outsideAppElements = 0
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                 qualifiedName: String?, attributes: [String: String]) {
         guard elementName.hasPrefix("XCUIElementType") else { return }
@@ -481,9 +484,13 @@ final class PhoneExecutor {
             if ["true", "false"].contains(a["focused"] ?? "") { result["focused"] = a["focused"] == "true" }
             return result
         }
-        let state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
+        var state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
             "screen": ["width": screen.width, "height": screen.height], "elements": elements,
             "truncated": observed.nodes.count > nodes.count]
+        if observed.outsideAppElements > 0 {
+            state["outside_app_elements"] = observed.outsideAppElements
+            state["outside_app_note"] = "屏幕上有由其他系统进程提供的界面（如键盘建议栏），未读取，不在 elements 中，不能按节点操作。"
+        }
         model.log("phone_observe", ["snapshotID": snapshotID, "elements": elements.count, "screenshotBytes": png?.count ?? 0])
         return state
     }
@@ -546,8 +553,13 @@ final class PhoneExecutor {
         }
         func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
+            let before = issued
             issued = true
-            try await operation()
+            do { try await operation() } catch PhoneObservationIssue.targetCovered {
+                // The native preflight refused before any touch was sent.
+                issued = before
+                throw PhoneObservationIssue.targetCovered
+            }
             try proceed()
         }
         control.cancellationCheck = proceed

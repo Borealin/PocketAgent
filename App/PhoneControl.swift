@@ -129,6 +129,8 @@ final class DDIControl: PhoneControl {
                error.localizedDescription.contains("AX request type"),
                error.localizedDescription.contains("refused: 8") { throw PhoneObservationIssue.foregroundChanged }
             if error.localizedDescription.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
+            // Native coordinate-effect refusals happen before any touch.
+            if error.localizedDescription.contains("; not tapped") { throw PhoneObservationIssue.targetCovered }
             let operation = object["op"] as? String ?? "request"
             throw failure("DDI \(operation)：\(error.localizedDescription)")
         }
@@ -144,6 +146,7 @@ final class DDIControl: PhoneControl {
         tree.bundleID = result["app"] as? String
         tree.frame = CGRect(x: frame["x"] ?? 0, y: frame["y"] ?? 0, width: frame["width"] ?? 0, height: frame["height"] ?? 0)
         tree.nodes = try raw.compactMap { try DDINodeMapping.attributes($0) }
+        tree.outsideAppElements = try DDINodeMapping.outsideAppElements(result)
         observedFrame = tree.frame; observedApp = tree.bundleID
         guard tree.frame.width > 0, tree.frame.height > 0 else { throw failure("DDI 屏幕尺寸无效。") }
         return tree

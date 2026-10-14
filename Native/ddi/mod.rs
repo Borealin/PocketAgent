@@ -61,6 +61,10 @@ pub struct PocketDDISession {
     hid_port: u16,
     pasteboard_port: Option<u16>,
     hit_point: Option<(f64, f64)>,
+    /// Main PID and outside-app element count of the last successful snapshot.
+    /// Cleared when a snapshot starts and consumed by every screen effect, so a
+    /// coordinate effect is always checked against the screen observed for it.
+    observed: Option<(u64, usize)>,
     hid: UniversalHidServiceClient<Box<dyn ReadWrite>>,
     keyboard_hid: Option<UniversalHidServiceClient<Box<dyn ReadWrite>>>,
     buttons: IndigoHidClient<Box<dyn ReadWrite>>,
@@ -337,6 +341,7 @@ impl PocketDDISession {
                 .get("com.apple.coredevice.pasteboardservice")
                 .map(|s| s.port),
             hit_point: None,
+            observed: None,
             info,
             apps,
             installed,
@@ -455,15 +460,35 @@ impl PocketDDISession {
         }
         Err(error("AX foreground has no readable hit point"))
     }
+    /// A coordinate effect must land on the app of the snapshot observed for
+    /// it: that app must still be foreground and own the element at the point.
+    /// UI hosted by another process (for example the keyboard's system paste
+    /// suggestion) is outside the observed graph, so a point it covers, or a
+    /// point whose owner cannot be confirmed while such UI is on screen, is
+    /// refused before any touch.
+    async fn require_owned_point(&mut self, scope: Option<(u64, usize)>, x: f64, y: f64) -> Result<(), IdeviceError> {
+        let (pid, outside) = scope.ok_or_else(|| error(POINT_UNOBSERVED))?;
+        let g = self.geometry().await?;
+        let (foreground, _, _) = self.active_hit(g).await?;
+        if foreground != pid {
+            return Err(error(FOREGROUND_NOT_OBSERVED));
+        }
+        let hit = match self.ax().await?.hit(x, y).await {
+            Ok(token) => Ok(ax::identity(&token).map_err(error)?.0),
+            Err(e) => Err(e),
+        };
+        point_owner(pid, outside, hit).map_err(error)
+    }
     async fn foreground(&mut self) -> Result<String, IdeviceError> {
         let g = self.geometry().await?;
         let (pid, _, _) = self.active_hit(g).await?;
         self.bundle_for_pid(pid).await
     }
     async fn snapshot(&mut self) -> Result<Json, IdeviceError> {
+        self.observed = None;
         let before = self.geometry().await?;
         let (selected_pid, x, y) = self.active_hit(before).await?;
-        let (pid, nodes) = self.ax().await?.graph(x, y).await.map_err(error)?;
+        let ax::Graph { pid, nodes, outside } = self.ax().await?.graph(x, y).await.map_err(error)?;
         if pid != selected_pid {
             return Err(error("AX foreground or root changed"));
         }
@@ -486,9 +511,9 @@ impl PocketDDISession {
             node["identity"] = json!(format!("{pid}:{object}"));
             result.push(node);
         }
-        Ok(
-            json!({"app":bundle,"frame":before.json(),"nodes":result,"source":"ddi_ax","atomic":false}),
-        )
+        self.observed = Some((pid, outside));
+        Ok(json!({"app":bundle,"frame":before.json(),"nodes":result,"source":"ddi_ax","atomic":false,
+            "outside_app_elements":outside}))
     }
     async fn wait(&self, millis: u64) -> Result<(), IdeviceError> {
         let mut remaining = millis;
@@ -664,6 +689,13 @@ impl PocketDDISession {
             ));
         }
         let expected = v["expected_app"].as_str();
+        // Every screen effect consumes the observed scope; the next coordinate
+        // effect needs a fresh successful snapshot.
+        let scope = if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace", "activate", "home"].contains(&op) {
+            self.observed.take()
+        } else {
+            None
+        };
         if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace"].contains(&op) {
             if let Some(frame) = v["expected_frame"].as_object() {
                 let g = self.geometry().await?;
@@ -704,7 +736,7 @@ impl PocketDDISession {
                     return Err(error("AX replacement app or display changed"));
                 }
                 let (selected_pid, x, y) = self.active_hit(screen).await?;
-                let (graph_pid, nodes) = self.ax().await?.graph(x, y).await.map_err(error)?;
+                let ax::Graph { pid: graph_pid, nodes, .. } = self.ax().await?.graph(x, y).await.map_err(error)?;
                 if graph_pid != selected_pid || self.bundle_for_pid(graph_pid).await? != expected_app {
                     return Err(error("AX replacement foreground changed"));
                 }
@@ -792,6 +824,8 @@ impl PocketDDISession {
                     from
                 };
                 let seconds = if op == "tap" { 0.05 } else { num("seconds")? };
+                self.require_owned_point(scope, num("x")?, num("y")?).await?;
+                self.proceed()?;
                 self.touch(from, to, seconds, op == "drag").await?;
                 Ok(json!({}))
             }
@@ -840,6 +874,27 @@ impl PocketDDISession {
             }
             _ => Err(error("Unknown DDI operation")),
         }
+    }
+}
+
+// Effect refusals before any touch; all end in "not tapped".
+const POINT_UNOBSERVED: &str = "DDI effect point has no current observation; not tapped";
+const FOREGROUND_NOT_OBSERVED: &str = "DDI foreground is not the observed app; not tapped";
+const POINT_COVERED: &str = "DDI target is covered by another process's UI; not tapped";
+const POINT_UNCONFIRMED: &str = "DDI target owner cannot be confirmed while UI of another process is on screen; not tapped";
+const BLANK_POINT: &str = "AX request type 6 refused: 8";
+
+/// Ownership of the element at an effect point. The observed app's own element
+/// passes; another process's element refuses. A point without an AX element
+/// (refusal 8) passes only when the observation read the whole screen (no
+/// outside-app elements); otherwise its owner cannot be confirmed.
+fn point_owner(observed: u64, outside: usize, hit: Result<u64, String>) -> Result<(), String> {
+    match hit {
+        Ok(pid) if pid == observed => Ok(()),
+        Ok(_) => Err(POINT_COVERED.into()),
+        Err(e) if e == BLANK_POINT && outside == 0 => Ok(()),
+        Err(e) if e == BLANK_POINT => Err(POINT_UNCONFIRMED.into()),
+        Err(e) => Err(e),
     }
 }
 
@@ -1066,6 +1121,21 @@ pub unsafe extern "C" fn pocket_ddi_close(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn effect_points_must_belong_to_the_observed_app() {
+        assert_eq!(point_owner(7, 0, Ok(7)), Ok(()));
+        assert_eq!(point_owner(7, 2, Ok(7)), Ok(()));
+        assert_eq!(point_owner(7, 0, Ok(9)).unwrap_err(), POINT_COVERED);
+        assert_eq!(point_owner(7, 2, Ok(9)).unwrap_err(), POINT_COVERED);
+        // A blank point is accepted only on a completely read screen.
+        assert_eq!(point_owner(7, 0, Err(BLANK_POINT.into())), Ok(()));
+        assert_eq!(point_owner(7, 1, Err(BLANK_POINT.into())).unwrap_err(), POINT_UNCONFIRMED);
+        assert_eq!(point_owner(7, 0, Err("AX semantic request timed out; session must close".into())).unwrap_err(),
+                   "AX semantic request timed out; session must close");
+        for refusal in [POINT_UNOBSERVED, FOREGROUND_NOT_OBSERVED, POINT_COVERED, POINT_UNCONFIRMED] {
+            assert!(refusal.ends_with("; not tapped"));
+        }
+    }
     #[test]
     fn ax_replacement_eligibility_requires_enabled_visible_ordinary_single_line_field() {
         let screen = Geometry { x: 0.0, y: 0.0, width: 390.0, height: 844.0 };
