@@ -310,8 +310,9 @@ and runner/VPN settings are local to each device.
 ## Long-lived assistant (assistant-v1)
 
 Status: P1–P4 implemented on `codex/long-lived-assistant-implementation`;
-Core tests and the iOS Release build/IPA inspection pass; device acceptance
-is partial (see below). Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
+Core tests, the iOS Release build/IPA inspection and the real-model device
+scenarios on the iPhone 12 mini pass; uncovered items are listed below.
+Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
 
 - Data: one strict `assistant-v1/history.json` (explicit nulls, no legacy
   decoder), `assistant-v1/Attachments`, and an `assistant-v1/` subfolder in the
@@ -358,20 +359,28 @@ is partial (see below). Design and file map: [long-lived-assistant.md](long-live
   request or another task.
 - Pending: one detached → promoted request with fair ordinals, Stop epoch,
   held/needsResume states, explicit same-ID continuation only before the permit,
-  abandon-unstarted, sync deferral and attachment retention.
+  abandon-unstarted, sync deferral and attachment retention. Continuing moves an
+  unauthorized promoted root to the project confirmed now in the same write
+  (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
+  from the root's.
 
-Verification scope (2026-10-14): Core suite (247 tests) passes on the Mac host,
-including the commit gates through the pinned AgentRuntime, crash points of the
-pending state machine and 12k-root dependency chains. Release build and IPA
-inspection pass. On the iPhone 12 mini the dev build installed over the existing
-identity and its first launch created the empty primary line once while the
-earlier-format files stayed unchanged; further device scenarios were paused
-because another session was operating that phone. Scenarios that need a model
-(recall after model change, Chinese search through tools, correction/forget in
-model context, fresh observation without replay) need a provider configured in
-the new namespace on the device and are not yet verified. Long-history numbers
-are host measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at
-50k (110 MB file), transcript paging renders 400 messages per page.
+Verification scope (2026-10-14): Core suite (257 tests, mock transports) passes
+on the Mac host, including the commit gates through the pinned AgentRuntime,
+crash points of the pending state machine, 12k-root dependency chains, earlier
+version-1 settings files keeping IDs/origins/default/budgets, and the summary
+dispatch checks (a large Chinese previous summary never reaches the producer).
+Release build and IPA inspection pass. On the iPhone 12 mini (dev build over the
+existing identity) the assistant used the model already configured in Settings
+without setup; with real model calls it answered from memory, did not recover a
+forgotten fact through Chinese memory/history search, kept state across
+relaunch, advanced and held the next request as specified, restored the draft
+under start-failure injection, and completed one real summary fold through the
+bounded `consume` path. Not verified on the device: recall after a model change
+(one model configured), phone actions/fresh observation (the local VPN tunnel
+was not connected), over-budget fold refusal, forgets during maintenance and the
+150/600 s limits (host tests only). Long-history numbers are host measurements:
+per-event write p95 0.05 s at 10k messages and 0.2 s at 50k (110 MB file),
+transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB

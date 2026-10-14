@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@22fc575`（含窄 bounded `consume` API），Core 测试与 iOS 构建/IPA 检查通过；指定设备验收见第 3 节“验证范围”，依赖真实模型的场景待设备上配置模型服务后验证
+> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@22fc575`（含窄 bounded `consume` API）；模型服务复用App通用设置；Core 测试、iOS 构建/IPA 检查与 iPhone 12 mini 真实模型场景通过，未覆盖项见第 3 节“验证范围”
 >
 > 最后核对：2026-10-14（实现与验证范围）
 >
@@ -497,7 +497,7 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 4. promoted但没有commitDispatchPermit时BG submit/prepare失败：原prompt永留history，receipt改held，仅在用户显式resume时用同promptID构造job，prior取该prompt之前（不重复append，不包含后来输入）；pending仍占槽，禁止同会话更晚send，草稿可编辑。重试未启动不复用上一次actions：receipt存续且dispatchAuthorized=false证明宿主没有授权主runtime dispatch（维护摘要可以调用无工具模型，不是phone执行）；任何不明启动状态不自动resume。
 5. abandonUnstarted：仅promoted且没有dispatchPermit时可原子清receipt、将ScopedRoot.abandonedUnstarted=true、保原prompt并释放冻结配置/重算GC，取消准备Task并撤销jobEpoch后才能新发送。不走DraftRestore；该root默认不进入自动上下文/摘要/search，UI保原文及“未启动已放弃”。explicit历史引用返回原文与未执行状态，不把旧请求升级成授权。detached取消可直接移回空草稿或删除待处理，不删已执行历史。
 6. commitDispatchPermit后任务按现有状态进行；failure/cancel保原prompt和结果，receipt已clear，不把它当未启动任务重试/重放。用户发送新prompt继续观察/规划。
-7. 重启：queued/running/cancelling→interrupted；任何pending→needsResume，不重建运行队列。detached可用户明确继续（重新选择/展示当前provider/model配置与scope，secret重新resolve）、移回空草稿、删除；promoted若能证明未启动，仅显式以同ID resume，否则保留原文、解释可能中断并要求新prompt继续。磁盘以ScopedRoot.dispatchAuthorized与promoted receipt存续区分permit前后：receipt存续且dispatchAuthorized=false可显式继续未授权请求；receipt已清则即使尚未发出runStarted也按可能中断处理，只能新prompt继续。permit后crash宁可失去同ID续跑便利，也不能猜测重放。派生内存配置不保存；恢复不是自动重放。
+7. 重启：queued/running/cancelling→interrupted；任何pending→needsResume，不重建运行队列。detached可用户明确继续（重新选择/展示当前provider/model配置与scope，secret重新resolve）、移回空草稿、删除；promoted若能证明未启动，仅显式以同ID resume（卡片显示将使用的当前项目；重排与root的scope更新在同一次写入里完成，已登记依赖、原ID原文与mask不变），否则保留原文、解释可能中断并要求新prompt继续。启动许可提交时核对job冻结scope与root记录的scope一致，不一致即不启动。磁盘以ScopedRoot.dispatchAuthorized与promoted receipt存续区分permit前后：receipt存续且dispatchAuthorized=false可显式继续未授权请求；receipt已清则即使尚未发出runStarted也按可能中断处理，只能新prompt继续。permit后crash宁可失去同ID续跑便利，也不能猜测重放。派生内存配置不保存；恢复不是自动重放。
 8. pending/resume origin始终不走DraftRestore.apply，避免复制或覆盖后来草稿。明确路由：queued或已进入prepare但未permit的promoted，用户cancel均abandonUnstarted；未permit且非cancel失败则held；permit后cancel按中断已执行轮处理。ChatSessions:498按origin/dispatchAuthorized/cancelled三元组判断，:449对pending origin的.cancelling预写合入同一abandon事务，不能先旧的非事务persist再清receipt；事务失败留receipt/dirty状态并取消准备，重启needsResume，不假定放弃成功。本版本普通独立任务DraftRestore保持原prompt事实；它当前并不删除prompt。
 
 pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或摘要准备中的session加入sync deferred；删除主线/占用项目检查计入pending/jobs。no concurrent mutation在MainActor、保存点与事件回调间需要epoch/ID验证，onIdle发生在自动advance检查之后，避免sync抢跑。scope/forget更新可取消摘要，但不使请求无故丢失。steer在await runtime.steer之前登记内存lease（messageID/root/附件refs），两条接受/steeringDelivered路径共用幂等ID事务；回调必须校验jobEpoch，附件lease进GC。自动activate等所有steer lease落盘/拒绝后才取prior，避免delivered先于steer返回造成附件/段归属缺失或晚回调覆盖下一轮状态。detached pending没有在raw中，因此不把其ID当既有before边界；promotion后也不允许旧job迟到append到新root后面。
@@ -515,7 +515,7 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 | P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
 | P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`、`SummaryMaintenance.swift`（逐fold发送前检查与读集登记）；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`（通用设置文件与 `ProviderSettingsStorage`）/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、SummaryDispatchGuardTests（大中文上一摘要不调用producer、遗忘/存储失败不再发送）、ContextEstimatorTests、ProviderConfigTests（早期version-1文件ID/origin/默认/预算保留）、StreamingSummaryTests、ConsumeIntegrationTests（fork真实 `consume`） |
 | P3 记忆/搜索/遗忘 | `Core/MemoryLedger.swift`、`PocketMemoryAdapter.swift`、`ToolCatalog.swift`（ToolKind.memory）、`ExecutionStatus.swift`；`App/ChatMemory.swift`、`AssistantViews.swift`（面板/预览） | MemoryLedgerTests（含12k根长链）、MemoryAdapterTests |
-| P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
+| P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`（重排时root随确认scope移动）、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests（含跨scope继续）、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
 
 实现与原形状的差异：ScopedRoot增加 `verified`；屏蔽集合为ScopeIndex的maskedRoots/maskedMessages行；StoredCompaction增加summaryPromptVersion/summaryModel；PendingNext增加acceptedAt；MemoryTombstone增加forgottenAt。工具调度的保存水位是逐call `ResultKey(runID, callID)`（本地结果保存或provider-native ACK），而非依赖结果消息UUID。启动失败的设备复现用仅限启动参数 `-PocketAgentInjectStartFailure` 的注入（App内不可开启）。
 
@@ -547,12 +547,12 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 247 项/54 组（macOS 主机）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值 |
+| Core 测试 | 通过 | 257 项/55 组（macOS 主机，mock transport）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响） |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
-| 指定设备（iPhone 12 mini） | 部分 | 同身份覆盖安装、首次启动一次初始化空主线、旧格式文件不变已验证；其余设备场景因另一会话同时操作该机暂停 |
-| 依赖真实模型的设备场景 | 未验证 | 改模型后召回、中文检索、纠正/遗忘对模型上下文的影响、fresh observe 不重放：需在新命名空间配置模型服务 |
+| 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；一次真实整理在设备上经 `consume` 完成并CAS提交（1个fold，3 KB摘要，5个来源root） |
+| 设备未覆盖 | 未验证 | 改模型后召回（设备只配置了1个模型）；手机动作与fresh observe（本机VPN隧道未连接，observe_screen返回失败、未执行动作）；超预算摘要拒发、维护中遗忘、150/600秒期限只在主机验证 |
 | 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
-| bounded streaming 维护 | 已实现，主机验证 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备侧整理未运行 |
+| bounded streaming 维护 | 主机＋设备 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备上一次真实整理成功 |
 
 跨天使用、后台到期与 iOS 系统任务行为没有虚构证明；系统任务与进度仍受 OS 到期约束，首版没有常驻保证。
 
@@ -564,6 +564,13 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - 每请求记忆相关度取最后一条 user 消息，在手机轮实际是追加的截图说明。改为取已记录的最新真实用户消息。
 - 摘要重复/交替/空 snapshot 被计为真实进度并刷新 idle。改为只计新的非空内容，并在整个响应内去重。
 - portable 消息/会话仍沿用旧格式字节：可空键省略、缺失 attachments 回填。改为严格当前格式（显式 null、必需键、attachments 必有），规范字节与冲突副本 ID 已固定并独立复算。
+- 摘要规划为后续fold固定预留4,000 token，但上一摘要最多64 KiB；fold发送前未按完整请求估算，约60 KB中文上一摘要会超过已知窗口上限仍被发出。改为每个fold发送前估算完整SummaryRequest并对照冻结预算，超出不发送；同时发送前检查存储与显式遗忘，避免第二个fold再披露已撤销来源。
+- promoted未授权请求在项目A失败后，用户改到项目B再显式继续：重排只更新pending.workspaceID，root仍记在A，permit也不核对scope；同ID任务读写B的内容却归属A，A之后的自动上下文/检索可能读到B的结果。改为重排时把未授权root原子移到确认的scope，permit校验job.scope；回归覆盖A→B与A→无项目（原ID一条，A的上下文与检索读不到该轮）。
+- 维护期间读取未登记且active root只认permit后的轮次，遗忘预览看不到正在准备的轮次，提交后却因来源被屏蔽停轮。改为发送前原子登记fold与父摘要coverage roots，active root包含引擎正在执行的主线（准备或运行中），遗忘只停止该主线轮次。
+
+### 开放问题
+
+- 普通发送在permit前失败（如启动失败注入）时草稿归还，但原prompt仍是自动上下文的eligible root：设备上重新发送后模型看到两遍并在回复中标注重复，该prompt也进入了随后生成的摘要。根因已确认：eligibility只排除 `abandonedUnstarted`，restoreDraft路由不设置它。建议：草稿确实归还时把该root按未启动放弃处理（原文保留、退出自动上下文），与待处理请求的放弃语义一致；需确认后实施。
 
 ### 拒绝方案
 
