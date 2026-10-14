@@ -446,8 +446,8 @@ deadline stopped it (7169080: 600.2 s, generic reason; final build: 600.6 s with
 the deadline reason), nothing replayed and below the per-turn caps. Not verified
 on the device: recall after a model change (the configured provider has one model
 and no model catalog address, so the app cannot discover another without a newly
-entered endpoint), over-budget fold refusal, forgets during maintenance, the
-150 s maintenance limit, the Dynamic Island task-surface gesture (native bounds
+entered endpoint), the 150 s maintenance limit and cancelling a live summary
+stream (host only), the Dynamic Island task-surface gesture (native bounds
 tests only), and coordinate taps on a system overlay hosted by SpringBoard while
 an app is the observed foreground (now refused by the ownership check). Weather's
 first-run welcome appears without a Weather app process: its launch returns
@@ -466,13 +466,29 @@ entries with the keyboard up, forget/correct/cancel/send as message, no match,
 an ordinary "我忘记带钥匙" message), recall after a correction, a memory added
 during a run used by the same run, read-only observation, the frozen budget line,
 the host refusal at a 1000-token ceiling (restored afterwards), Stop and restart
-without replay, and clearing the conversation on the final build. Device
-long-history numbers (launch argument, sandbox file, real history untouched):
-per-event write p95 0.08 s at 10k and 0.55 s at 50k messages. Remaining
-boundaries (bare SSE error objects at the pinned SDK, lexical recall precision,
-oversized single segments, model-change recall) are listed in the plan. Long-history numbers are host
-measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
-(110 MB file), transcript paging renders 400 messages per page.
+without replay, and clearing the conversation on the final build. An over-budget
+fold was refused on the device at a 4000-token ceiling: the maintenance note was
+shown, no fold read was registered, no summary was written and the main guard
+then refused. At 1000–3000 the planner emits no fold (every test segment exceeds
+the fold budget), so only the main guard applies. A forget during maintenance
+was exercised only with fault injection: the launch argument
+`-PocketAgentHoldMaintenanceDispatch` makes each fold wait 20 s (cancellable)
+after its read registration and before its request; a forget confirmed in that
+wait, with the preview saying the running task stops, stopped the preparing
+turn with no reply and no new summary. It does not exercise a live stream or
+the 150 s limit. Device long history (`-PocketAgentLongHistoryBenchmark`,
+sandbox file): after reusing unchanged scope-index rows, the 50k per-event
+write p95 is 0.48–0.89 s over three runs, mostly the whole 110 MB atomic file
+write (p50 0.16–0.23 s) with encoding about 0.14 s, so the 0.2 s target is not
+met without a storage-structure decision (10k meets it). The real transcript
+view over synthetic 10k/50k histories is timed with
+`-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
+load-blocked, real history unchanged). Memory search no longer counts single
+characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
+evaluation table). Remaining boundaries (bare SSE error objects at the pinned
+SDK, oversized single segments, model-change recall) are listed in the plan.
+Host per-event write p95 after the change is about 0.02 s at 10k and 0.12 s at
+50k messages (110 MB file); transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
