@@ -8,10 +8,10 @@ import Testing
 /// Numbers are host measurements, not device acceptance.
 @MainActor
 struct LongHistoryBenchmarkTests {
-    @Test func measureWritePath() throws {
+    @Test func measureWritePath() async throws {
         guard let output = ProcessInfo.processInfo.environment["POCKETAGENT_BENCH_OUT"] else { return }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-bench-\(UUID().uuidString)")
-        let data = try LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory,
+        let data = try await LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory,
                                                    label: ProcessInfo.processInfo.environment["POCKETAGENT_BENCH_CONFIG"] ?? "swift test")
         try data.write(to: URL(fileURLWithPath: output))
     }

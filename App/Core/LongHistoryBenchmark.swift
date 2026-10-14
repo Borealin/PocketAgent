@@ -80,12 +80,15 @@ enum LongHistoryBenchmark {
         return sorted[min(sorted.count - 1, Int((Double(sorted.count - 1) * p).rounded()))]
     }
 
-    static func report(sizes: [Int], directory: URL, label: String) throws -> Data {
+    /// Yields between samples and phases (never inside a write), so a long
+    /// run does not hold the main actor for its whole duration.
+    static func report(sizes: [Int], directory: URL, label: String) async throws -> Data {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let storage = HistoryStorage(url: directory.appendingPathComponent("history.json"))
         var results: [[String: Any]] = []
         for size in sizes {
+            await Task.yield()
             let file = try synthetic(messages: size)
             var data = Data()
             let encode = try seconds { data = try HistoryCodec.encode(file) }
@@ -99,6 +102,7 @@ enum LongHistoryBenchmark {
                 let start = ProcessInfo.processInfo.systemUptime
                 try storage.write(data)
                 timer.last = ProcessInfo.processInfo.systemUptime - start
+                timer.count += 1
             })
             let primary = file.assistant.primarySessionID
             guard let root = file.sessions[0].messages.last.flatMap({ file.assistant.scopeIndex.root(of: $0.id) }) else {
@@ -110,21 +114,29 @@ enum LongHistoryBenchmark {
             }
             // 20 events back to back (the baseline), then 20 more with the
             // autorelease pool drained around each event (a separate method).
-            var events: [Double] = [], writers: [Double] = []
+            var events: [Double] = [], writers: [Double] = [], written: [Bool] = []
             for index in 0..<20 {
+                await Task.yield()
                 let event = AgentTranscriptMessage(role: .assistant, text: "事件 \(index)")
-                events.append(seconds { owner.record { try $0.appendEvent(event, to: primary, root: root) } })
+                let before = timer.count
+                var durable = false
+                events.append(seconds { durable = owner.record { try $0.appendEvent(event, to: primary, root: root) } })
                 writers.append(timer.last)
+                written.append(durable && timer.count == before + 1 && owner.health == .ready)
             }
+            // Runs after the baseline (warm caches, a file 20 events longer);
+            // the stopwatch includes the pool's teardown.
             var drained: [Double] = [], drainedWriters: [Double] = []
             for index in 0..<20 {
+                await Task.yield()
                 let event = AgentTranscriptMessage(role: .assistant, text: "排空后事件 \(index)")
-                autoreleasepool {
-                    drained.append(seconds { owner.record { try $0.appendEvent(event, to: primary, root: root) } })
-                    drainedWriters.append(timer.last)
-                }
+                let before = timer.count
+                var durable = false
+                drained.append(seconds { autoreleasepool { durable = owner.record { try $0.appendEvent(event, to: primary, root: root) } } })
+                drainedWriters.append(timer.last)
+                written.append(durable && timer.count == before + 1 && owner.health == .ready)
             }
-            guard owner.health == .ready else { throw Failure(detail: "写入失败") }
+            guard owner.health == .ready, written.allSatisfy({ $0 }) else { throw Failure(detail: "写入失败") }
             let rest = zip(events, writers).map { $0 - $1 }
             let drainedRest = zip(drained, drainedWriters).map { $0 - $1 }
             // Read registration of a request whose context holds the chain of
@@ -153,6 +165,8 @@ enum LongHistoryBenchmark {
                             "encodeAndValidateP50Seconds": percentile(rest, 0.5),
                             "encodeAndValidateP95Seconds": percentile(rest, 0.95),
                             "drainedRecordSamples": drained, "drainedWriterSamples": drainedWriters,
+                            "writesCounted": timer.count, "everySampleWrittenAndReady": written.allSatisfy { $0 },
+                            "drainedOrder": "after the 20 baseline events; pool teardown inside the stopwatch",
                             "drainedRecordP50Seconds": percentile(drained, 0.5), "drainedRecordP95Seconds": percentile(drained, 0.95),
                             "drainedEncodeAndValidateP95Seconds": percentile(drainedRest, 0.95),
                             "firstRecordSeconds": firstRecord, "fullDisplayBuildSeconds": display,
@@ -167,4 +181,5 @@ enum LongHistoryBenchmark {
 @MainActor
 private final class WriterTimer {
     var last: Double = 0
+    var count = 0
 }

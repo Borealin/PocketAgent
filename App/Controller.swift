@@ -776,7 +776,7 @@ struct ControllerApp: App {
     var body: some Scene {
         WindowGroup {
             ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
-                .task { DeviceSettings.runLongHistoryBenchmarkIfRequested() }
+                .task { await DeviceSettings.runLongHistoryBenchmarkIfRequested() }
         }
     }
 }

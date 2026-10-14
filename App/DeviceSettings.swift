@@ -51,8 +51,10 @@ enum DeviceSettings {
     static var longHistoryBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentLongHistoryBenchmark") }
 
     @MainActor
-    static func runLongHistoryBenchmarkIfRequested() {
+    static func runLongHistoryBenchmarkIfRequested() async {
         guard longHistoryBenchmark else { return }
+        // Let launch finish first; the run yields between samples.
+        try? await Task.sleep(for: .seconds(3))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-bench-\(UUID().uuidString)")
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let output = documents.appendingPathComponent("long-history-benchmark.json")
@@ -65,7 +67,7 @@ enum DeviceSettings {
         let label = "device \(configuration) \(info["CFBundleShortVersionString"] as? String ?? "?")"
             + " (\(info["CFBundleVersion"] as? String ?? "?"))"
         do {
-            try LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: label)
+            try await LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: label)
                 .write(to: output, options: .atomic)
         } catch {
             let failure = ["configuration": label, "error": error.localizedDescription]
