@@ -225,7 +225,9 @@ phase bubble and Doubao's official task-queue illustration.
 
 ## Decisions
 
-Retain pinned AgentKit 8108c9bb87c546860cfc1769571e115af919fe8a and the verified
+Pin AgentKit to the published fork Borealin/AgentKit at
+22fc575009bde3a2097ac1a49908ffa239b9c029 (upstream 8108c9b plus the bounded
+`consume` API used for context maintenance) and keep the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
@@ -338,7 +340,7 @@ is partial (see below). Design and file map: [long-lived-assistant.md](long-live
   held/needsResume states, explicit same-ID continuation only before the permit,
   abandon-unstarted, sync deferral and attachment retention.
 
-Verification scope (2026-10-14): Core suite 240+ tests pass on the Mac host,
+Verification scope (2026-10-14): Core suite (247 tests) passes on the Mac host,
 including the commit gates through the pinned AgentRuntime, crash points of the
 pending state machine and 12k-root dependency chains. Release build and IPA
 inspection pass. On the iPhone 12 mini the dev build installed over the existing
@@ -352,11 +354,16 @@ are host measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at
 50k (110 MB file), transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
-(`AgentProviderClient.consume(_:limits:onEvent:)`) is implemented and tested in a
-separate clone of the pinned revision but not published; the pin is unchanged
-and the app uses a labeled foreground summary fallback of at most 30 seconds,
-so the bounded streaming maintenance goal is not yet met. The Core streaming
-collector is implemented and verified against the patched clone.
+(`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
+SSE line, 65,536 events, terminal required, callback in the producer task) is
+published on the fork branch `codex/pocketagent-bounded-consume` and pinned at
+its immutable revision; default stream/complete and the loop are unchanged.
+Summary folds stream through it into the Core collector under one 150-second
+maintenance deadline shared by up to three folds and capped by the turn
+deadline, a 45-second idle limit refreshed only by new real content, coalesced
+real progress and cancellation propagated as cancellation. Host integration
+tests drive the real `consume` through a URL protocol stub; device-side
+summarization has not run yet.
 
 Confirmed problems found during implementation review and fixed:
 
@@ -376,7 +383,8 @@ Confirmed problems found during implementation review and fixed:
   is the appended screenshot caption. It now uses the latest recorded real user
   message.
 - Repeated, alternating or empty summary snapshots counted as maintenance
-  progress and refreshed the idle timer; only new non-empty content counts now.
+  progress and refreshed the idle timer; only new non-empty content counts now,
+  deduplicated across the whole response rather than a recent window.
 
 ## Device Hub backend feasibility
 

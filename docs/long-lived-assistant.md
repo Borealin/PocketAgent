@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），Core 测试与 iOS 构建通过；指定设备验收见第 3 节“验证范围”，依赖真实模型的场景待设备上配置模型服务后验证；AgentKit 窄 bounded API 已备好补丁、待发布审批，App 暂用标注的 ≤30 秒前台整理 fallback
+> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@22fc575`（含窄 bounded `consume` API），Core 测试与 iOS 构建/IPA 检查通过；指定设备验收见第 3 节“验证范围”，依赖真实模型的场景待设备上配置模型服务后验证
 >
 > 最后核对：2026-10-14（实现与验证范围）
 >
@@ -272,7 +272,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 ### 可直接复用的 AgentKit 原语
 
-已核实项目锁定的 `8108c9bb87c546860cfc1769571e115af919fe8a` 源码，依赖 checkout 无本地改动；没有依赖最新版本的未核实 API。
+方案阶段核实了当时锁定的上游 `8108c9bb87c546860cfc1769571e115af919fe8a` 源码；实现后依赖固定为 fork `Borealin/AgentKit` 的 `22fc575009bde3a2097ac1a49908ffa239b9c029`（上游该提交＋窄 `consume` API，未改其他 API）。
 
 - [AgentCompaction / AgentCompactionService](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentCompactionService.swift)：安全切分历史、保留近期预算、限制摘要输入中的工具输出，并用无工具模型调用生成摘要。`shouldCompact` 在未知窗口时返回 false，宿主需要明确预算来源。
 - [AgentContextPipeline](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentContextPipeline.swift)：只变换发送给模型的上下文，不改写保留的历史。默认 chat pipeline 修复工具语法并重放上下文快照，没有自动长期摘要。
@@ -301,9 +301,9 @@ ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。�
 | 模型循环 | AgentRuntime、provider编码/解析、steer/cancel、工具调度/语法修复 | ContextBuilder、统一Estimator、每请求wrapper、无工具摘要编排与真实进度 |
 | 记忆/搜索 | AgentMemoryAccessing、Operation/Scanner/applying、SearchQuery、只读工具 | ID/revision定位、scope/来源、已知副本遗忘、exact宿主写入与受限搜索 |
 | 手机执行 | PhoneExecutor串行owner、DDI/WDA、fresh snapshot、脚本lease、取消清理 | commit gate接到所有入口，同一deadline；不替换后端/loop |
-| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口（`consume(_:limits:onEvent:)`）已在独立clone实现并测试，待发布审批后升级pin；当前App用≤30秒前台buffered整理fallback |
+| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口 `consume(_:limits:onEvent:)` 已发布于 fork `Borealin/AgentKit` 分支 `codex/pocketagent-bounded-consume`（`22fc575`），PocketAgent 已固定该不可变提交；默认stream/complete/loop不变 |
 
-实现状态：P1–P4 已落在 `App/Core`（纯逻辑与可 fake 的 owner/屏障）和 `App/`（ChatController 扩展与界面），Core 测试覆盖格式、事务、屏障（经真实 AgentRuntime）、scope/DAG/遗忘、上下文与摘要、记忆与搜索、pending 崩溃点与 sync 交叉。模型请求的 bounded streaming 维护目标尚未满足：AgentKit 窄 API 补丁未发布前，摘要整理只走标注的 ≤30 秒前台 fallback，不在后台路径假定可保活。
+实现状态：P1–P4 已落在 `App/Core`（纯逻辑与可 fake 的 owner/屏障）和 `App/`（ChatController 扩展与界面），Core 测试覆盖格式、事务、屏障（经真实 AgentRuntime）、scope/DAG/遗忘、上下文与摘要（含经 fork 真实 `consume` 的流式整理）、记忆与搜索、pending 崩溃点与 sync 交叉。
 
 ```mermaid
 flowchart TD
@@ -477,11 +477,9 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 
 旧屏幕投影只针对phone工具已知screen/element内容，最多保留最新2个完整观察；旧结果保ok/error/code/message/action_issued/action_outcome/replay_allowed/input_method/input_verified和工具结构，删除旧snapshot节点/坐标并明确“过期观察，重新observe”。不能裁其他file/network/script结果；最新screen仍唯一动作依据，projection不改PhoneExecutor授权。
 
-固定AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2需要一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete不变，不新增本地化字符串（超事件数复用responseTooLarge）。该补丁已在独立clone（基于 `8108c9b`）实现并通过新增4项与AgentKit全量测试，尚未发布，PocketAgent的pin因此仍为 `8108c9b`。
+上游AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2做了一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete/loop不变，未复制provider解码器，未新增本地化字符串（超事件数复用responseTooLarge）。该提交发布在 fork `Borealin/AgentKit`（parent AkinoKaede/AgentKit）分支 `codex/pocketagent-bounded-consume`，PocketAgent在Package.swift/Package.resolved/project.yml/Xcode工程与lockfile/dependencies.json中固定不可变revision `22fc575009bde3a2097ac1a49908ffa239b9c029`；SwiftSoup仍锁2.13.9（2.14.2与ScrubberKit的平台声明在当前工具链下无法解析）。
 
-宿主侧 `StreamingSummary`/`SummaryCollector`（Core）已实现并测试：只保text（≤64KiB，textDelta追加、textSnapshot覆盖），reasoning只计真实工作，tool call/超限立即拒绝并停止producer，只接受finished(.completed)（`.length`/缺终态/空文本拒绝），总deadline（默认150秒且不超过整轮剩余）与idle 45秒仅由真实文本/推理刷新，进度经ProgressCoalescer至多一个待处理MainActor通知。它对已打补丁AgentKit的 `consume` 接线已在本地临时包中端到端验证；pin发布前App不启用它。摘要编排复用AgentCompaction.serialized与AgentCompactionService.systemPrompt，宿主校验完整结果后经CAS保存，不采用Service.summarize的静默截断。
-
-当前App路径（明确标注的临时方案）：`AssistantTurnSupport.summaryText` 用现有buffered `complete`（16MiB上限、要求终态）做前台短整理，deadline取30秒与整轮剩余的较小值，App进入后台即取消，无流式维护进度，不在BG路径假定150秒可保活，因此不能宣称已满足bounded streaming维护目标。整理失败/超时等于本轮无摘要、不重试；known/显式窗口仍由hardguard清晰报错，unknown按软目标继续主请求，OS取消或整轮deadline已到则整轮停止。整轮600秒只使用一个TurnDeadline（TurnStatus.started起算），PhoneExecutor.remainingTime/checkDeadline、watchdog、摘要准备与脚本lease共用；准备阶段显示.preparingContext，不增modelResponses/phoneActions，不生成伪心跳。
+整理链路：每个fold用 `SummaryRequest`（AgentCompaction.serialized + AgentCompactionService.systemPrompt，上一摘要折叠）经 `consume(limits: .maintenance)` 进入Core `SummaryCollector`：只保text（≤64KiB，textDelta追加、textSnapshot覆盖，空snapshot不清除已收文本），reasoning不保正文；只有新的非空内容计为真实工作（整个响应的snapshot以16字节digest去重，上限即事件上限，重复/交替/循环/空snapshot都不刷新idle）；tool call/超限立即拒绝并停止producer；只接受finished(.completed)，`.length`/缺终态/空文本拒绝；宿主校验完整结果后经CAS保存，不采用Service.summarize的静默截断。最多3个fold共享一个 `MaintenanceDeadline`：自开始150秒且不超过整轮剩余；若到期的是整轮deadline则抛 `TurnDeadlineReached` 停止整轮，否则本轮不使用新摘要、不重试；每次尝试45秒idle只由真实增量刷新。进度经 `ProgressCoalescer` 至多一个待处理MainActor投递，按真实计数累加workObserved并上报系统任务进度；准备阶段显示.preparingContext，不增modelResponses/phoneActions，不生成伪心跳。Stop/系统到期在runtime建立前取消准备Task，URLSession取消等传输错误统一以CancellationError传播，未授权permit即按未启动路由。known/显式窗口仍由每请求hardguard清晰报错，unknown按软目标继续主请求。整轮600秒只使用一个TurnDeadline（TurnStatus.started起算），PhoneExecutor.remainingTime/checkDeadline、watchdog、摘要准备与脚本lease共用。
 
 ### 一个下一件事的状态机
 
@@ -509,7 +507,7 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 | 阶段 | 主要文件 | Core 测试（`Tests/PocketAgentCoreTests`） |
 |---|---|---|
 | P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
-| P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、ContextEstimatorTests、ProviderConfigTests、StreamingSummaryTests |
+| P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、ContextEstimatorTests、ProviderConfigTests、StreamingSummaryTests、ConsumeIntegrationTests（fork真实 `consume`） |
 | P3 记忆/搜索/遗忘 | `Core/MemoryLedger.swift`、`PocketMemoryAdapter.swift`、`ToolCatalog.swift`（ToolKind.memory）、`ExecutionStatus.swift`；`App/ChatMemory.swift`、`AssistantViews.swift`（面板/预览） | MemoryLedgerTests（含12k根长链）、MemoryAdapterTests |
 | P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
 
@@ -533,7 +531,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 | 端 / 共享层 | 影响 | 原因 |
 |---|---|---|
 | PocketAgent iOS | 受影响 | 入口、唯一历史数据、上下文、记忆、输入调度；已实现 |
-| AgentKit | 窄provider API受影响 | `consume` 补丁已在独立clone实现/测试，待发布审批后升级pin；现有loop/手机后端保留 |
+| AgentKit | 窄provider API受影响 | fork `Borealin/AgentKit@22fc575` 新增 `consume`，PocketAgent已固定；现有loop/手机后端保留 |
 | PortableSync / iCloud Drive | 新格式隔离与apply回归 | 新目录/generation仅接同格式客户端，不同步助理身份/ledger/scope/屏蔽集 |
 | Looktech Android / iOS App | 不受影响 | 独立PocketAgent，不改眼镜业务 |
 | 蓝牙 / ISP / Wi-Fi | 不受影响 | 无设备通信、媒体、电源或固件变化 |
@@ -543,12 +541,12 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 240+ 项（macOS 主机）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值 |
+| Core 测试 | 通过 | 247 项/54 组（macOS 主机）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值 |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
 | 指定设备（iPhone 12 mini） | 部分 | 同身份覆盖安装、首次启动一次初始化空主线、旧格式文件不变已验证；其余设备场景因另一会话同时操作该机暂停 |
 | 依赖真实模型的设备场景 | 未验证 | 改模型后召回、中文检索、纠正/遗忘对模型上下文的影响、fresh observe 不重放：需在新命名空间配置模型服务 |
 | 长历史 | 主机量测 | 每事件写入 p95：10k 条 0.05 秒、50k 条 0.2 秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备侧未测 |
-| bounded streaming 维护 | 未满足 | AgentKit API 未发布；App 用 ≤30 秒前台 fallback |
+| bounded streaming 维护 | 已实现，主机验证 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备侧整理未运行 |
 
 跨天使用、后台到期与 iOS 系统任务行为没有虚构证明；系统任务与进度仍受 OS 到期约束，首版没有常驻保证。
 
@@ -570,12 +568,12 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 ## 4. 资源与交付计划
 
-按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施，四项代码均已完成并由 Core 测试覆盖。MVP 交付仍以指定设备验收为门禁；依赖真实模型的设备场景与 AgentKit pin 发布见下表依赖列。
+按“数据/保存闸与身份 → 上下文预算/摘要及来源登记 → 显式记忆与搜索 → pending输入与全链路”实施，四项代码均已完成并由 Core 测试覆盖。MVP 交付仍以指定设备验收为门禁；依赖真实模型的设备场景见下表依赖列。
 
 | 阶段 / 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
 | P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现；Core/构建通过，设备部分验证；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
-| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；AgentKit补丁待发布审批；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
+| P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；AgentKit fork已固定；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
 | P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1/P2、完整来源注册与撤销 |
 | P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | codex/long-lived-assistant-implementation | 待确认 | 待确认 | 已实现未验证（设备）；2026-10-14 | P1–P3、指定设备与长历史样本 |
 | 自动学习候选、普通聊天前台宿主 | PocketAgent | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | MVP后续 | 显式记忆/遗忘、能力冻结/生命周期稳定 |
