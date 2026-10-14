@@ -6,9 +6,10 @@ import Testing
 /// Chinese lexical recall evaluation over a fixed synthetic table, through
 /// the two paths the assistant actually uses: `memory_search` ranking and the
 /// automatic per-request memory block. Keywords, scope, forget and unrelated
-/// queries are asserted; paraphrases and false-positive probes are measured
-/// and reported, because word matching (NLTokenizer terms + CJK bigrams, no
-/// embeddings) is expected to miss paraphrases. Set
+/// queries are asserted; paraphrases and shared-word probes are measured and
+/// reported, because word matching (NLTokenizer terms, CJK run bigrams and
+/// the whole query; single characters are not evidence; no embeddings) is
+/// expected to miss paraphrases. Set
 /// `POCKETAGENT_EVAL_REPORT=/path/report.json` to write the per-query results.
 struct ChineseRecallEvaluationTests {
     private static let project = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
@@ -123,8 +124,18 @@ struct ChineseRecallEvaluationTests {
                 #expect(!query.forget.contains(label), "\(r.query) returned forgotten \(label)")
             }
         }
-        // Measured: single-character words (在、对、去) match in both paths, so
-        // unrelated questions can return or inject an entry; reported below.
+        // Single characters are not evidence: keyword and scope queries return
+        // nothing extra and unrelated questions return or inject nothing.
+        for r in group(.keyword) + group(.scope) {
+            #expect(r.searchExtra.isEmpty && r.blockExtra.isEmpty, "\(r.query) extra \(r.searchExtra)")
+        }
+        for r in group(.unrelated) { #expect(r.search.isEmpty && r.block.isEmpty, "\(r.query)") }
+        // A one-character query still matches through the whole query.
+        var single = HistoryFile.initial(selection: nil)
+        _ = try single.applyMemoryEdit(.add(target: .memory, scope: .global, content: "我住在杭州西湖区", origin: .panel,
+                                            sourceRootPromptIDs: [], sourceMessageIDs: []))
+        #expect(MemorySearch.rank(single.assistant.memory.active, query: "州").count == 1)
+        #expect(MemorySearch.rank(single.assistant.memory.active, query: "我对什么过敏").isEmpty)
         // Measured: paraphrases and shared-word probes (reported, not tuned).
         let paraphrase = group(.paraphrase), probes = group(.falsePositive)
         let summary: [String: String] = [

@@ -153,20 +153,34 @@ nonisolated enum MemorySearch {
 
     static func terms(_ query: String) -> [String] {
         var terms = AgentSearchQuery(query).terms.map(folded)
-        // NLTokenizer may keep a short CJK query as one token; also try its bigrams.
-        for term in terms where term.unicodeScalars.contains(where: ContextEstimator.isCJK) && term.count > 2 {
-            let characters = Array(term)
-            for index in 0..<(characters.count - 1) {
-                let bigram = String(characters[index...index + 1])
-                if !terms.contains(bigram) { terms.append(bigram) }
+        // NLTokenizer may keep a short CJK query as one token, or split a word
+        // into single characters (组会几点 → 组 / 会 / 几点): add the bigrams of
+        // every CJK run of the query, so a two-character word is evidence even
+        // though single characters are not.
+        var run: [Character] = []
+        func flush() {
+            if run.count >= 2 {
+                for index in 0..<(run.count - 1) {
+                    let bigram = String(run[index...index + 1])
+                    if !terms.contains(bigram) { terms.append(bigram) }
+                }
             }
+            run = []
         }
+        for character in folded(query) {
+            if character.unicodeScalars.allSatisfy(ContextEstimator.isCJK) { run.append(character) } else { flush() }
+        }
+        flush()
         return terms
     }
 
+    /// Evidence is a term of two or more characters, or the whole query as
+    /// written. A single character inside a longer query (在、对、去) is not:
+    /// it matched unrelated entries in the Chinese evaluation table. A
+    /// one-character query still matches through the whole-query phrase.
     static func score(_ text: String, terms: [String], phrase: String) -> Int {
         let content = folded(text)
-        var score = terms.reduce(0) { $0 + (content.contains($1) ? ($1.count >= 2 ? 2 : 1) : 0) }
+        var score = terms.reduce(0) { $0 + ($1.count >= 2 && content.contains($1) ? 2 : 0) }
         if !phrase.isEmpty, content.contains(folded(phrase)) { score += 5 }
         return score
     }
