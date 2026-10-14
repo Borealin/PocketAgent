@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：公开资料及固定版本关键架构路径已静态核对；多模型讨论及双模型审查后的实现契约，已决定待开发；未修改应用代码
+> 状态：已决定待开发；采用用户明确授权的 breaking change 数据边界；公开调研及核心架构已审查，本轮仅修订方案，未修改应用代码
 >
 > 最后核对：2026-10-14
 >
@@ -12,7 +12,7 @@
 
 ## 1. 需求与关联资料
 
-用户确认目标为“单入口＋长期记忆”：再次打开 App 时直接回到同一个助理，换话题、换模型和跨天使用时仍能找回相关偏好与之前的决定。现有 PocketAgent 的主组织单位是独立会话，每条会话分别保存历史、模型和项目。推荐新增默认“你的助理”独立入口，保留旧任务会话与历史；继续用 AgentKit，补齐宿主的主线、记忆、上下文与输入队列。长期连续性来自数据与上下文管理，每轮仍是有起止的执行。首版沿用本机运行方式，不依赖常驻服务器。
+用户确认目标为“单入口＋长期记忆”：再次打开 App 时直接回到同一个助理，换话题、换模型和跨天使用时仍能找回相关偏好与之前的决定。现有 PocketAgent 的主组织单位是独立会话，每条会话分别保存历史、模型和项目。新增默认“你的助理”独立入口，并提供本版本内的任务/历史区；继续用 AgentKit，补齐宿主的主线、记忆、上下文与输入队列。长期连续性来自数据与上下文管理，每轮仍是有起止的执行。首版沿用本机运行方式，不依赖常驻服务器。
 
 | 类型 | 链接 | 说明 |
 |---|---|---|
@@ -29,7 +29,9 @@
 | OpenMuseAgent 后继 | [nanoMuse](https://github.com/nano-muse/nanoMuse) | Python、OpenMinis iOS 与桌面 Harness 分别核验 |
 | iOS 生命周期 | [Apple：BGContinuedProcessingTaskRequest](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtaskrequest) | 用户在前台发起、可继续到后台的工作 |
 
-用户最新要求是“先不改代码”，由主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 整体讨论，再由 GPT-6 Astra xhigh 与 Fable 5.1 xhigh 审查并确定技术细节及实施步骤。本次交付为源码依据与具体方案，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
+用户已明确“目前不需要做版本兼容，迁移什么的可以不做，直接 breakingchange”。本期按新格式从空助理主线开始，不自动迁入旧聊天、草稿、选择或配置；旧版本本地文件与云端目录不作为新版本数据源。仍然“先不改代码”。此前多模型审查中的旧记录升级与兼容约束已撤销；本轮按用户新决定由主审修订，未重复多模型审查。
+
+用户此前要求是“先不改代码”，由主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 整体讨论，再由 GPT-6 Astra xhigh 与 Fable 5.1 xhigh 审查并确定技术细节及实施步骤。本次交付为源码依据与具体方案，不修改 App 行为。主动提醒、定时监控、持续语音和离开 App 后全天候工作属于后续扩展，没有被本次需求确认。
 
 ## 2. 公开项目调研与结论
 
@@ -48,7 +50,7 @@
 | 路线 | 改动与收益 | 主要代价 | 本轮建议 |
 |---|---|---|---|
 | 固定当前某条会话，隐藏其他会话 | 导航改动小 | 易继承旧项目/一次性任务；仍需记忆、预算和队列改造 | 不作为主方案 |
-| 新增默认“你的助理”，旧任务/历史共存，继续 AgentKit | 默认入口稳定；保留原执行与旧数据；宿主分别管理记忆和上下文 | 新增主指针、数据扩展、请求投影与运行宿主 | 推荐 |
+| 新增默认“你的助理”，本版本任务/历史共存，继续 AgentKit | 默认入口稳定；复用执行链路；宿主分别管理记忆和上下文 | 新增主指针、数据扩展、请求投影与运行宿主 | 推荐 |
 | 替换成 OpenMinis 类自有 loop | 可控制整个循环，与上游机制一致 | 替换模型适配、事件、工具调度、取消、生命周期；仍须接入 DDI/WDA | 当前收益不足，后置评估 |
 
 独立入口与保留 AgentKit 可以同时成立。固定版本 AgentKit 已有非破坏请求 pipeline、记忆协议/工具和无工具摘要服务；PocketAgent 尚未把这些接成长期助理。新增入口给用户一个稳定落点，宿主改造让这个落点真正有长期记忆。
@@ -229,7 +231,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 ### 多模型讨论、双模型审查与主审裁决
 
-主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 分别形成第一轮意见，再交换分歧做第二轮讨论。GPT-6 Astra xhigh、Fable 5.1 xhigh 对同一冻结候选独立审查，主会话按固定源码逐条核验并修订，再复审差异。Astra/Fable经差异复审已关闭设计阻断项；最后的接线前提由主审回写。模型意见来源：peer；结论是静态设计审查，不是编译、运行或设备证明。外部参考仍依据前文的固定版本核验，并非每位模型重新完整审计全部外部仓库。
+主会话与 Opus 5.5 xhigh、DeepSeek Flash high、Grok 4.7 high 分别形成第一轮意见，再交换分歧做第二轮讨论。GPT-6 Astra xhigh、Fable 5.1 xhigh 对同一冻结候选独立审查，主会话按固定源码逐条核验并修订，再复审差异。Astra/Fable完成了此前含升级约束候选的差异复审；其余核心接线结论沿用。当前 breaking 数据边界按用户最新决定替换升级约束，未重复模型复审。模型意见来源：peer；结论是静态设计审查，不是编译、运行或设备证明。外部参考仍依据前文的固定版本核验，并非每位模型重新完整审计全部外部仓库。
 
 | 分歧 / 审查点 | 最终裁决与理由 |
 |---|---|
@@ -243,7 +245,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 | 静默摘要截断、仅限宿主text就称内存有界 | 拒绝length/缺终态/溢出；自组摘要，窄provider callback在producer限额，不换loop |
 | 纠正与遗忘混用 | replace升revision、下一请求刷新，不撤销读者或停当前任务；只有显式forget才屏蔽依赖闭包，并在提交前显示连带影响 |
 | 遗忘只删条目/旧摘要 | 持久依赖闭包，屏蔽已知检索副本，命中active root则停止；保原文、说明整段连带排除 |
-| 新schema一律拒绝旧消息重复 | legacy本地repair语义保留并留迁移前副本；v4新事务严验；remote重复仍由现有PortableCodec拒绝 |
+| 旧格式自动迁入/升级 | 用户明确采用breaking；删除旧版本decoder、字段回填、去重迁入及升级副本，当前格式严格校验 |
 | 主线被删/分叉任意挑分支 | 显示恢复态，用户选保留分支或新空主线；不同步本机主指针/记忆 |
 
 实际调用与报告、冻结稿hash和审查闭环引用只保留本地，未把模型原始输出、配置或成功证明放进Git。首版关键规则与测试契约在下文；接口仍是新增设计。
@@ -264,7 +266,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 | 后端在 PhoneExecutor.ready 才连接，但 beginAgent 对每次发送提交系统后台任务 | `App/PhoneAgent.swift:328-334`、`App/AgentRunner.swift:28-56` | 现有按需连接复用；前台聊天宿主可后置，不能把入口独立等同于后台能力改变 |
 | 未知工具被 reducer 默认计入手机动作 | `App/Core/ExecutionStatus.swift:110-115` | 注册 memory 工具还要补工具类型与状态展示 |
 | 模型构造只指定输入能力与 4096 输出 token，未传上下文窗口 | `App/Core/ProviderConfig.swift:144-165` | 自动压缩不能假定所有自定义模型的窗口大小 |
-| 迁移保留真实 ID；进行中的状态变 interrupted；按调用修复结果邻接 | `App/Core/ChatHistory.swift:123-180` | 主线迁移不能排序重写消息或恢复执行旧动作 |
+| 基线有旧格式迁移；重启会将进行中状态变 interrupted | `App/Core/ChatHistory.swift:123-180` | breaking版删除旧格式迁移；仅保留当前格式重启中断与不重放规则 |
 | 同 ID 历史是前缀时选较长，否则保存冲突副本 | `App/Core/PortableSync.swift:286-307` | 两设备并发追加同一主线会产生分支，现有算法没有统一时间线语义 |
 | SwiftUI 懒加载行，但先为完整消息构造渲染项与进度 | `App/ChatTranscriptView.swift:17-52` | 长历史仍需窗口化；LazyVStack 不会消除全量预处理成本 |
 
@@ -288,14 +290,14 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 ## 3. 技术方案总括
 
-**已决定采用“默认你的助理入口＋现有 AgentKit＋本地长期记忆”。** 旧独立任务保留在任务/历史区，主线固定身份，模型每轮runtime仍可销毁。长期连续性由原始消息、有效记忆、摘要和按需检索承接；运行继续沿用一个活动槽、串行手机队列与现有DDI/WDA。
+**已决定采用“默认你的助理入口＋现有 AgentKit＋本地长期记忆”。** 本版本独立任务保留在任务/历史区，主线固定身份，模型每轮runtime仍可销毁。长期连续性由原始消息、有效记忆、摘要和按需检索承接；运行继续沿用一个活动槽、串行手机队列与现有DDI/WDA。
 
-ChatController/MainActor继续是同一原子HistoryFile的唯一owner。新增文件层主指针、scope/已知依赖、记忆账本、摘要及一个pendingNext；显式记忆由宿主提交，模型只有只读记忆/历史工具。启动许可、轮内保存屏障和遗忘撤销都在实际模型/工具边界落实。纠正记忆只刷新未来请求；显式遗忘才按已知依赖排除历史，并在最终操作面板显示连带影响。首版是单设备本机MVP；跨设备统一助理、自动学习、并行与全天候工作后置。
+ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。新格式从空主线开始，不自动接收旧版本数据；历史与provider配置只支持当前格式，portable同步用新目录与generation隔离旧客户端。新增文件层主指针、scope/已知依赖、记忆账本、摘要及一个pendingNext；显式记忆由宿主提交，模型只有只读记忆/历史工具。启动许可、轮内保存屏障和遗忘撤销都在实际模型/工具边界落实。纠正记忆只刷新未来请求；显式遗忘才按已知依赖排除历史，并在最终操作面板显示连带影响。首版是单设备本机MVP；跨设备统一助理、自动学习、并行与全天候工作后置。
 
 | 层 | 复用 | 新增 / 必要改造 |
 |---|---|---|
 | 入口与展示 | ChatRootView/Composer/Transcript、Markdown、附件、模型选择 | 主入口、任务区、记忆面板/回执、输入目标、恢复/待处理卡片 |
-| 数据与提交 | 原子历史文件、真实ID、附件/attribution、portable原文冲突算法 | History v4、唯一throwing保存边界、scope/dependency、ledger/summary/pending、启动与保存屏障 |
+| 数据与提交 | 原子历史文件、真实ID、附件/attribution、portable原文冲突算法 | 新一代严格格式、唯一throwing保存边界、scope/dependency、ledger/summary/pending、启动与保存屏障 |
 | 模型循环 | AgentRuntime、provider编码/解析、steer/cancel、工具调度/语法修复 | ContextBuilder、统一Estimator、每请求wrapper、无工具摘要编排与真实进度 |
 | 记忆/搜索 | AgentMemoryAccessing、Operation/Scanner/applying、SearchQuery、只读工具 | ID/revision定位、scope/来源、已知副本遗忘、exact宿主写入与受限搜索 |
 | 手机执行 | PhoneExecutor串行owner、DDI/WDA、fresh snapshot、脚本lease、取消清理 | commit gate接到所有入口，同一deadline；不替换后端/loop |
@@ -323,7 +325,21 @@ flowchart TD
 
 ### 数据与提交点
 
-HistoryFile v4 新增 assistant: AssistantState?，scopeIndex也在AssistantState文件层；ChatSession与portable结构不加字段。AssistantState 只存主线身份/notice、MemoryLedger、StoredCompaction、PendingNext，无独立TaskStore。
+新一代本地格式标识为 `generation="assistant-v1"`、`schemaVersion=1`，只读写这个组合，不提供旧版本分支。HistoryFile.assistant 为必填 AssistantState，scopeIndex也在文件层，不再靠nil推断是否升级。ChatSession复用原文/附件/selection等数据形状，但本版本codec要求当前schema字段存在；可选业务值显式nullable，不用缺字段默认值兼容旧记录。AssistantState存主线身份/notice、MemoryLedger、StoredCompaction、PendingNext，无独立TaskStore。
+
+应用本地根下使用 `assistant-v1/history.json`（唯一权威历史）、`assistant-v1/providers.json`和对应附件目录；所选iCloud根下仅使用`assistant-v1/`的当前portable envelope。旧目录不扫描、不升级、不复制、不自动清除；首次新命名空间不存在时，一次原子初始化空主线和完整必填状态。Provider配置在新命名空间重新设置，Keychain按当前providerID解析，不做旧ID桥接；配对记录和PhoneExecutor后端不参加本次数据格式改造。
+
+```swift
+// 以下为当前格式要求；不提供legacy decoder或缺字段默认回填。
+struct HistoryFile: Codable {
+    var generation: String // 必须为assistant-v1
+    var schemaVersion: Int // 必须为1
+    var selectedID: UUID? // key必填，值可以是null
+    var sessions: [ChatSession]
+    var deletedSessions: [Tombstone]
+    var assistant: AssistantState // 必填；初次创建与空主线同事务
+}
+```
 
 ```swift
 // 新设计形状；具体 Sendable/Codable conformances 在实现时验证
@@ -404,9 +420,9 @@ enum PendingPrompt: Codable {
 enum PendingState: Codable { case queued, held(reason: String), needsResume }
 ```
 
-新增字段必须进 CodingKeys + decodeIfPresent，缺失与坏类型区分。迁移 legacySelection 条件固定 version<3；v3故意nil选择不能被v4升级填回。v1/v2/v3原始ID/草稿/模型/附件保留，旧scope unknown不推测。首次 assistant==nil 才新随机UUID主线；decode为纯读取，迁移候选原子保存成功后才发布。已有非nil主指针缺失进恢复态，不选sessions.first。v1–v3消息继续现有repairedToolOrder去重/邻接修复，升级前留一份原字节v3本机保护副本（非权威文件、不同步/不进Git），避免新校验把目前可读文件锁死；v4新事务严格拒绝会话内真实消息重复、会话ID重复、ledger/tombstone ID重复或非法pending双重所有权；不同conflict副本间同一消息ID允许且保留。PortableCodec.validate当前已拒绝remote会话内重复ID（213–214），沿用它，不因local adopt容忍历史duplicates而放宽remote校验；不能声称现有remote重复合法。派生摘要坏锚点/失效链可丢弃，不影响原文。未知文件版本拒绝覆盖。
+当前格式使用明确CodingKeys和严格decoder：generation/schemaVersion、必填key或字段类型不符即拒绝，不调用旧HistoryMigration、不按版本回填selection，也不自动去重、修复或备份后迁入旧原文。业务nullable字段区分null与缺key，编码端明确写null、解码端用decode(Optional<T>.self, forKey:)；不能让synthesized encodeIfPresent省略key后被自己的严格decoder拒绝。没有文件时才初始化新状态，已有当前格式损坏文件不能当空文件覆盖。已有主指针失踪进入运行数据恢复态，不选sessions.first。严格拒绝会话内真实消息重复、会话ID重复、ledger/tombstone ID重复或非法pending双重所有权；当前generation的不同conflict副本间同一消息ID允许且保留。复用PortableCodec的当前数据校验与合并原理，current-generation remote重复仍拒绝；旧云格式不参与解码或merge。派生摘要坏锚点/失效链可丢弃，不影响当前格式原文。当前文件恢复与明确重置只作用当前命名空间，不承接旧格式导入。 decode为纯读取；当前格式重启后的running/pending状态由owner恢复事务处理，保存成功才发布中断/needsResume状态，不重新调度已授权phone动作。
 
-读取失败loadBlocked禁止任何覆盖，用户恢复/导入后才解除；保存失败saveDirty可显式重试。所有新操作用 MainActor `transact`：从当前已确认状态复制candidate → 同步validate/apply → throwing HistoryMigration.encode/atomic file.write → 成功publish（无await）。失败不发布记忆/主指针/pending候选，不返回工具成功。现有event/edit/sync须共用保存边界；若现有事件落盘失败，保留可见未保存事件、暂停后续执行并标storageError，禁止新接受/事务/sync直到最新完整状态成功flush，不能回滚掉可能已发生的手机结果。flush只恢复存储能力，不自动resume动作。
+读取失败loadBlocked禁止任何覆盖，当前格式文件恢复或用户明确重置后才解除；保存失败saveDirty可显式重试。所有新操作用 MainActor `transact`：从当前已确认状态复制candidate → 同步validate/apply → throwing HistoryCodec.encode/atomic file.write → 成功publish（无await）。失败不发布记忆/主指针/pending候选，不返回工具成功。现有event/edit/sync须共用保存边界；若现有事件落盘失败，保留可见未保存事件、暂停后续执行并标storageError，禁止新接受/事务/sync直到最新完整状态成功flush，不能回滚掉可能已发生的手机结果。flush只恢复存储能力，不自动resume动作。
 
 新增TranscriptCommitBarrier（ChatController持有、非第二writer）：成功write后推进原始消息ID/结构内容digest与tool-result水位，等待者由owner恢复。saveDirty采用cancel-at-boundary并清理owned runtime/context task/script，不声称暂停后可原地恢复；保dirty事件待flush。现有AgentEventChannel.emit只yield，不是ACK。保留loop.toolExecution=.sequential/maxConcurrency=1：RegistryApproval.authorize/willExecute在每个tool dispatch前await sourceMessageID对应assistant已保存及其前序call结果已保存；前序结果以逐call的toolFinished事件（executor finish:369；现有ChatSessions:534–539已按事件append）落盘推进水位，禁止等scheduler.run批末才追加的snapshot results（Runtime:303–313），否则第二call会死锁；模型wrapper在phone.prepare前await当前run新增的真实输入已保存。PreparedContext单列synthetic IDs（summary/repair），不要求它们落入raw；对真实消息不能仅拿“ID存在”替代当前正确内容已保存。屏障按runID/jobEpoch+必要IDs判定；owner替换/移除job时立即拒绝对应epoch全部waiters，不让被忽略旧event等到timeout，每次await后复核Stop/storage/jobepoch；save失败、cancel、timeout解除等待并拒绝。storageDirty检查同时进入PhoneExecutor.checkDeadline（script内部helper复用该检查）；关闭所有新模型/tool副作用；脚本lease内部phone helper同样查共享健康/撤销状态，不能只靠外层script一次批准。in-flight动作不能撤销，保其真实或unknown结果；不自动重发。复用现有awaitedapproval/hooks与wrapper，不需要改SDKloop。现有persist吞错/永久early-return不能当提交API；不新增第二writer。
 
@@ -418,7 +434,7 @@ MVP 的记忆写入由宿主完成：
 - 记忆面板直接add/replace/remove，用户选择scope/target和具体记录。
 - 输入框“记住”模式打开带预填内容的记忆面板，保存即一次编辑。严格 `记住：<完整原文>` / `/remember <完整原文>` 是宿主记忆命令：整段余文作为exactpayload直接提交，不启动run/BG任务，也不append进活动工具组；展示本地回执，MemoryReceipt和ledger同事务存AssistantState（最近64条只记ID/操作/结果，无content副本），从composer状态卡/记忆面板查看；不塞ChatSession.messages，不portable/不自动发给模型。保存失败不清命令输入，不能出现成功回执。普通自然语言“记住X”仍是聊天，气泡可显示“存为记忆”候选chip，点击后以原文预填面板并一次提交，不能声称未点击已记住。默认memory target，当前项目scope，无项目global。个人核心user target只由UI明确选择global。
 - 自然语言修改/忘记存在多个目标时显示候选卡，点选条目再一次提交；模型可提议，不能替用户授权。明确结构请求无需额外二次确认。
-- 本期仅向主线注册 memory_search/session_search；不注册可由模型自由批量写入的原生memory工具。复用原生AgentMemoryOperation/operationSchema/content校验/applying与搜索协议，未来如开放写工具须有 exact grant（operation kind/content/entryID/expectedRevision/scope）和commit二次校验，不能仅关键词/substring/模型claim。旧任务本期不加记忆工具。
+- 本期仅向主线注册 memory_search/session_search；不注册可由模型自由批量写入的原生memory工具。复用原生AgentMemoryOperation/operationSchema/content校验/applying与搜索协议，未来如开放写工具须有 exact grant（operation kind/content/entryID/expectedRevision/scope）和commit二次校验，不能仅关键词/substring/模型claim。独立任务本期不加记忆工具。
 
 `PocketMemoryAdapter: AgentMemoryAccessing` 回到owner读最新ledger。add按scope分区使用原生AgentMemoryState.applying做内容校验/去重；replace/remove由owner先用entryID+expectedRevision定位，再仅对该单条AgentMemoryEntry投影调用原生applying并按ID合回。原生oldText substring可能同时命中“北京”和“北京出差”，不能用完整原文猜定位。暂存所有差异、检查容量/指纹/并发后一次原子commit；相同文本不同scope保留不同ID。正常run注入快照与search实际返回均记录entryID/revision read-set；任何未来模型replace/remove须expectedRevision匹配，add须scope/contentDigest+forgetEpoch有效；未来旧run不能覆盖用户修正；模型写授权/乐观写回接口后置，本期读取依赖仍完整登记。明确UI写入用UI展示版本做CAS，过期刷新再编辑。
 
@@ -431,7 +447,7 @@ RootDependencies保存已知回流路径：每次真正model dispatch前，将�
 
 ### ContextBuilder与摘要
 
-ContextBuilder纯函数输入：原文+membership、当前scope、ledger快照、摘要候选、根promptID/已完成边界、budget policy、附件meta/digests；输出PreparedContext（同scope有资格历史、有效summary、memoryBlock、revision/forgetEpoch、SummaryPlan、SourceReadSet）。不await、不改原文。runtime首次prior来自此投影；当前run消息在每个实际请求边界重新按forget过滤，保留安全完整组。主线自定义pipeline顺序：PocketSnapshotStripAndModelTextProjection → AgentUnansweredToolCallRepair → AgentToolResultOrdering → AgentOrphanedToolResultRepair；不SnapshotCapture/Replay。snapshot清空必须同时令发送text=modelText??text，否则会丢SDK原有modelText语义。raw历史保持。loop.contextSnapshot可以仍产生空snapshot，发送侧统一剥除；memory/system规则只在fresh systemPrompt，不sessionContext。旧任务原pipeline不变。
+ContextBuilder纯函数输入：原文+membership、当前scope、ledger快照、摘要候选、根promptID/已完成边界、budget policy、附件meta/digests；输出PreparedContext（同scope有资格历史、有效summary、memoryBlock、revision/forgetEpoch、SummaryPlan、SourceReadSet）。不await、不改原文。runtime首次prior来自此投影；当前run消息在每个实际请求边界重新按forget过滤，保留安全完整组。主线自定义pipeline顺序：PocketSnapshotStripAndModelTextProjection → AgentUnansweredToolCallRepair → AgentToolResultOrdering → AgentOrphanedToolResultRepair；不SnapshotCapture/Replay。snapshot清空必须同时令发送text=modelText??text，否则会丢SDK原有modelText语义。raw历史保持。loop.contextSnapshot可以仍产生空snapshot，发送侧统一剥除；memory/system规则只在fresh systemPrompt，不sessionContext。独立任务继续原pipeline。
 
 memoryBlock连同AgentMemoryContext.policy显式放入systemPrompt，放能力说明之后、当前rules之前，注明参考数据，附ID/revision/scope，不成为执行授权。任意ledger revision变化在下一model边界刷新memoryBlock，显式search也读新状态；只有forget触发来源撤销/停止和受影响摘要失效，并剔除被屏蔽来源与旧摘要，不能仅删systemmemory后继续用包含旧内容的summary。
 
@@ -445,7 +461,7 @@ StoredCompaction复用原生record、summary指令和安全cut逻辑，宿主独
 
 ### 每请求预算与流式维护
 
-ProviderFile新增本机ContextBudgetOverrides（providerID/modelID），不改portable ProviderModelEntry。ProviderFile.CodingKeys/decodeIfPresent、ProviderStore.load/persist/applySync完整带回override，保存model列表或同步provider不得归零本地预算。接受时freeze到RunConfiguration；knownWindow配置来自用户/已验证能力，inputCeiling=W-4096-max(2048,ceil(0.08W))；输入预算<=0拒绝。未知窗口用24k估计作为自动整理软目标（宿主策略，不声称provider窗口），只对knownWindow或用户明确输入inputCeiling实施hardguard；输出仍4096。估计未知默认不把大手机观察直接停在24k，用户可设定硬上限。模型可能实际更小，provider context-limit必须清晰报错、建议降低本机上限或新轮整理，不能降级模型/重放工具。任何默认都不能证明兼容未知provider。
+当前格式ProviderFile包含本机ContextBudgetOverrides（providerID/modelID），portable只投影明确的provider/model字段。ProviderFile严格CodingKeys/decoder、ProviderStore.load/persist/applySync完整带回override，保存model列表或同步provider不得归零本地预算。接受时freeze到RunConfiguration；knownWindow配置来自用户/已验证能力，inputCeiling=W-4096-max(2048,ceil(0.08W))；输入预算<=0拒绝。未知窗口用24k估计作为自动整理软目标（宿主策略，不声称provider窗口），只对knownWindow或用户明确输入inputCeiling实施hardguard；输出仍4096。估计未知默认不把大手机观察直接停在24k，用户可设定硬上限。模型可能实际更小，provider context-limit必须清晰报错、建议降低本机上限或新轮整理，不能降级模型/重放工具。任何默认都不能证明兼容未知provider。
 
 Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，另加结构headroom；这是待实测估算而非token上界证明，图片按config模型估计/未知按每张4,096 token工程初值，最多沿用现有attachment cap；使用同一provider/model/input-mode的真实usage作有界校准（初值1，范围0.5–2，异常样本不用于调整），不据usage推窗口/自动抬hardcap；工程估计不宣称token上界。指标同时显示估计与已验证window标签。70%触发准备期摘要，recent目标35%；有known/显式inputCeiling时final hardguard不允许估计超过它；未知只保持同样的软目标整理和图片限制，实际超长错误不可重试并提示配置窗口。中文/大量JSON/图片路径必须有provider实测用例，无法tokenizer精确证明。
 
@@ -459,7 +475,7 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 
 ### 一个下一件事的状态机
 
-新增InputTarget.send/steer/next：主线活动时默认next（不依赖job.ready），steer仍原readiness；有待处理就新输入留草稿，不覆盖。旧任务send即steer保持。进程内全局acceptedOrdinal用于所有已接受ChatJob和pending，公平队列按序，不抢占正在运行job；重启后原运行队列不恢复，pending显式继续按新的接受时刻取ordinal，无需持久全局计数器。接受配置/model/credential/workspace/backend/clipboard/attachments全部复制freeze到内存AcceptedJob；磁盘只存非secretselection/workspaceID/backend/clipboard/原文附件，不持久新endpoint/path/device/secret。
+新增InputTarget.send/steer/next：主线活动时默认next（不依赖job.ready），steer仍原readiness；有待处理就新输入留草稿，不覆盖。独立任务send即steer保持。进程内全局acceptedOrdinal用于所有已接受ChatJob和pending，公平队列按序，不抢占正在运行job；重启后原运行队列不恢复，pending显式继续按新的接受时刻取ordinal，无需持久全局计数器。接受配置/model/credential/workspace/backend/clipboard/attachments全部复制freeze到内存AcceptedJob；磁盘只存非secretselection/workspaceID/backend/clipboard/原文附件，不持久新endpoint/path/device/secret。
 
 1. acceptNext：生成真实UUID user message（forHistory去除images，attachments仅文件引用；validator硬拒绝detached.images、snapshot及providerItems的图片/上下文载荷；宿主prompt规范要求snapshot=nil、providerItems=[]）和acceptedOrdinal，detached pending + scope + frozen内存配置候选，原子save成功后清草稿/附件；不插在活动tool组。失败保草稿、不返回接受成功。
 2. finish前件：终态/清理与事件消费完成、in-flight steer lease都已结算、engine不忙；只有completed、foreground、stopEpoch没有变化且autoAdvance仍有效时activate；其他保持held（包括Stop后race完成、失败、取消、expiration）。Stop先MainActor增加epoch并禁autoAdvance，再请求cancel。
@@ -468,20 +484,20 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 5. abandonUnstarted：仅promoted且没有dispatchPermit时可原子清receipt、将ScopedRoot.abandonedUnstarted=true、保原prompt并释放冻结配置/重算GC，取消准备Task并撤销jobEpoch后才能新发送。不走DraftRestore；该root默认不进入自动上下文/摘要/search，UI保原文及“未启动已放弃”。explicit历史引用返回原文与未执行状态，不把旧请求升级成授权。detached取消可直接移回空草稿或删除待处理，不删已执行历史。
 6. commitDispatchPermit后任务按现有状态进行；failure/cancel保原prompt和结果，receipt已clear，不把它当未启动任务重试/重放。用户发送新prompt继续观察/规划。
 7. 重启：queued/running/cancelling→interrupted；任何pending→needsResume，不重建运行队列。detached可用户明确继续（重新选择/展示当前provider/model配置与scope，secret重新resolve）、移回空草稿、删除；promoted若能证明未启动，仅显式以同ID resume，否则保留原文、解释可能中断并要求新prompt继续。磁盘以ScopedRoot.dispatchAuthorized与promoted receipt存续区分permit前后：receipt存续且dispatchAuthorized=false可显式继续未授权请求；receipt已清则即使尚未发出runStarted也按可能中断处理，只能新prompt继续。permit后crash宁可失去同ID续跑便利，也不能猜测重放。派生内存配置不保存；恢复不是自动重放。
-8. pending/resume origin始终不走DraftRestore.apply，避免复制或覆盖后来草稿。明确路由：queued或已进入prepare但未permit的promoted，用户cancel均abandonUnstarted；未permit且非cancel失败则held；permit后cancel按中断已执行轮处理。ChatSessions:498按origin/dispatchAuthorized/cancelled三元组判断，:449对pending origin的.cancelling预写合入同一abandon事务，不能先legacy persist再清receipt；事务失败留receipt/dirty状态并取消准备，重启needsResume，不假定放弃成功。普通旧任务DraftRestore保持原prompt事实；它当前并不删除prompt。
+8. pending/resume origin始终不走DraftRestore.apply，避免复制或覆盖后来草稿。明确路由：queued或已进入prepare但未permit的promoted，用户cancel均abandonUnstarted；未permit且非cancel失败则held；permit后cancel按中断已执行轮处理。ChatSessions:498按origin/dispatchAuthorized/cancelled三元组判断，:449对pending origin的.cancelling预写合入同一abandon事务，不能先旧的非事务persist再清receipt；事务失败留receipt/dirty状态并取消准备，重启needsResume，不假定放弃成功。本版本普通独立任务DraftRestore保持原prompt事实；它当前并不删除prompt。
 
 pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或摘要准备中的session加入sync deferred；删除主线/占用项目检查计入pending/jobs。no concurrent mutation在MainActor、保存点与事件回调间需要epoch/ID验证，onIdle发生在自动advance检查之后，避免sync抢跑。scope/forget更新可取消摘要，但不使请求无故丢失。steer在await runtime.steer之前登记内存lease（messageID/root/附件refs），两条接受/steeringDelivered路径共用幂等ID事务；回调必须校验jobEpoch，附件lease进GC。自动activate等所有steer lease落盘/拒绝后才取prior，避免delivered先于steer返回造成附件/段归属缺失或晚回调覆盖下一轮状态。detached pending没有在raw中，因此不把其ID当既有before边界；promotion后也不允许旧job迟到append到新root后面。
 
 ### 同步与恢复
 
-首版primary/memory/summary/pending/scope/budget均本地，portable原文算法/schema保留（主线消息仍同步），不承诺双设备一助理。applySync从最新local fullfile起复制再合入portable session，不新建只含旧字段的HistoryFile。若明确replaced[primary]（远端删本地编辑另存copy），显示恢复态和本地copy选项；不自动切指针。若出现conflictOf==primary的副本，或主线不是本地历史的严格前缀延长，主线notice阻止自动advance/新执行，提供原/本机copy选择。changedSinceBase可以保本地原ID或远端原ID，不能把原ID总归remote当事实。原主线被远端删无本地编辑或无法确认归属，显示恢复态，用户可建立新空主线（记忆保留，旧主线留任务/历史、旧compactions失效，待处理请求先明确放弃或留旧会话，不能隐式搬目标）或选择有效session；不静默赢家。选择后scopeIndex按root/sourceID与整个段segmentDigest一致才保留；仅ID相同而内容变化也归unknown，远端新增段unknown；旧summary全部重验。mask以rootPromptID为键，原与conflict copy仍生效。
+首版primary/memory/summary/pending/scope/budget均本地；portable复用原文前缀/冲突/tombstone合并算法，但使用assistant-v1目录及严格generation/schema envelope（主线消息仍同步），不读取旧目录或保留旧schema兼容，不承诺双设备一助理。同generation导入需严格验证；旧generation/缺标识/未知schema只报不支持，不转换、不合并。applySync从最新local fullfile起复制再合入portable session，不新建只含旧字段的HistoryFile。若明确replaced[primary]（远端删本地编辑另存copy），显示恢复态和本地copy选项；不自动切指针。若出现conflictOf==primary的副本，或主线不是本地历史的严格前缀延长，主线notice阻止自动advance/新执行，提供原/本机copy选择。changedSinceBase可以保本地原ID或远端原ID，不能把原ID总归remote当事实。原主线被远端删无本地编辑或无法确认归属，显示恢复态，用户可建立新空主线（记忆保留，旧主线留任务/历史、旧compactions失效，待处理请求先明确放弃或留旧会话，不能隐式搬目标）或选择有效session；不静默赢家。选择后scopeIndex按root/sourceID与整个段segmentDigest一致才保留；仅ID相同而内容变化也归unknown，远端新增段unknown；旧summary全部重验。mask以rootPromptID为键，原与conflict copy仍生效。
 
 已有sync在后台基于snapshot生成plan：deferred集合在出发和apply两端重查（generation+currentjob/pending/preparation）；新pending/运行在sync飞行期间出现，不能apply过期覆盖。必要时标rerun，不自行改merge算法；所有保留字段/失效摘要/指针回写一次事务。attachments GC必须在成功apply与运行终态后重新取当前引用集，不能用旧snapshot删除新pending附件。
 
 ### 文件拆分、实施次序与验收
 
 
-P1 数据/保存/身份（含两条steer归属路径及现有PhoneObservingModel的ACK await）：Core/AssistantState.swift形状与validators，ChatHistory v4/CodingKeys/legacy边界，ChatController事务/保存失败禁执行，主线入口/恢复态，scope归属，同步字段保护。先core migration/roundtrip/failure tests，再UI入口。主线只创建一次、损坏文件不覆盖、v3nil模型不改、跨conflict重复消息合法、所有新增字段写回不丢。
+P1 当前格式/保存/身份（含两条steer归属路径及现有PhoneObservingModel的ACK await）：Core/AssistantState.swift形状与validators、HistoryCodec严格schema、空主线一次初始化与新命名空间；删除旧HistoryMigration/adopt/backfill路径、legacy ProviderStore/Keychain-ID桥接；ChatController事务/保存失败禁执行，主线入口/恢复态，scope归属，当前数据同步字段保护。先core初始化/strict roundtrip/拒绝非当前格式/failure tests，再UI入口。主线只创建一次、损坏文件不覆盖、跨当前conflict重复消息合法、所有必填字段写回不丢。不做旧记录升级或多版本测试矩阵。
 
 P2 上下文/预算/摘要（同步落地RootDependencies登记/闭包，P3开始前已有来源基础）：Core/ContextBudget.swift + AgentContextBuilder.swift + BudgetedAgentModel.swift；ProviderConfig/ProviderStore/Views本机override；AgentKit窄callback维护API（单独依赖commit并更新pin，不更换loop）；PhoneAgent上下文准备Task/Status，AgentRunner/PhoneExecutor同一deadline。验证snapshot不会重注memory、modelText不丢、source/父digest/锚点失效、forget并发drop、trailingtool边界、tool grammar、未知软目标/显式hardcap标签、schema/截图纳预算、summary overflow/缺terminal/toolcall/length/取消、慢消费者内存上限、真实progress不冒充phone。
 
@@ -489,7 +505,7 @@ P3 显式记忆/搜索（使用P2来源基础，新增memory版本边及forget�
 
 P4 输入排队/性能/全链路：ChatSessions/Composer/Policies单pending和序号；现有ChatSessions:483提前置running移入permit唯一事务，:452/:467/:498三处restoreDraft按origin短路；cancel排队promoted未permit任务走abandonUnstarted（保raw/解除槽/无draft覆盖），:228/:231项目/删除保护计pending，:427–431/:527–530两条steer归属已在P1完成，P4仅补lease/GC/闭幕结算。AgentRunner.beginAgent改为明确Result/失败回调，busy拒绝不可静默return（:16），owner保receipt/释放占用；补齐finish/cancel/start边界、GC/deferral，长历史渲染窗口。先state reducer fake tests所有crashpoint，再设备任务。长历史先量测10k/50k真实shape synthetic messages和附件索引：主线程单次prepare/JSONencode/写盘p95预算与10k滚动frame budget在实施第一天测定并录本机指标；未达则加显示分页/有界索引，不静默改成数据库。功能一项项完成再完整gate，避免重复编译。
 
-关键集成矩阵：pending接受save失败、激活save失败、激活后BG失败/summary失败、清receipt write失败、commitDispatchPermit前后forcequit、Stop-vs-completed race、第二pending拒绝、模型/secret编辑livefreeze、重启explicitreaccept、sync flying期间新pending、主线delete/diverge/replaced、GC保留pending附件。任何可能已发phone请求都不得自动resume；不把模型provider成功当手机成功。
+关键集成矩阵：空命名空间初始化、非当前格式明确拒绝、新旧云目录隔离、必填字段缺失/坏类型、当前格式crash恢复；pending接受save失败、激活save失败、激活后BG失败/summary失败、清receipt write失败、commitDispatchPermit前后forcequit、Stop-vs-completed race、第二pending拒绝、模型/secret编辑livefreeze、重启explicitreaccept、sync flying期间新pending、主线delete/diverge/replaced、GC保留pending附件。任何可能已发phone请求都不得自动resume；不把模型provider成功当手机成功。
 交付仍需core tests、iOS build、IPA inspection、指定真实设备使用（多天/改模型/phone取消+fresh observe/遗忘+重启/中文检索/长主线）；当前只有静态方案。Looktech Android/iOS业务、BT/ISP/WiFi、schema/rpc/lt-vad不受影响，无共享通信变更。资源负责人/人日/版本/提测待确认，不猜测排期。
 
 
@@ -522,19 +538,19 @@ protocol AssistantOwner {
 
 | 现有文件 / 建议新增 | 关系 | 内容 |
 |---|---|---|
-| Core/ChatHistory.swift、ChatSessions.swift | 扩展 | v4/CodingKeys/迁移、唯一保存、prompt/steer事件归属、permit/pending、late-callback保护 |
+| Core/ChatHistory.swift、ChatSessions.swift | 替换codec/扩展owner | 严格当前格式与空主线初始化，删除旧迁移/字段回填；唯一保存、prompt/steer事件归属、permit/pending、late-callback保护 |
 | 建议Core/AssistantState.swift、MemoryLedger.swift、TranscriptCommitBarrier.swift | 新增 | 本地DTO/validators、ID-CAS及依赖闭包、可fake的保存水位与执行闸；不建TaskStore |
 | 建议Core/ContextBudget.swift、AgentContextBuilder.swift | 新增 | 同一预算口径、有效prefix/摘要验证、scope/来源投影；纯逻辑进入现有Core测试target |
 | 建议PocketMemoryAdapter.swift、BudgetedAgentModel.swift | 新增 | 只读协议适配、真实请求边界、summary编排与进度coalescer |
 | PhoneAgent.swift、AgentRunner.swift、Core/ToolCatalog.swift、ExecutionStatus.swift | 扩展 | memory只读类型/policy、保存ACK、唯一deadline、prepare/主请求次序、busy明示失败 |
-| ProviderConfig.swift、ProviderStore.swift、ProviderViews.swift | 扩展 | 本机预算字段/保存/sync保留、接受时freeze，不改portable模型结构 |
+| ProviderConfig.swift、ProviderStore.swift、ProviderViews.swift | 替换旧codec/扩展 | 当前格式配置重新设置，删除旧endpoint/model/Keychain-ID迁入；本机预算字段/保存/sync保留、接受时freeze |
 | ChatRootView.swift、ChatComposer.swift、ChatTranscriptView.swift、Core/ChatPolicies.swift | 扩展 | 主入口/任务区、引用chip、面板/回执、输入目标、pending恢复与长历史显示 |
-| Core/PortableSync.swift、CloudSync.swift | 算法/schema保持 | 本地新字段带回、两端deferral重查、主线分支恢复、当前引用GC |
+| Core/PortableSync.swift、CloudSync.swift | 复用算法/替换格式边界 | assistant-v1目录/严格envelope隔离旧schema；本地字段带回、两端deferral重查、主线分支恢复、当前引用GC |
 | AgentKit Providers/AgentProviderClient.swift 与 SSEStream.swift | 窄新增API | producer callback限额、终态/取消；默认loop/stream行为保持，SDK独立测试 |
 | Package.swift、Package.resolved、Xcode SwiftPM Package.resolved | 固定依赖升级 | 窄API完成后统一新commit pin；不直接修改.build/checkouts |
 | PhoneControl / Native / DDI / WDA | 执行契约保持 | 现有动作owner、fresh snapshot、结果真实性与不重放 |
 
-MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命令与用户点击的chat chip。新增DTO都须通过roundtrip/严格类型校验；正确性hash只用版本化有序DTO，不用文件整体编码顺序。原子历史仍是唯一权威；迁移副本与可重建索引不是另一writer。
+MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命令与用户点击的chat chip。新增DTO都须通过roundtrip/严格类型校验；正确性hash只用版本化有序DTO，不用文件整体编码顺序。原子历史仍是唯一权威；可重建索引不是另一writer，不建旧格式迁入/升级副本。
 
 ### 影响面与验证边界
 
@@ -542,7 +558,7 @@ MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命
 |---|---|---|
 | PocketAgent iOS | 受影响 | 入口、唯一历史数据、上下文、记忆、输入调度；本次仅文档 |
 | AgentKit | 窄provider API受影响 | 新维护callback并升级pin，现有loop/手机后端保留 |
-| PortableSync / iCloud Drive | 本地apply回归 | portable协议保持，不同步助理身份/ledger/scope/屏蔽集 |
+| PortableSync / iCloud Drive | 新格式隔离与apply回归 | 新目录/generation仅接同格式客户端，不同步助理身份/ledger/scope/屏蔽集 |
 | Looktech Android / iOS App | 不受影响 | 独立PocketAgent，不改眼镜业务 |
 | 蓝牙 / ISP / Wi-Fi | 不受影响 | 无设备通信、媒体、电源或固件变化 |
 | schema / rpc / lt-vad | 不受影响 | 无共享消息、音频算法或binding变化 |
@@ -563,7 +579,7 @@ MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命
 
 | 阶段 / 需求模块 | 端/仓库 | 负责人 | 预计人日 | 开发分支 | 预期版本 | 提测时间 | 状态/最后核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
-| P1 数据迁移、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | v4/legacy边界、保存失败、模型wrapper/逐call ACK |
+| P1 当前格式/空主线、唯一保存/ACK、主入口、scope/steer归属 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | 当前严格schema/新命名空间、保存失败、模型wrapper/逐call ACK |
 | P2 上下文预算/摘要、来源登记基础、真实维护进度 | PocketAgent + AgentKit窄API | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1、来源DAG、provider限额API与统一pin |
 | P3 宿主显式记忆、版本依赖/搜索、纠正/遗忘交互 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1/P2、完整来源注册与撤销 |
 | P4 pending、恢复/放弃、sync/GC、性能与设备验收 | PocketAgent iOS/Core | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 已决定待开发；2026-10-14 | P1–P3、指定设备与长历史样本 |
@@ -571,4 +587,4 @@ MemoryScope明确为global/workspace(UUID)；MemoryOrigin区分panel、明确命
 | 并行委派、多设备身份/记忆同步 | PocketAgent调度/sync | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 后续扩展 | 新资源owner、portable并发与双设备验证 |
 | 主动跟进、持续语音、云端常驻 | 待确认 | 待确认 | 待估算 | 待确认 | 待确认 | 待确认 | 本期未纳入 | 新需求/运行与授权设计 |
 
-用户已确认“单入口＋长期记忆”“先不改代码”，并明确要求多模型讨论后确定实现细节。上文是技术方案决定，本轮继续只交付方案。负责人、人日、版本与提测日期仍待实际排期；不阻塞契约收敛。自动学习默认写入、并行/主动任务和云端托管属于新的产品范围，未纳入本期。
+用户已确认“单入口＋长期记忆”“先不改代码”，并明确“直接 breakingchange”，并明确要求多模型讨论后确定实现细节。上文是技术方案决定，本轮继续只交付方案。负责人、人日、版本与提测日期仍待实际排期；不阻塞契约收敛。自动学习默认写入、并行/主动任务和云端托管属于新的产品范围，未纳入本期。

@@ -8,7 +8,7 @@ Grok Bot and OpenAI dots, and fixed-revision architecture research for OpenClaw,
 Hermes, the OpenMuse variants, and nanoMuse/OpenMinis iOS. It distinguishes live
 composition from standalone modules, future design, and reused frameworks.
 The implementation contract continues the AgentKit loop and the existing phone
-execution path. It adds a default assistant entry and extends the same
+execution path. It adds a default assistant entry and defines a new strictly decoded
 ChatController-owned atomic history with local scope/dependency rows, explicit
 memory, validated compaction metadata and one pending-next request. Startup
 permits and awaited transcript commit barriers preserve the no-replay boundary.
@@ -17,17 +17,21 @@ known dependency impact before excluding sources. Model memory writes remain
 host-controlled. Context preparation needs one narrow bounded provider callback
 API, without replacing the loop. Opus 5.5 xhigh, DeepSeek Flash high and Grok 4.7
 high completed two discussion rounds; GPT-6 Astra xhigh and Fable 5.1 xhigh
-reviewed and closed the design blockers. File locations, failure paths and P1–P4
-implementation/acceptance steps are recorded in that plan. This is documentation
-only; the current multi-session behavior and execution contracts below remain
+reviewed the preceding contract and closed its design blockers. The user then
+authorized a clean breaking data format without legacy compatibility or
+migration; that scope update is now recorded in the plan. File locations, failure
+paths and P1–P4 implementation/acceptance steps are recorded in that plan. This
+is documentation only; the current multi-session behavior and execution contracts below remain
 the implemented baseline.
 
 Native provider management on a dedicated page, provider/model selection per
 conversation, iCloud Drive synchronization of portable data, reproducible IPA
 builds and AltStore Classic/SideStore source publication. Borealin/PocketAgent is
-public following the user's authorization on 2026-10-11. Existing installed conversations and local API
-settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
-remain outside this iteration.
+public following the user's authorization on 2026-10-11. The planned assistant
+release uses an empty assistant-v1 namespace with mandatory current-schema
+fields. Old history and provider settings are not automatically adopted; new
+provider IDs use current Keychain references without legacy-ID migration. Siri
+and arbitrary on-phone XCTest compilation remain outside this iteration.
 
 Setup must use one Base URL for standard model services, with Sub2API and protocol
 presets, clear model-loading outcomes and manual fallback. iCloud setup proposes
@@ -96,22 +100,22 @@ current history with optional fields while retaining its current version;
 image bytes remain outside portable synchronization. The earlier teardown fix
 did not include this UI rewrite.
 
-This revision must preserve every existing conversation/message ID, message
-content, draft, selection and attribution. Back up the installed history before
-upgrade, install using the same local bundle/signing identity, and compare the
-original records after migration and device checks. User photos use protected
-local binary files and explicit metadata in the existing atomic history; image
-capability is checked against the accepted turn's frozen configuration. Failed
-import/send retains the user's draft. Image-only sends and image steering use
-AgentKit's existing image fields. Portable sync carries no image bytes or local
-paths; attachment-unavailable placeholders and retention of unchanged local
-attachments are part of compatibility validation.
+The assistant release is an explicitly authorized breaking change. It supersedes
+prior preserve-on-upgrade requirements: no historical decoder, field backfill,
+legacy deduplication/import, upgrade backup or multi-version migration matrix.
+Use an assistant-v1 local namespace and separate assistant-v1 portable cloud
+folder/envelope; prior client formats are rejected rather than converted. Old
+folders are not active data sources and are not automatically removed. New
+current-format messages keep their IDs, order and call/result adjacency; crash
+recovery and storage failure handling remain required.
 
-The user explicitly removed multi-version history compatibility from this
-unreleased iteration. Preserve the currently installed records through one
-upgrade; do not build or maintain a general legacy-version compatibility layer
-or expand the old-format test matrix. Existing portable merging remains a
-current-data integrity requirement.
+User photos use protected local binary files and explicit metadata in the new
+atomic history; image capability is checked against the accepted turn's frozen
+configuration. Failed import/send retains the user's draft. Image-only sends and
+image steering use AgentKit's existing image fields. Portable sync carries no
+image bytes or local paths; missing attachments display an unavailable
+placeholder. Current-format conflict merging and deletion tombstones remain data
+integrity requirements.
 
 Normalize user images to a maximum 2048-pixel edge, apply orientation and remove
 source EXIF/GPS before storage. A message may contain up to six images. Draft and
@@ -295,9 +299,10 @@ the runtime's terminal events instead of abandoning an in-flight tool. Cleanup
 runs without inherited cancellation; failures appear in the conversation status
 without changing an already completed action into a replay.
 
-Legacy endpoint/model and Keychain settings migrate once; production defaults
-contain no private gateway or company identity. Local build overrides preserve
-the installed test app identity without committing them. Device pairing import
+Current-format provider configuration is set up directly; no legacy endpoint,
+model or Keychain-ID migration is required for the assistant release. Production
+defaults contain no private gateway or company identity. Local build overrides
+preserve the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
 
 ## Device Hub backend feasibility
@@ -1114,8 +1119,9 @@ because this introduces no glasses-device contract or algorithm change.
 ## Delivery and rejected alternatives
 
 Owner: Codex integrator and Opus 5.5 app developer.
-Verify migrations, session isolation, provider selection capture, sync deletion
-and concurrent history conflicts, build/install and actual model/tool execution.
+For the assistant release, verify empty initialization, strict current-format
+roundtrips/rejection, restart recovery, session isolation, provider selection
+capture, sync generation isolation, deletion and concurrent history conflicts, build/install and actual model/tool execution.
 IPA/source and repository scans precede GitHub push. Success-only evidence stays
 in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
