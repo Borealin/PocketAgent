@@ -354,13 +354,52 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   eligibility and the complete request estimate against the frozen target, then
   durably registers the fold's and parent summary's roots as reads of the turn's
   root; storage failures, forgets and the turn deadline stop the turn, while an
-  over-budget or changed fold only skips the new summary.
-- Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`), model
-  read-only (`memory_search`/`session_search` through AgentKit's protocol),
-  correction by ID/revision CAS, forgetting through a recomputed preview over
-  the known read graph (iterative, linear). A forget can stop only the primary
-  turn the engine is executing (preparing or running), never a queued primary
-  request or another task.
+  over-budget or changed fold only skips the new summary. When this turn's folds
+  would take the valid chain past 128 records, maintenance first commits a
+  checkpoint: a host copy receipt of the valid tip (no model request; same summary
+  bytes and anchor, exactly the eligible prefix up to it and all its roots, the tip
+  kept as parent; `builderVersion` 1001, no format change), committed by the same
+  CAS only while the tip is the current valid tip. Later validation trusts that
+  sealed receipt instead of re-walking the old chain: it recomputes the current
+  raw-prefix fingerprint, the parent's record digest from its stored body and the
+  receipt, and checks anchor, bytes, prefix and roots. Validation checks each
+  record once (roots and checkpoints downward), rejects anything on or leading
+  into a parent cycle, and requires every record to list exactly the roots of the
+  messages it covers. A remainder needing more than three folds starts with the
+  oldest three; a single segment larger than one summary input is never split, so
+  the plan stops before it. The per-request preparation lives in Core
+  (`AssistantRequestPreparer`). A provider rejection of a too-large request (400/413/
+  422 or an in-stream failure with an overflow code or explicit overflow wording;
+  never 401/403/429/5xx, rate limits or network errors) becomes
+  `ProviderContextLimit` on the main and summary paths: the turn stops without a
+  retry, model change or replay, and the text names only the status, a known code
+  and a reported limit, with request-size rejections (413) advised separately. The
+  in-stream case reads AgentKit's internal failure type through a bounded bridge
+  pinned to its shape; at the pinned SDK a bare Chat Completions SSE `error` object
+  ends the stream without a failure (a local SDK patch exists, not published). The
+  status line shows the turn's frozen model, budget source and the latest complete
+  request estimate (kept after Stop or finish; not progress or usage).
+- Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`, the
+  composer's remember mode, the editor opened from a candidate), model read-only
+  (`memory_search`/`session_search` through AgentKit's protocol), correction by
+  ID/revision CAS, forgetting through a recomputed preview over the known read
+  graph (iterative, linear) that shows the entry it computed; a selection whose
+  revision changed is refused and a changed confirmation shows the latest entry
+  for a new confirmation. A forget can stop only the primary turn the engine is
+  executing (preparing or running), never a queued primary request or another
+  task. A search plans its page from a snapshot by identity only; one owner
+  transaction then verifies it against the latest history (entry revision/scope,
+  segment digest, eligibility, masks, explicit references, the run's frozen
+  started root), registers exactly what it returns and returns that content; a
+  changed page is `stale_search`, and a failed registration, a replaced run or a
+  wrong root fails the run's commit epoch so no later tool or model request
+  follows (`too_large` returns IDs only). Remember mode (bookmark in the primary
+  composer) opens the editor with the draft and saves only on 保存, clearing the
+  draft only if unchanged. An explicit "忘掉/删除/更正…记忆" request (verb first plus
+  记忆, or `/forget`) opens a sheet of up to five lexical matches in the current
+  scope; the user picks one for the editor or the forget panel; ordinary sentences
+  are sent. Script phone helpers pass `ScriptPhoneAdmission` (tool, lease, the
+  turn's shared effect gate) for every request.
 - Clear the conversation, keep memory: the drawer's assistant row (swipe or
   menu) asks with an alert (清空对话，保留记忆 / 取消) that names what goes and
   what stays. One transaction replaces the primary line with an empty one (new
@@ -420,12 +459,8 @@ confirmed clear left an empty line with the same model and project, unchanged
 tasks, memory and settings, the cleared marker was not found by the model's
 history search after a relaunch, and memory recall continued. The in-flight
 sync plan, same-ID remote refill, conflict-copy and failed-write boundaries are
-host-tested only. Known gaps
-against the plan (remember mode in the composer, multi-target candidate cards,
-rebuilding a 128-deep summary chain, revalidating read-only search results
-against a forget committed before their registration, provider context-limit
-mapping, per-turn
-estimate display, Chinese recall evaluation) are listed in the plan. Long-history numbers are host
+host-tested only. Remaining gaps and the
+2026-10-15 device results for the six follow-ups are listed in the plan. Long-history numbers are host
 measurements: per-event write p95 0.05 s at 10k messages and 0.2 s at 50k
 (110 MB file), transcript paging renders 400 messages per page.
 
