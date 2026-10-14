@@ -283,6 +283,8 @@ final class PhoneExecutor {
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
     private var compactedTaskTitle: String?
+    /// Effects of the phone call in progress (calls are serial).
+    private var callEffects = PhoneCallEffects()
     init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool,
          deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
@@ -407,6 +409,7 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
+        callEffects.preparationSent()
         try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
         try proceed()
         try await Task.sleep(for: .milliseconds(300))
@@ -538,7 +541,8 @@ final class PhoneExecutor {
     /// revoked or cancelled action never issues a new effect. An effect that
     /// was already sent is reported as unconfirmed and never repeated.
     private func perform(_ call: AgentToolCall, lease: ScriptLease? = nil) async throws -> (content: String, isError: Bool) {
-        var issued = false
+        callEffects = PhoneCallEffects()
+        var issued: Bool { callEffects.issued }
         var openedBundle: String?
         var expectedInput: (identity: String, text: String)?
         var submittedInput = false
@@ -553,11 +557,11 @@ final class PhoneExecutor {
         }
         func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
-            let before = issued
-            issued = true
+            let before = callEffects.beginAction()
             do { try await operation() } catch PhoneObservationIssue.targetCovered {
-                // The native preflight refused before any touch was sent.
-                issued = before
+                // The native preflight refused before any touch was sent; an
+                // executor preparation gesture already sent stays reported.
+                callEffects.refusedBeforeTouch(restoring: before)
                 throw PhoneObservationIssue.targetCovered
             }
             try proceed()

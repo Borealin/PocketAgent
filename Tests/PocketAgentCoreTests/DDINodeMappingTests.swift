@@ -74,3 +74,30 @@ struct DDINodeMappingTests {
         #expect(DDINodeMapping.confirmsInput(["value": "你好🌟"], text: "你好🌟"))
     }
 }
+
+/// What a phone call reports as sent: a refused touch is not an action, but an
+/// executor preparation gesture that was sent stays reported.
+struct PhoneCallEffectsTests {
+    @Test func refusedTouchRestoresOnlyTheActionFlag() {
+        var plain = PhoneCallEffects()
+        let before = plain.beginAction()
+        plain.refusedBeforeTouch(restoring: before)
+        #expect(!plain.issued)
+        // The task-surface swipe was sent while observing for the tap.
+        var prepared = PhoneCallEffects()
+        prepared.preparationSent()
+        let previous = prepared.beginAction()
+        prepared.refusedBeforeTouch(restoring: previous)
+        #expect(prepared.issued && !prepared.action && prepared.preparation)
+        // A second effect after a sent one keeps the earlier action reported.
+        var chain = PhoneCallEffects()
+        _ = chain.beginAction()
+        let second = chain.beginAction()
+        chain.refusedBeforeTouch(restoring: second)
+        #expect(chain.issued && chain.action)
+        // Preparation alone (e.g. cancelled or failed observation) is reported.
+        var onlyPreparation = PhoneCallEffects()
+        onlyPreparation.preparationSent()
+        #expect(onlyPreparation.issued)
+    }
+}

@@ -6,6 +6,26 @@ nonisolated enum PhoneBackendKind: String, CaseIterable, Codable, Sendable {
     var label: String { self == .ddi ? "DDI" : "WDA" }
 }
 
+/// Effects of one phone tool call: the requested action and any executor
+/// preparation gesture sent while observing for it (the task-surface swipe on
+/// Dynamic Island layouts). A refusal before the requested touch restores only
+/// the action flag; a preparation gesture that was sent stays reported in every
+/// outcome, including cancellation and failed observation.
+nonisolated struct PhoneCallEffects: Equatable, Sendable {
+    private(set) var action = false
+    private(set) var preparation = false
+    var issued: Bool { action || preparation }
+
+    /// Marks the requested action as sent; returns the previous action flag.
+    mutating func beginAction() -> Bool {
+        defer { action = true }
+        return action
+    }
+    mutating func refusedBeforeTouch(restoring previous: Bool) { action = previous }
+    /// Called before the gesture is sent: a failed send may still have touched.
+    mutating func preparationSent() { preparation = true }
+}
+
 nonisolated enum DDIResultError: LocalizedError, Equatable {
     case outsideCount
     var errorDescription: String? { "DDI 观察结果格式无效：缺少有效的应用外元素计数。" }
