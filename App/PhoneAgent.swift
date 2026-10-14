@@ -142,7 +142,10 @@ extension Model {
                 activeAgentRuntime = runtime
                 let watchdog = Task {
                     do { try await Task.sleep(for: .seconds(max(0, deadline.remaining))) } catch { return }
-                    log("deadline_exceeded"); await runtime.cancel()
+                    log("deadline_exceeded")
+                    // The turn's own limit, not a user Stop: it is the reported cause.
+                    if status.value.failure == nil { status.value.failure = TurnDeadlineReached().errorDescription }
+                    await runtime.cancel()
                 }
                 defer { watchdog.cancel() }
                 let events = await runtime.start(AgentRunRequest(conversationID: conversationID, promptID: promptID,
