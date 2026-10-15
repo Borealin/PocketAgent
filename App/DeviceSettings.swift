@@ -81,6 +81,8 @@ enum DeviceSettings {
     static var providerLimitProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentProviderLimitProbe") }
     /// The script helper gate on the device (`ScriptGateProbe`).
     static var scriptGateProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentScriptGateProbe") }
+    /// Context maintenance end to end on isolated data (`SummaryMaintenanceProbe`).
+    static var summaryMaintenanceProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentSummaryMaintenanceProbe") }
     /// Metadata diagnostics (run log and native log) for this launch only,
     /// without changing the saved setting.
     static var diagnosticsEnabled: Bool {
@@ -112,10 +114,35 @@ enum DeviceSettings {
         ProcessInfo.processInfo.arguments.contains("-PocketAgentDropInputReleaseConfirmation")
     }
 
+    /// Writes `Documents/summary-maintenance-probe.json`: the probe's cases
+    /// with a fresh run nonce, start and end time, process and build.
+    @MainActor
+    private static func runSummaryMaintenanceProbe() async {
+        try? await Task.sleep(for: .seconds(2))
+        let started = Date()
+        var report = await SummaryMaintenanceProbe.report()
+        #if DEBUG
+        let configuration = "Debug"
+        #else
+        let configuration = "Release"
+        #endif
+        let info = Bundle.main.infoDictionary ?? [:]
+        report["configuration"] = "device \(configuration) \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
+        report["runNonce"] = UUID().uuidString
+        report["pid"] = Int(ProcessInfo.processInfo.processIdentifier)
+        let format = ISO8601DateFormatter()
+        report["startedAt"] = format.string(from: started)
+        report["endedAt"] = format.string(from: Date())
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("summary-maintenance-probe.json")
+        try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+    }
+
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {
         if scriptGateProbe { await ScriptGateProbe.runAndReport(); return }
         if providerLimitProbe { await ProviderLimitProbe.runAndReport(); return }
+        if summaryMaintenanceProbe { await runSummaryMaintenanceProbe(); return }
         guard longHistoryBenchmark else { return }
         // Let launch finish first; the run yields between samples.
         try? await Task.sleep(for: .seconds(3))
