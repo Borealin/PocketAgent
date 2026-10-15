@@ -589,7 +589,8 @@ Confirmed problems found during implementation review and fixed:
   scan or sampled decodes would accept.
 - A running primary turn stopped by a forget reported the phone run's generic
   "手机助手未完成本轮". A started turn that was revoked now reports the
-  revoked-source reason (`StartedTurnOutcome`).
+  revoked-source reason (`StartedTurnOutcome`; Core regression, the new text
+  was not re-run on the device).
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a
