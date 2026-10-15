@@ -373,25 +373,49 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   (CAS commit), fresh memory block per request, forget filtering, stale phone
   screens projected, one estimator with bounded per-model usage calibration;
   known windows/explicit ceilings are hard guards, unknown windows only a soft
-  target. Before each summary fold is sent, `SummaryMaintenance` checks storage,
-  explicit forgets (current root, fold sources, the extended summary), current
-  eligibility and the complete request estimate against the frozen target, then
-  durably registers the fold's and parent summary's roots as reads of the turn's
-  root; storage failures, forgets and the turn deadline stop the turn, while an
-  over-budget or changed fold only skips the new summary. When this turn's folds
+  target. A summary covers an exact prefix of the eligible messages ending at a
+  safe cut: a segment end, or a point inside a root where repairing each side
+  alone equals repairing the whole (never at a tool result; a segment holding a
+  result detached from its call's group has no inner cut). Raw history continues
+  exactly there, so a root may be partly summarized and partly raw
+  (`builderVersion` 2; records of other versions stay in the file unused and the
+  chain is rebuilt from raw history, at most three folds per turn, while a known
+  ceiling may refuse main requests). Planning uses the turn's calibrated estimate:
+  the recent tail keeps whole segments within 35% of the target, or, when the
+  newest alone exceeds it, its longest suffix of whole groups; older history is
+  folded oldest first in at most three folds of whole segments or windows of whole
+  groups, each payload within 60% of the target (a host packing window), the first
+  fold's complete request with the actual previous summary within the target and
+  estimated once; later folds open within the window and are checked with the real
+  summary before dispatch, so their progress is not guaranteed. A group larger
+  than the window, or (first fold) than the room the previous summary leaves,
+  stops packing before it with a typed maintenance note; nothing is split,
+  truncated or skipped. If a forget invalidates the summary a request includes,
+  the request also drops every raw message of roots that summary covered (the
+  rest of a cut root, or a later run of an interleaved root), registers none of
+  them and the status says so (`context_exclusion` in the opt-in log); history is
+  unchanged. Before each summary fold is sent, `SummaryMaintenance` checks
+  storage, explicit forgets (current root, fold sources, the extended summary),
+  that the fold is exactly the eligible messages right after the valid tip's
+  coverage (same content, each piece within its root, ending at a safe cut) and
+  the complete request estimate against the frozen target, then durably registers
+  the fold's roots (once each, in order) and the parent summary's roots as reads
+  of the turn's root; storage failures, forgets and the turn deadline stop the
+  turn, while an over-budget or changed fold only skips the new summary. When this turn's folds
   would take the valid chain past 128 records, maintenance first commits a
   checkpoint: a host copy receipt of the valid tip (no model request; same summary
   bytes and anchor, exactly the eligible prefix up to it and all its roots, the tip
-  kept as parent; `builderVersion` 1001, no format change), committed by the same
+  kept as parent; `builderVersion` 1002, no format change), committed by the same
   CAS only while the tip is the current valid tip. Later validation trusts that
   sealed receipt instead of re-walking the old chain: it recomputes the current
   raw-prefix fingerprint, the parent's record digest from its stored body and the
   receipt, and checks anchor, bytes, prefix and roots. Validation checks each
   record once (roots and checkpoints downward), rejects anything on or leading
-  into a parent cycle, and requires every record to list exactly the roots of the
-  messages it covers. A remainder needing more than three folds starts with the
-  oldest three; a single segment larger than one summary input is never split, so
-  the plan stops before it. The per-request preparation lives in Core
+  into a parent cycle, and requires every record (checkpoints included) to end at
+  a safe cut and list exactly the roots of the messages it covers. A remainder
+  needing more than three folds starts with the oldest three. The forget preview
+  counts only current-version summaries as newly invalidated (the commit removes
+  every affected record). The per-request preparation lives in Core
   (`AssistantRequestPreparer`). A provider rejection of a too-large request (400/413/
   422 or an in-stream failure with an overflow code or explicit overflow wording;
   never 401/403/429/5xx, rate limits or network errors) becomes
@@ -445,7 +469,7 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
 
-Verification scope (2026-10-14; follow-ups 2026-10-15): Core suite (312 tests, mock transports) passes
+Verification scope (2026-10-14; follow-ups 2026-10-15): Core suite (381 tests in 77 suites, mock transports) passes
 on the Mac host, including the commit gates through the pinned AgentRuntime,
 crash points of the pending state machine, 12k-root dependency chains, earlier
 version-1 settings files keeping IDs/origins/default/budgets, the summary
@@ -494,8 +518,10 @@ the host refusal at a 1000-token ceiling (restored afterwards), Stop and restart
 without replay, and clearing the conversation on the final build. An over-budget
 fold was refused on the device at a 4000-token ceiling: the maintenance note was
 shown, no fold read was registered, no summary was written and the main guard
-then refused. At 1000–3000 the planner emits no fold (every test segment exceeds
-the fold budget), so only the main guard applies. A forget during maintenance
+then refused. At 1000–3000 that earlier planner emitted no fold (every test
+segment exceeded the fold budget), so only the main guard applied; the current
+planner folds safe units before an oversized group and reports the block (Core
+only, not yet on the device). A forget during maintenance
 was exercised only with fault injection: the launch argument
 `-PocketAgentHoldMaintenanceDispatch` makes each fold wait 20 s (cancellable)
 after its read registration and before its request; a forget confirmed in that
@@ -518,7 +544,14 @@ An isolated provider fixture (`-PocketAgentProviderLimitProbe`) mapped bare SSE
 error objects and strings through the pinned client in the optimized iOS build
 on both paths (the summary path through the `StreamingSummary` producer, not
 the full `SummaryMaintenance` compare-and-swap); it is not a service actually
-rejecting a request, and no real provider overflow was induced. Device long
+rejecting a request, and no real provider overflow was induced. The same fixture
+and an isolated maintenance fixture (`-PocketAgentSummaryMaintenanceProbe`: an
+isolated owner through the production writer to a temporary file, the real
+`SummaryMaintenance.run`, the pinned `consume` over injected responses) passed on
+the df53187 build: two committed folds reloading to a valid tip, a typed summary
+limit, a Stop and a revocation while a fold streams, and a source edit refused by
+the commit's compare-and-swap (injected responses; not a real provider). The
+E build adds a sixth case (one huge root folded over two turns). Device long
 history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
 the production writer, three runs): a patched event at 50k messages records in
 p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
@@ -550,8 +583,11 @@ view over synthetic 10k/50k histories is timed with
 `-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
 load-blocked, real history unchanged). Memory search no longer counts single
 characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
-evaluation table). Remaining boundaries (oversized single segments,
-model-change recall) are listed in the plan.
+evaluation table); it stays lexical: a general Traditional/Simplified script
+conversion was not adopted (no measurable gain on the all-Simplified table,
+many-to-one ambiguity, search cost and device availability risk), and the table
+runs as a regression. Remaining boundaries (oversized single groups,
+model-change recall, partial coverage on the device) are listed in the plan.
 Transcript paging renders 400 messages per page. A script turn on the 12 mini
 once stayed cancelling for over ten minutes until a relaunch (interrupted,
 nothing replayed); its stalled stage and the bounds added since are under
@@ -602,8 +638,24 @@ Confirmed problems found during implementation review and fixed:
   scan or sampled decodes would accept.
 - A running primary turn stopped by a forget reported the phone run's generic
   "手机助手未完成本轮". A started turn that was revoked now reports the
-  revoked-source reason (`StartedTurnOutcome`; Core regression, the new text
-  was not re-run on the device).
+  revoked-source reason (`StartedTurnOutcome`; Core regression). On the 12 mini
+  (df53187 build) the acceptance tooling did not open the memory panel while a
+  permitted turn that had read the entry ran `wait` (reported refusals: a child
+  element of another process with the keyboard up, and the press target not
+  being the frame-centre hit element; a screenshot showed the system task banner
+  over the toolbar; the exact cause is not located), so the new text is still
+  unverified there. The launch-only `-PocketAgentForgetDuringRun <PKATEST_marker>`
+  drives the real path: when the turn starts a `wait` call after its real request
+  read exactly the current revision of the one own entry with that marker, and
+  the panel's own preview says the running turn stops, a later main-actor turn
+  rechecks the same guards and calls `commitForget` once (no retry; booleans in
+  the run's log).
+- A Stop while a request's preparation (memory refresh, projections, phone
+  observation) was suspended still handed the request to the provider once the
+  preparation returned (host probe: one provider call after cancellation). The
+  gated model now checks cancellation after each await before dispatch; a
+  regression suspends the preparation, stops, releases it and requires no
+  provider call and no stream trace (the control dispatches once).
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a
@@ -1121,6 +1173,30 @@ and test project only; injected cases labelled as such):
 The original stall was not reproduced; these runs prove the bounds and the stop
 path, not why cryptexd did not answer. One run ended on the provider's
 "Upstream response stream was interrupted" (cause unknown, nothing retried).
+
+Refusals before dispatch, stream metadata and Stop wording. A phone call refused
+before it reaches the device (too little of the turn left for the call and its
+cleanup, or native entry refusing a passed expiry, matched by its exact error) is
+typed `PhoneCallNotDispatched`: the result says 动作未执行 and the action flag is
+restored only when no native call of that operation was dispatched (a composite
+primitive whose first call acted stays reported; a timeout or cancellation never
+rolls back). With opt-in diagnostics each main request and summary fold logs
+`model_stream` metadata: event kinds and counts, first-event and end times, outcome,
+terminal reason and a failure category (cancelled, URL error code, HTTP status,
+provider response, allowlisted provider code, context limit, other), never
+content; events delivered late go to their own run's log with origin time and a
+per-run sequence. A Stop before the startup permit says
+"已在准备阶段停止：本轮主请求未开始，不会再有新的手机操作。" without claiming no
+summary request was sent; routing is unchanged. 12 mini (df53187 dev build, real UI
+and model, injection labelled): a real `tap` refused by
+`-PocketAgentRefuseNextDDIDispatch tap` returned an error result with the
+insufficient-time reason and no native entry for it; a Stop during the 20 s
+pre-dispatch hold and one at the first real summary text (20 text events
+received, transfer cancelled, no terminal) both left the turn unpermitted, with no
+main request and no summary, the draft restored exactly and the new wording in
+the detail and the UI; real main and summary requests logged only the allowlisted
+fields. The provider interruption's cause stays unknown; timeouts, HTTP/2 and
+retries are unchanged.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
