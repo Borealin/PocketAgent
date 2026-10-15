@@ -1101,10 +1101,13 @@ earlier description (a screen read after `wait`) was not supported by the log;
 the 4 s/35 s DDI call limits existed in that source but never applied to this
 stage.
 
-Preparation now bounds every native step by a wall-clock expiry fixed in Swift
-before the worker thread starts and cut by the turn's end; native code measures
-the window inside the runtime future (handoff delay deducted, passed expiry
-refused before connecting). Image check 15 s (`pocket_ddi_installed`; a failed
+The image check, a missing image's mount and the app inventory read now get a
+wall-clock expiry fixed in Swift before the worker thread starts and cut by the
+turn's end; native code measures the window inside the runtime future (handoff
+delay deducted, passed expiry refused before connecting). Opening the DDI
+session (`pocket_ddi_open`) keeps its own native 30 s setup deadline; Stop is
+checked before and after it, not while it runs, so that bounded setup may finish
+before Stop settles. Image check 15 s (`pocket_ddi_installed`; a failed
 or timed-out check is an error, never "not installed"); a missing image's
 downloads and mount share 180 s (`DDIImagePreparation`), downloads race a
 cancellable URLSession task group against the turn's stop check and are
@@ -1133,10 +1136,25 @@ acting. Opt-in metadata diagnostics (`-PocketAgentDiagnosticLogs`) record native
 stage and heartbeat progress, call entry/exit, the queue, the script stop path,
 preparation and finish steps; local fault-injection launch arguments stall one
 stage once per session, lower the call cap, or drop the confirmation of an
-already-sent touch release. Proof so far: native host tests over the real
-primitives with fake services (not a real unanswered cryptexd, not the whole
-cleanup-to-latch chain), Core tests for the budgets and the queue, and builds;
-device acceptance is pending.
+already-sent touch release. Native host tests cover the real primitives with
+fake services (not a real unanswered cryptexd); Core tests cover the budgets and
+the queue.
+
+12 mini acceptance (dev build of 698b4fa, opt-in diagnostics, synthetic primary
+and test project only; injected cases labelled as such):
+
+| Case | Observed |
+|---|---|
+| Stop during an injected AX-read stall | Native call returned `cancelled` 40 ms after Stop; turn interrupted; finish (stop observing, return, close) 41 ms; no later action |
+| Injected stall, default and lowered call cap | Call ended at 35.006 s and, with a 5 s cap, 5.005 s as `budget`; the model's next observation succeeded |
+| Injected stall in the geometry request and in the screenshot | Next call on the same native session reconnected that client once and succeeded |
+| Dropped confirmation after a real touch release | `cleanup_input` reported unconfirmed, the app latched; next turn on a new connection without relaunch: observation worked, `open_app` and `press_home` refused before dispatch (no native call) |
+| Stop during a script (sleeping, and while its helper's observation stalled) | Lease revoked, guests 0 (3 terminated), `serving.value` settled in 0 ms, terminal 0.24–0.34 s after Stop, no second helper call |
+| Ordinary turns | Image check 9–19 ms on every turn; no stall reproduced |
+
+The original stall was not reproduced; these runs prove the bounds and the stop
+path, not why cryptexd did not answer. One run ended on the provider's
+"Upstream response stream was interrupted" (cause unknown, nothing retried).
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
