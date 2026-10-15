@@ -522,12 +522,27 @@ rejecting a request, and no real provider overflow was induced. Device long
 history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
 the production writer, three runs): a patched event at 50k messages records in
 p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
-image. Whole writes stay above 0.2 s at 50k: the first write of a file that
-cannot be adopted takes 0.65–0.67 s (was 1.2 s; encoding now in parallel) and a
-warm whole write 0.31–0.36 s, mostly the 123 MB atomic write, both after an
-outside change to the file and for the periodic whole write (the benchmark sets
-the adopted writer's interval to 4 so the same path runs after the fourth patch;
-production keeps every 512 patches, never run 512 times on the device). After adoption (0.48–0.58 s off the main actor at launch,
+image. Whole writes no longer assemble the image: the layout's pieces stream in
+file order through one 4 MiB buffer into an exclusive temporary file confirmed
+as class C, then fsync, checked close and rename (`HistoryStorage.writeWhole`,
+`HistoryLayoutEmitter`); the bytes are those of `image()`, a failure before the
+rename leaves the published file and the writer's baseline as they were, and
+nothing throws after it. They still stay above 0.2 s at 50k (123 MB; dev build
+of 8bccbdd, three runs): a warm whole write after an outside change, or the
+periodic one (benchmark interval 4, production every 512 patches, never run 512
+times on the device), takes 0.27–0.46 s, of which planning 0.07 s, producing
+the pieces 0.013–0.015 s, the 30 write calls 0.14–0.29 s and fsync
+0.013–0.056 s; the first write of a file that cannot be adopted takes
+0.64–0.83 s, of which planning 0.41–0.45 s. Same-layout pairs later in each run
+(Foundation `.atomic` 0.21–0.94 s with 0.023–0.026 s assembling the image,
+the region writer 0.22–0.92 s, the explicit-call floor 0.19–1.15 s) vary with
+the device's write speed and show no consistent difference between the
+strategies; the remaining cost is writing 123 MB, measured for these strategies
+on these runs only. The region writer's explicit buffer is bounded at 4 MiB;
+process memory was not measured. The public swift-foundation source also calls
+plain `fsync` before its rename; the shipped iOS implementation was not
+inspected. Next concrete options, not implemented: fewer whole writes or fewer
+bytes per whole write (for example the 12% capacity spare). After adoption (0.48–0.58 s off the main actor at launch,
 after the 1.9 s strict load) the first write is a 0.10–0.11 s patch; appending a
 session or a later session overflowing patches in about 0.085 s (one run 0.37 s).
 The capacity makes the 50k file 123 MB instead of 110 MB. The real transcript
@@ -1096,7 +1111,7 @@ and test project only; injected cases labelled as such):
 
 | Case | Observed |
 |---|---|
-| Stop during an injected AX-read stall | Native call returned `cancelled` 40 ms after Stop; turn interrupted; finish (stop observing, return, close) 41 ms; no later action |
+| Stop during an injected AX-read stall | Native call returned `cancelled` 34 ms after the cancel request (raw log); 157 ms from Stop to the session closed, of which the finish steps (stop observing, return, close) 41 ms; turn interrupted; no later action |
 | Injected stall, default and lowered call cap | Call ended at 35.006 s and, with a 5 s cap, 5.005 s as `budget`; the model's next observation succeeded |
 | Injected stall in the geometry request and in the screenshot | Next call on the same native session reconnected that client once and succeeded |
 | Dropped confirmation after a real touch release | `cleanup_input` reported unconfirmed, the app latched; next turn on a new connection without relaunch: observation worked, `open_app` and `press_home` refused before dispatch (no native call) |
