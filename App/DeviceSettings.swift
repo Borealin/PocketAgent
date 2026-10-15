@@ -60,9 +60,29 @@ enum DeviceSettings {
     static var maintenanceDispatchHold: Duration? {
         ProcessInfo.processInfo.arguments.contains("-PocketAgentHoldMaintenanceDispatch") ? .seconds(20) : nil
     }
+    /// Local acceptance launch arguments only (not reachable from the UI):
+    /// record the kinds, sizes and timing of each maintenance fold's stream
+    /// events, no content, in `Documents/maintenance-stream-*.json`.
+    static var recordMaintenanceStream: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentRecordMaintenanceStream") }
+    /// Fault injection: a fold sends no provider request and receives a new
+    /// summary text increment every 3 s instead, so the real 150 s
+    /// maintenance deadline (not the 45 s idle limit) ends it.
+    static var injectSlowSummaryStream: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentInjectSlowSummaryStream") }
+    /// At the first summary text received from the provider, request the same
+    /// stop as the Stop button for the primary line.
+    static var stopAtFirstSummaryText: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentStopAtFirstSummaryText") }
+    static let diagnosticStop = Notification.Name("PocketAgent.diagnosticStop")
+    /// After a run's first script phone call, the next history write fails
+    /// once (fault injection) on a run event, so storage becomes dirty while
+    /// the script still runs.
+    static var dirtyAfterFirstScriptCall: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentDirtyAfterFirstScriptCall") }
+    static let diagnosticDirty = Notification.Name("PocketAgent.diagnosticDirty")
+    /// The script helper gate on the device (`ScriptGateProbe`).
+    static var scriptGateProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentScriptGateProbe") }
 
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {
+        if scriptGateProbe { await ScriptGateProbe.runAndReport(); return }
         guard longHistoryBenchmark else { return }
         // Let launch finish first; the run yields between samples.
         try? await Task.sleep(for: .seconds(3))
