@@ -54,30 +54,31 @@ fn key_sequence(v: &Json) -> Result<(Vec<u16>, Vec<u16>), IdeviceError> {
     Ok((keys, modifiers))
 }
 
-/// Stage codes reported by `pocket_ddi_progress`: metadata only.
+/// Stage codes reported by `pocket_ddi_progress`: metadata only. Crate-
+/// visible, so they stay out of the generated C header.
 pub(crate) mod stage {
-    pub const IDLE: u32 = 0;
-    pub const ADMIT: u32 = 1;
-    pub const GEOMETRY: u32 = 2;
-    pub const AX_CONNECT: u32 = 3;
-    pub const AX_SETUP: u32 = 4;
+    pub(crate) const IDLE: u32 = 0;
+    pub(crate) const ADMIT: u32 = 1;
+    pub(crate) const GEOMETRY: u32 = 2;
+    pub(crate) const AX_CONNECT: u32 = 3;
+    pub(crate) const AX_SETUP: u32 = 4;
     /// Detail: the AX request kind.
-    pub const AX_READ: u32 = 5;
-    pub const PROCESSES: u32 = 6;
-    pub const LAUNCH: u32 = 7;
-    pub const CLIPBOARD: u32 = 8;
-    pub const TOUCH: u32 = 9;
-    pub const BUTTON: u32 = 10;
-    pub const KEYBOARD: u32 = 11;
-    pub const WAIT: u32 = 12;
+    pub(crate) const AX_READ: u32 = 5;
+    pub(crate) const PROCESSES: u32 = 6;
+    pub(crate) const LAUNCH: u32 = 7;
+    pub(crate) const CLIPBOARD: u32 = 8;
+    pub(crate) const TOUCH: u32 = 9;
+    pub(crate) const BUTTON: u32 = 10;
+    pub(crate) const KEYBOARD: u32 = 11;
+    pub(crate) const WAIT: u32 = 12;
     /// Detail: the channel id.
-    pub const RECONNECT: u32 = 13;
-    pub const CLEANUP_TOUCH: u32 = 14;
-    pub const CLEANUP_HOME: u32 = 15;
-    pub const CLEANUP_KEYBOARD: u32 = 16;
-    pub const AX_CLOSE: u32 = 17;
-    pub const SCREENSHOT: u32 = 18;
-    pub const ENCODE: u32 = 19;
+    pub(crate) const RECONNECT: u32 = 13;
+    pub(crate) const CLEANUP_TOUCH: u32 = 14;
+    pub(crate) const CLEANUP_HOME: u32 = 15;
+    pub(crate) const CLEANUP_KEYBOARD: u32 = 16;
+    pub(crate) const AX_CLOSE: u32 = 17;
+    pub(crate) const SCREENSHOT: u32 = 18;
+    pub(crate) const ENCODE: u32 = 19;
 }
 
 /// Where the current call is, readable while it runs. Atomics only.
@@ -323,12 +324,12 @@ pub(crate) struct Channel<T> {
     dirty: bool,
 }
 pub(crate) mod channel {
-    pub const INFO: u32 = 1;
-    pub const APPS: u32 = 2;
-    pub const CAPTURE: u32 = 3;
-    pub const HID: u32 = 4;
-    pub const BUTTONS: u32 = 5;
-    pub const KEYBOARD: u32 = 6;
+    pub(crate) const INFO: u32 = 1;
+    pub(crate) const APPS: u32 = 2;
+    pub(crate) const CAPTURE: u32 = 3;
+    pub(crate) const HID: u32 = 4;
+    pub(crate) const BUTTONS: u32 = 5;
+    pub(crate) const KEYBOARD: u32 = 6;
 }
 impl<T: Reconnect> Channel<T> {
     fn new(client: T, port: u16, id: u32) -> Self {
