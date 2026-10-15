@@ -176,6 +176,9 @@ nonisolated enum ScriptPhoneAdmission {
 
 /// Phone request handler supplied by the turn (PhoneExecutor.executeScript).
 typealias ScriptPhoneHandler = @Sendable (AgentToolCall) async -> (content: String, isError: Bool, denied: Bool)
+/// Metadata-only run-log events from a script run's stop path (names, counts,
+/// milliseconds; never arguments, output or paths).
+typealias ScriptDiagnostic = @Sendable (String, [String: any Sendable]) -> Void
 
 /// Serves one run's phone requests from files the guest writes in the run's
 /// bridge directory. Requests are read without following links, each ID is

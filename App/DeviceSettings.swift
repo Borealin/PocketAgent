@@ -81,6 +81,32 @@ enum DeviceSettings {
     static var providerLimitProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentProviderLimitProbe") }
     /// The script helper gate on the device (`ScriptGateProbe`).
     static var scriptGateProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentScriptGateProbe") }
+    /// Metadata diagnostics (run log and native log) for this launch only,
+    /// without changing the saved setting.
+    static var diagnosticsEnabled: Bool {
+        saveDiagnosticLogs || ProcessInfo.processInfo.arguments.contains("-PocketAgentDiagnosticLogs")
+    }
+    private static func argument(after name: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+    /// Lowers the cap of one native DDI call (seconds); the expiry is computed
+    /// and enforced exactly as in production.
+    static var ddiCallBudgetCap: TimeInterval {
+        argument(after: "-PocketAgentDDICallBudgetCap").flatMap(TimeInterval.init).map { max(1, $0) } ?? DDICallBudget.cap
+    }
+    /// Fault injection: one DDI stage (`ax_read`, `geometry` or `screenshot`)
+    /// stalls once per native session until Stop or the call's expiry ends it.
+    static var injectDDIStall: String? {
+        argument(after: "-PocketAgentInjectDDIStall").flatMap { ["ax_read", "geometry", "screenshot"].contains($0) ? $0 : nil }
+    }
+    /// Fault injection: the first touch release of a native session is sent,
+    /// then its confirmation is treated as lost, so the real unconfirmed-release
+    /// path runs. No input is left held.
+    static var dropInputReleaseConfirmation: Bool {
+        ProcessInfo.processInfo.arguments.contains("-PocketAgentDropInputReleaseConfirmation")
+    }
 
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {

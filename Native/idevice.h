@@ -49,6 +49,64 @@
 
 #define MAX_BYTES ((20 * 1024) * 1024)
 
+#define IDLE 0
+
+#define ADMIT 1
+
+#define GEOMETRY 2
+
+#define AX_CONNECT 3
+
+#define AX_SETUP 4
+
+/**
+ * Detail: the AX request kind.
+ */
+#define AX_READ 5
+
+#define PROCESSES 6
+
+#define LAUNCH 7
+
+#define CLIPBOARD 8
+
+#define TOUCH 9
+
+#define BUTTON 10
+
+#define KEYBOARD 11
+
+#define KEYBOARD 6
+
+#define WAIT 12
+
+/**
+ * Detail: the channel id.
+ */
+#define RECONNECT 13
+
+#define CLEANUP_TOUCH 14
+
+#define CLEANUP_HOME 15
+
+#define CLEANUP_KEYBOARD 16
+
+#define AX_CLOSE 17
+
+#define SCREENSHOT 18
+
+#define ENCODE 19
+
+#define INFO 1
+
+#define APPS 2
+
+#define CAPTURE 3
+
+#define HID 4
+
+#define BUTTONS 5
+
 typedef enum AfcFopenMode {
   AfcRdOnly = 1,
   AfcRw = 2,
@@ -1183,6 +1241,18 @@ typedef struct WdaBridgeEndpointsC {
   uint16_t device_http;
   uint16_t device_mjpeg;
 } WdaBridgeEndpointsC;
+
+typedef struct PocketDDIProgress {
+  uint64_t seq;
+  bool in_call;
+  uint32_t stage;
+  uint32_t detail;
+  uint64_t stage_age_ms;
+  uint64_t beats;
+  uint64_t beat_age_ms;
+  uint32_t reconnects;
+  bool input_unconfirmed;
+} PocketDDIProgress;
 
 /**
  * Creates a new Idevice connection
@@ -9877,8 +9947,19 @@ void pocket_ddi_reset_cancel(struct PocketDDICancellation *cancel);
 
 /**
  * # Safety
+ * `cancel` is a live cancellation from pocket_ddi_open that pocket_ddi_close
+ * has not consumed. Reads atomics only and never touches the session, so it
+ * may run while a call is in flight.
+ */
+bool pocket_ddi_progress(const struct PocketDDICancellation *cancel, struct PocketDDIProgress *out);
+
+/**
+ * # Safety
  * A single caller owns the session. Request is a bounded NUL-terminated JSON
  * string; output is released with idevice_string_free. No request/result logs.
+ * Every operation except the finalization ops `stop_observing` and `return`
+ * requires `expires_at_ms` (wall-clock Unix ms, fixed by the app before the
+ * handoff); a missing or passed expiry dispatches nothing.
  */
 struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
                                         const char *request,
@@ -9887,9 +9968,14 @@ struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
 /**
  * # Safety
  * Session is valid, no other call in flight. Buffer is freed with
- * pocket_ddi_bytes_free using its exact returned length.
+ * pocket_ddi_bytes_free using its exact returned length. `expires_at_ms`
+ * (wall-clock Unix ms, fixed by the app before the handoff) bounds the call; a
+ * missing or passed expiry dispatches nothing. `diagnostic_stall` is 0, or 1
+ * (local acceptance only) to stall the capture once per session.
  */
 struct IdeviceFfiError *pocket_ddi_screenshot(struct PocketDDISession *handle,
+                                              uint64_t expires_at_ms,
+                                              uint32_t diagnostic_stall,
                                               uint8_t **out,
                                               uintptr_t *len);
 
@@ -9902,9 +9988,13 @@ void pocket_ddi_bytes_free(uint8_t *data, uintptr_t len);
 /**
  * # Safety
  * No call in flight. Consumes both handles even when cleanup is unconfirmed.
+ * `input_unconfirmed` (nullable) receives whether releasing held input was
+ * left unconfirmed at any point in this session, close included; an AX
+ * unsubscribe failure is reported only through the returned error.
  */
 struct IdeviceFfiError *pocket_ddi_close(struct PocketDDISession *handle,
-                                         struct PocketDDICancellation *cancel);
+                                         struct PocketDDICancellation *cancel,
+                                         bool *input_unconfirmed);
 
 #endif  /* IDEVICE_H */
 

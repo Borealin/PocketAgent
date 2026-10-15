@@ -129,7 +129,7 @@ final class ScriptRuntime: @unchecked Sendable {
                     if let reason = PocketISHFailure() { throw failure("脚本环境已停止：\(reason)") }
                     try? await Task.sleep(for: .milliseconds(100))
                 }
-                if !exit.done { _ = await stop(until: exit) }
+                if !exit.done { _ = await stop(until: exit, diagnostic: { _, _ in }) }
                 let remaining = await blocking { PocketISHUserTasks(Self.uid, 0) }
                 guard remaining == 0 else { throw failure("无法确认脚本环境检查已结束，请重启 App。") }
                 let result = ScriptExit.resolve(kernel: exit.status, wrapper: nil)
@@ -167,16 +167,19 @@ final class ScriptRuntime: @unchecked Sendable {
 
     /// `stage` reports lifecycle stages actually reached and output growth
     /// (at most once per second); it never fires without a real change.
+    /// `diagnostic` receives metadata-only stop-path events (names, counts,
+    /// milliseconds) for the opt-in run log.
     func run(_ request: ScriptRequest, workspace: WorkspaceSnapshot, lease: ScriptLease,
              phone: @escaping ScriptPhoneHandler,
-             stage: @escaping @Sendable (ScriptStage) -> Void = { _ in }) async -> ScriptOutcome {
+             stage: @escaping @Sendable (ScriptStage) -> Void = { _ in },
+             diagnostic: @escaping ScriptDiagnostic = { _, _ in }) async -> ScriptOutcome {
         let control = RunControl()
         // The run, including its stop sequence, is not itself cancellable:
         // cancellation only sets the flag the run observes.
         let work = Task.detached(priority: .userInitiated) { [self] in
             await gate.acquire()
             let outcome = await execute(request, workspace: workspace, lease: lease, control: control,
-                                        stage: stage, phone: phone)
+                                        stage: stage, phone: phone, diagnostic: diagnostic)
             await gate.release()
             return outcome
         }
@@ -195,7 +198,7 @@ final class ScriptRuntime: @unchecked Sendable {
 
     private func execute(_ request: ScriptRequest, workspace: WorkspaceSnapshot, lease: ScriptLease,
                          control: RunControl, stage: @escaping @Sendable (ScriptStage) -> Void,
-                         phone: @escaping ScriptPhoneHandler) async -> ScriptOutcome {
+                         phone: @escaping ScriptPhoneHandler, diagnostic: @escaping ScriptDiagnostic) async -> ScriptOutcome {
         var outcome = ScriptOutcome()
         let started = Date()
         defer { lease.revoke() }
@@ -282,11 +285,12 @@ final class ScriptRuntime: @unchecked Sendable {
                 // The kernel panicked or stopped answering: nothing can be
                 // signalled or counted any more, so end the run now.
                 lease.revoke()
+                diagnostic("script_lease_revoked", ["reason": "kernel"])
                 outcome.failure = "脚本运行环境已停止（\(failure)）；请重启 App 后再运行脚本。"
                 markUnusable(outcome.failure!)
                 break
             }
-            if control.cancelled { outcome.cancelled = true }
+            if control.cancelled { outcome.cancelled = true; diagnostic("script_cancel_observed", [:]) }
             else if Date().timeIntervalSince(started) > request.timeout { outcome.timedOut = true }
             else {
                 let stdout = Self.size(paths, run + "/stdout"), stderr = Self.size(paths, run + "/stderr")
@@ -299,7 +303,8 @@ final class ScriptRuntime: @unchecked Sendable {
             if outcome.cancelled || outcome.timedOut || outcome.outputLimited {
                 // Revoke first so no further phone action starts, then stop.
                 lease.revoke()
-                outcome.terminatedProcesses = await stop(until: exit)
+                diagnostic("script_lease_revoked", ["reason": outcome.cancelled ? "cancelled" : outcome.timedOut ? "timedOut" : "output"])
+                outcome.terminatedProcesses = await stop(until: exit, diagnostic: diagnostic)
                 break
             }
             ticks += 1
@@ -308,20 +313,29 @@ final class ScriptRuntime: @unchecked Sendable {
         }
         // Background processes left by a finished script are reaped as well.
         if exit.done, !outcome.cancelled, !outcome.timedOut, !outcome.outputLimited {
-            outcome.terminatedProcesses = await stop(until: exit)
+            outcome.terminatedProcesses = await stop(until: exit, diagnostic: diagnostic)
         }
         lease.revoke()
         // An action already started finishes and is recorded, never repeated;
         // requests that arrive afterwards are answered as refused.
+        let serveWait = ContinuousClock.now
+        diagnostic("script_serving_wait_begin", [:])
         await serving.value
+        diagnostic("script_serving_wait_end", ["ms": Self.milliseconds(since: serveWait)])
         await bridge.refusePending()
+        diagnostic("ish_remaining_enter", [:])
+        let remainingStarted = ContinuousClock.now
         let remaining = Int(await blocking { PocketISHUserTasks(Self.uid, 0) })
+        diagnostic("ish_remaining_exit", ["remaining": remaining, "ms": Self.milliseconds(since: remainingStarted)])
         outcome.remainingProcesses = remaining < 0 ? nil : remaining
         if remaining != 0 {
             markUnusable(remaining < 0 ? "无法确认脚本进程是否已结束；请重启 App 后再运行脚本。"
                                        : "上一个脚本有 \(remaining) 个 guest 进程无法终止；请重启 App 后再运行脚本。")
         }
+        diagnostic("ish_unmount_enter", [:])
+        let unmountStarted = ContinuousClock.now
         _ = await blocking { PocketISHUnmount(Self.mountPoint) }
+        diagnostic("ish_unmount_exit", ["ms": Self.milliseconds(since: unmountStarted)])
         outcome.phoneActions = await bridge.records
         outcome.phoneActionsOmitted = await bridge.omittedRecords
         outcome.milliseconds = Int(Date().timeIntervalSince(started) * 1000)
@@ -343,20 +357,43 @@ final class ScriptRuntime: @unchecked Sendable {
     /// threads were found. Completion is the kernel's own count of live
     /// threads owned by the script uid reaching zero, not a sent signal; a
     /// negative count (kernel not answering) never counts as zero.
-    private func stop(until exit: ExitBox) async -> Int {
+    private func stop(until exit: ExitBox, diagnostic: @escaping ScriptDiagnostic) async -> Int {
+        let begun = ContinuousClock.now
+        diagnostic("script_stop_begin", [:])
         let found = Int(await blocking { PocketISHUserTasks(Self.uid, 0) })
+        diagnostic("script_stop_found", ["found": found, "ms": Self.milliseconds(since: begun)])
         guard found != 0 else { return 0 }
-        _ = await blocking { PocketISHUserTasks(Self.uid, SIGINT) }
+        var polls = 0
+        _ = await blocking("signal", diagnostic) { PocketISHUserTasks(Self.uid, SIGINT) }
         for _ in 0..<20 {
-            if await blocking({ PocketISHUserTasks(Self.uid, 0) }) == 0 { break }
+            polls += 1
+            if await blocking("tasks", diagnostic, { PocketISHUserTasks(Self.uid, 0) }) == 0 { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         for _ in 0..<50 {
-            if await blocking({ PocketISHUserTasks(Self.uid, SIGKILL) }) == 0 { break }
+            polls += 1
+            if await blocking("signal", diagnostic, { PocketISHUserTasks(Self.uid, SIGKILL) }) == 0 { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         for _ in 0..<50 where !exit.done { try? await Task.sleep(for: .milliseconds(100)) }
+        diagnostic("script_stop_end", ["ms": Self.milliseconds(since: begun), "terminated": max(found, 0),
+                                       "polls": polls, "exited": exit.done])
         return max(found, 0)
+    }
+
+    /// A polled stop-path iSH call. Each is bounded underneath
+    /// (`PocketISHWork`: 15 s for tasks and signals, 30 s for unmount); the
+    /// polls are counted, and only calls slower than 500 ms are reported.
+    private func blocking<T: Sendable>(_ label: String, _ diagnostic: @escaping ScriptDiagnostic,
+                                       _ work: @escaping @Sendable () -> T) async -> T {
+        let started = ContinuousClock.now
+        let result = await blocking(work)
+        let ms = Self.milliseconds(since: started)
+        if ms > 500 { diagnostic("ish_call", ["op": label, "ms": ms]) }
+        return result
+    }
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        Int((ContinuousClock.now - start) / .milliseconds(1))
     }
 
     private func blocking<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {

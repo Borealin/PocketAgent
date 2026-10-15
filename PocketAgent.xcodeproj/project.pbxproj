@@ -15,6 +15,7 @@
 		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
 		166288E4676C3F7F4A696455 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC53E4CFF0E2B8C7FC267BE0 /* ChatTranscriptView.swift */; };
 		19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A45359ABA3EE41F69474549 /* ChatComposer.swift */; };
+		253C78AD6ED1774C95722133 /* SerialGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C405D30C26DD74E9D43D252 /* SerialGate.swift */; };
 		274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */; };
 		27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1523AE79BCB523972CA3A5 /* Controller.swift */; };
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
@@ -44,6 +45,7 @@
 		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
 		73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925006F86E0B486805C14187 /* StreamingSummary.swift */; };
 		7BF504059BFF50CB719B57D3 /* ipb-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1E3F38C6E1EC1788F9E5636F /* ipb-LICENSE.txt */; };
+		7D936E9FB0D5FDFF2CAB52F9 /* DDICallBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187CEE22A5291401CCFC137 /* DDICallBudget.swift */; };
 		828CF5DA8A7C898956B83BEC /* PendingEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */; };
 		832CAC133E608E581ED4FAD8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0038D3B0E28F7D09E1D18F2B /* Assets.xcassets */; };
 		837D7E83B6804FE0BE3D8C99 /* HistoryFileEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */; };
@@ -128,6 +130,7 @@
 		55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptRuntime.swift; sourceTree = "<group>"; };
 		59F24A784103BF8F2532963F /* ChatHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistory.swift; sourceTree = "<group>"; };
 		64A275A3B478025AE3327E64 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		6C405D30C26DD74E9D43D252 /* SerialGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerialGate.swift; sourceTree = "<group>"; };
 		6CE88C9FB1A659621C93A20A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		71BBBC1966721F24A0B7C74B /* ContextBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextBudget.swift; sourceTree = "<group>"; };
 		7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketMemoryAdapter.swift; sourceTree = "<group>"; };
@@ -149,6 +152,7 @@
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
 		9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIOperationFailure.swift; sourceTree = "<group>"; };
+		A187CEE22A5291401CCFC137 /* DDICallBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDICallBudget.swift; sourceTree = "<group>"; };
 		AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderToolSchema.swift; sourceTree = "<group>"; };
 		AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryFileEncoder.swift; sourceTree = "<group>"; };
 		ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingEdits.swift; sourceTree = "<group>"; };
@@ -245,6 +249,7 @@
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
 				DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */,
 				71BBBC1966721F24A0B7C74B /* ContextBudget.swift */,
+				A187CEE22A5291401CCFC137 /* DDICallBudget.swift */,
 				9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */,
@@ -275,6 +280,7 @@
 				9546B4615DB532FC42BF7335 /* Rules.swift */,
 				4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */,
 				F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */,
+				6C405D30C26DD74E9D43D252 /* SerialGate.swift */,
 				925006F86E0B486805C14187 /* StreamingSummary.swift */,
 				B63FEC8E86A7377406E9127B /* SummaryMaintenance.swift */,
 				7F385985B41CF2BDD68B588A /* SyncApply.swift */,
@@ -459,6 +465,7 @@
 				72018019477198B62A047CE7 /* CloudSync.swift in Sources */,
 				EAC477D9DF67D43E10E429AA /* ContextBudget.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
+				7D936E9FB0D5FDFF2CAB52F9 /* DDICallBudget.swift in Sources */,
 				F2FDE3B2136A4DD8384EB4E1 /* DDIOperationFailure.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
@@ -499,6 +506,7 @@
 				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
 				A8D642607E15F33D0BC95BFC /* ScriptGateProbe.swift in Sources */,
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
+				253C78AD6ED1774C95722133 /* SerialGate.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 				73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */,
 				F7493659461238130C24AB4D /* SummaryMaintenance.swift in Sources */,
