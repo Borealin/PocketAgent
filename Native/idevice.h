@@ -49,64 +49,6 @@
 
 #define MAX_BYTES ((20 * 1024) * 1024)
 
-#define IDLE 0
-
-#define ADMIT 1
-
-#define GEOMETRY 2
-
-#define AX_CONNECT 3
-
-#define AX_SETUP 4
-
-/**
- * Detail: the AX request kind.
- */
-#define AX_READ 5
-
-#define PROCESSES 6
-
-#define LAUNCH 7
-
-#define CLIPBOARD 8
-
-#define TOUCH 9
-
-#define BUTTON 10
-
-#define KEYBOARD 11
-
-#define KEYBOARD 6
-
-#define WAIT 12
-
-/**
- * Detail: the channel id.
- */
-#define RECONNECT 13
-
-#define CLEANUP_TOUCH 14
-
-#define CLEANUP_HOME 15
-
-#define CLEANUP_KEYBOARD 16
-
-#define AX_CLOSE 17
-
-#define SCREENSHOT 18
-
-#define ENCODE 19
-
-#define INFO 1
-
-#define APPS 2
-
-#define CAPTURE 3
-
-#define HID 4
-
-#define BUTTONS 5
-
 typedef enum AfcFopenMode {
   AfcRdOnly = 1,
   AfcRw = 2,
