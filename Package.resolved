@@ -1,12 +1,12 @@
 {
-  "originHash" : "4f35fc01e027c2e207a5e3f1970226986de9de95038e179a0463319b1dfb2c7a",
+  "originHash" : "ce7a9a13c0dfb9ebdcf3e71655981a2514bf137092366f74f8b2295dedc1c0b6",
   "pins" : [
     {
       "identity" : "agentkit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Borealin/AgentKit.git",
       "state" : {
-        "revision" : "22fc575009bde3a2097ac1a49908ffa239b9c029"
+        "revision" : "e1c81c911564c39d5f78ccec6808ba96c1acd2e8"
       }
     },
     {
