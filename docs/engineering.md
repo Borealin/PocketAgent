@@ -334,21 +334,31 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
 - Owner: transactions publish only after a successful write; run events stay
   visible when their write fails, storage becomes dirty, every gate fails and
   only an explicit retry restores storage (never the stopped run). The file is
-  one JSON value in one atomic file, laid out with whitespace capacity after the
-  file fields, after each session's fields and after each message array
-  (`HistoryLayout`; same value as the codec, key order and whitespace differ),
-  so an unchanged byte keeps its offset. Each region's spare comes from its own
-  length only (message arrays an eighth, at least 16 KiB; session fields half,
-  at least 1 KiB; file fields an eighth, at least 64 KiB). While the file still has the identity
-  the writer last published (device, inode, size, modification and change
-  time, checked before and after cloning), `PatchingHistoryWriter` clones it,
+  one JSON value in one atomic file (`HistoryLayout`; same value as the codec,
+  key order and whitespace differ): the sessions array first, each session's
+  message array followed by whitespace capacity and then its other fields with
+  their own capacity, and the other file fields (including the assistant
+  section) last without capacity. Each region's spare comes from its own length
+  only (message arrays an eighth, at least 16 KiB; session fields half, at
+  least 1 KiB). A plan keeps every session still in place and rewrites from the
+  first moved session to the end of the file, so the tail growing, a later
+  session outgrowing its capacity, or a session appended or removed after the
+  first one all patch. While the file still has the identity the writer last
+  published (device, inode, size, modification and change time, checked before
+  and after cloning), `PatchingHistoryWriter` clones it, sets the clone's size,
   writes only the changed ranges, fsyncs and renames the clone over it; the
-  clone must be confirmed as protection class C on iOS. Otherwise (first write
-  after launch, a changed file, a region over capacity, no cloning, an
-  unconfirmed class, and at least every 512 patches) it writes the whole file
-  atomically. Failures before the rename leave the file and the baseline
-  untouched; the baseline moves only after publication. Changed messages are
-  found with ordinary equality against the last published layout.
+  clone must be confirmed as protection class C on iOS. Otherwise (no adopted
+  baseline, a changed file, the first session moved, no cloning, an unconfirmed
+  class, and at least every 512 patches) it writes the whole file atomically.
+  Failures before the rename leave the file and the baseline untouched; the
+  baseline moves only after publication. Changed messages are found with
+  ordinary equality against the last published layout; cache misses (messages,
+  scope rows) are encoded in parallel with sorted keys. At launch the file is
+  read through one descriptor under one identity and strictly decoded; off the
+  main actor every message is encoded again, capacities are read from the
+  whitespace runs and the rebuilt image must equal the bytes. The owner adopts
+  it only while storage is ready, nothing was written and it still holds that
+  exact decoding, so the first write after launch can patch.
 - Gates: a startup permit is committed before `runtime.start`; each model
   request waits for the saved request view (text/modelText, calls, provider
   items, image identity) of every real message since its prompt; each tool
@@ -462,8 +472,7 @@ deadline stopped it (7169080: 600.2 s, generic reason; final build: 600.6 s with
 the deadline reason), nothing replayed and below the per-turn caps. Not verified
 on the device: recall after a model change (the configured provider has one model
 and no model catalog address, so the app cannot discover another without a newly
-entered endpoint), the 150 s maintenance limit and cancelling a live summary
-stream (host only), the Dynamic Island task-surface gesture (native bounds
+entered endpoint), the Dynamic Island task-surface gesture (native bounds
 tests only), and coordinate taps on a system overlay hosted by SpringBoard while
 an app is the observed foreground (now refused by the ownership check). Weather's
 first-run welcome appears without a Weather app process: its launch returns
@@ -492,20 +501,44 @@ was exercised only with fault injection: the launch argument
 after its read registration and before its request; a forget confirmed in that
 wait, with the preview saying the running task stops, stopped the preparing
 turn with no reply and no new summary. It does not exercise a live stream or
-the 150 s limit. Device long history (`-PocketAgentLongHistoryBenchmark`,
-sandbox file, the owner through the production writer): a patched event at
-50k messages records in p95 0.10–0.11 s over four runs (10k: 0.02 s), and the
-file is exactly the published layout image. Whole writes stay slower: the first
-write after launch encodes every message (50k: about 1.2 s) and a warm whole
-write (overflow, every 512 patches, a changed file) takes 0.30–0.35 s at 50k.
-The capacity makes the 50k file 124 MB instead of 110 MB. The real transcript
+the 150 s limit. With the launch argument `-PocketAgentInjectSlowSummaryStream`
+(a fold sends no request and receives a new summary increment every 3 s) the
+real 150 s maintenance deadline ended the fold at 150.05 s with the note
+"上下文整理超过 150 秒" and no summary written. With
+`-PocketAgentStopAtFirstSummaryText` the fold streaming from the configured
+provider was stopped through the Stop button's path at the first non-empty text:
+the transport ended by cancellation, no summary and no main request followed.
+A real-model `run_script` turn whose helper had made one call was stopped by
+an injected one-shot write failure (`-PocketAgentDirtyAfterFirstScriptCall`):
+storage became dirty, the lease was revoked and the guest killed before any
+second call; flushing restored storage. Forgetting, from the composer, memory
+the running turn had read showed that the task would stop; confirming it
+cancelled the script before its second call (guest processes 0, root masked).
+An isolated provider fixture (`-PocketAgentProviderLimitProbe`) mapped bare SSE
+error objects and strings through the pinned client in the optimized iOS build
+on both paths; it is not a service actually rejecting a request. Device long
+history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
+the production writer, three runs): a patched event at 50k messages records in
+p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
+image. Whole writes stay above 0.2 s at 50k: the first write of a file that
+cannot be adopted takes 0.65–0.67 s (was 1.2 s; encoding now in parallel) and a
+warm whole write (every 512 patches, a changed file) 0.31–0.36 s, mostly the
+123 MB atomic write. After adoption (0.48–0.58 s off the main actor at launch,
+after the 1.9 s strict load) the first write is a 0.10–0.11 s patch; appending a
+session or a later session overflowing patches in about 0.085 s (one run 0.37 s).
+The capacity makes the 50k file 123 MB instead of 110 MB. The real transcript
 view over synthetic 10k/50k histories is timed with
 `-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
 load-blocked, real history unchanged). Memory search no longer counts single
 characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
 evaluation table). Remaining boundaries (oversized single segments,
 model-change recall) are listed in the plan.
-Transcript paging renders 400 messages per page.
+Transcript paging renders 400 messages per page. Open, not fixed: on the
+12 mini a script helper `wait` whose screen read after waiting never returned
+(a sheet and the keyboard were over the app) kept its turn cancelling for over
+ten minutes; neither Stop nor the 600 s deadline ended it, because the native
+DDI call has no host-side timeout. A relaunch recovered it (interrupted, nothing
+replayed); why the native read did not return is not established.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
@@ -541,6 +574,18 @@ Confirmed problems found during implementation review and fixed:
   re-encodes of an unchanged session differed), which made unchanged regions
   look changed. The layout's shells encode with sorted keys; a regression
   requires an unchanged file to produce no ranges.
+- Whole writes of the first layout (file fields first) were frequent and slow:
+  any growth of the assistant section past its capacity, any session overflow
+  or session-list change, and the first write after every launch rewrote the
+  whole file (1.2 s cold at 50k). File fields now come last, plans patch from
+  the first moved session, misses encode in parallel, and a verified launched
+  file is adopted. A launched file is adopted only on a byte-for-byte rebuild of
+  its own strict decoding: a file with two keys of one message swapped (same
+  length, same value, all boundaries in place) is refused, which a structural
+  scan or sampled decodes would accept.
+- A running primary turn stopped by a forget reported the phone run's generic
+  "手机助手未完成本轮". A started turn that was revoked now reports the
+  revoked-source reason (`StartedTurnOutcome`).
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a

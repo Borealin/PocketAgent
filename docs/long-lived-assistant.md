@@ -2,7 +2,7 @@
 
 > 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@e1c81c9`（含窄 bounded `consume` API 与裸SSE `error` 帧失败）；模型服务复用App通用设置；Core 测试、iOS 构建/IPA 检查与 iPhone 12 mini 真实模型场景通过，未覆盖项见第 3 节“验证范围”
 >
-> 最后核对：2026-10-15（实现与验证范围；AgentKit e1c81c9 接入与12 mini验收）
+> 最后核对：2026-10-15（实现与验证范围；整文件写入优化、维护期限/真实流停止/脚本助手/错误形状的12 mini验收）
 >
 > 面向读者：PocketAgent iOS、AgentKit 集成与测试开发者
 >
@@ -432,7 +432,7 @@ enum PendingState: Codable { case queued, held(reason: String), needsResume }
 
 当前格式使用明确CodingKeys和严格decoder：generation/schemaVersion、必填key或字段类型不符即拒绝，不调用旧HistoryMigration、不按版本回填selection，也不自动去重、修复或备份后迁入旧原文。业务nullable字段区分null与缺key，编码端明确写null、解码端用decode(Optional<T>.self, forKey:)；不能让synthesized encodeIfPresent省略key后被自己的严格decoder拒绝。没有文件时才初始化新状态，已有当前格式损坏文件不能当空文件覆盖。已有主指针失踪进入运行数据恢复态，不选sessions.first。严格拒绝会话内真实消息重复、会话ID重复、ledger/tombstone ID重复或非法pending双重所有权；当前generation的不同conflict副本间同一消息ID允许且保留。复用PortableCodec的当前数据校验与合并原理，current-generation remote重复仍拒绝；旧云格式不参与解码或merge。派生摘要坏锚点/失效链可丢弃，不影响当前格式原文。当前文件恢复与明确重置只作用当前命名空间，不承接旧格式导入。 decode为纯读取；当前格式重启后的running/pending状态由owner恢复事务处理，保存成功才发布中断/needsResume状态，不重新调度已授权phone动作。
 
-读取失败loadBlocked禁止任何覆盖，当前格式文件恢复或用户明确重置后才解除；保存失败saveDirty可显式重试。所有新操作用 MainActor `transact`：从当前已确认状态复制candidate → 同步validate/apply → throwing 编码与写入（稳定布局；文件仍是本writer最后发布的那份时克隆后只写变化区间并rename，否则整文件原子写）→ 成功publish（无await）。失败不发布记忆/主指针/pending候选，不返回工具成功。现有event/edit/sync须共用保存边界；若现有事件落盘失败，保留可见未保存事件、暂停后续执行并标storageError，禁止新接受/事务/sync直到最新完整状态成功flush，不能回滚掉可能已发生的手机结果。flush只恢复存储能力，不自动resume动作。
+读取失败loadBlocked禁止任何覆盖，当前格式文件恢复或用户明确重置后才解除；保存失败saveDirty可显式重试。所有新操作用 MainActor `transact`：从当前已确认状态复制candidate → 同步validate/apply → throwing 编码与写入（会话在前、文件字段在后的稳定布局；文件仍是本writer最后发布的那份时克隆、设定尺寸、只写从变化处或首个移动会话起的区间并rename，否则整文件原子写；启动时同一身份读取并严格解码的文件，逐条重编码后整字节相等才被采用为已发布）→ 成功publish（无await）。失败不发布记忆/主指针/pending候选，不返回工具成功。现有event/edit/sync须共用保存边界；若现有事件落盘失败，保留可见未保存事件、暂停后续执行并标storageError，禁止新接受/事务/sync直到最新完整状态成功flush，不能回滚掉可能已发生的手机结果。flush只恢复存储能力，不自动resume动作。
 
 新增TranscriptCommitBarrier（ChatController持有、非第二writer）：成功write后推进原始消息ID/结构内容digest与tool-result水位，等待者由owner恢复。saveDirty采用cancel-at-boundary并清理owned runtime/context task/script，不声称暂停后可原地恢复；保dirty事件待flush。现有AgentEventChannel.emit只yield，不是ACK。保留loop.toolExecution=.sequential/maxConcurrency=1：RegistryApproval.authorize/willExecute在每个tool dispatch前await sourceMessageID对应assistant已保存及其前序call结果已保存；前序结果以逐call的toolFinished事件（executor finish:369；现有ChatSessions:534–539已按事件append）落盘推进水位，禁止等scheduler.run批末才追加的snapshot results（Runtime:303–313），否则第二call会死锁；模型wrapper在phone.prepare前await当前run新增的真实输入已保存。PreparedContext单列synthetic IDs（summary/repair），不要求它们落入raw；对真实消息不能仅拿“ID存在”替代当前正确内容已保存。屏障按runID/jobEpoch+必要IDs判定；owner替换/移除job时立即拒绝对应epoch全部waiters，不让被忽略旧event等到timeout，每次await后复核Stop/storage/jobepoch；save失败、cancel、timeout解除等待并拒绝。storageDirty检查同时进入PhoneExecutor.checkDeadline（script内部helper复用该检查）；关闭所有新模型/tool副作用；脚本lease内部phone helper同样查共享健康/撤销状态，不能只靠外层script一次批准。in-flight动作不能撤销，保其真实或unknown结果；不自动重发。复用现有awaitedapproval/hooks与wrapper，不需要改SDKloop。现有persist吞错/永久early-return不能当提交API；不新增第二writer。
 
@@ -515,12 +515,12 @@ pending附件加入cleanupAttachments引用union；pending.sessionID/promoted或
 
 | 阶段 | 主要文件 | Core 测试（`Tests/PocketAgentCoreTests`） |
 |---|---|---|
-| P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryLayout.swift`（稳定布局与补丁计划）、`HistoryPatchStore.swift`（克隆补丁写与身份守卫）、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、HistoryLayoutTests/PatchingHistoryWriterTests（与codec同一JSON值、随机编辑下补丁结果逐字节等于整文件、写入中途ENOSPC/短写/EINTR/fsync与rename失败/不支持克隆/保护级别未确认/文件被外部改动、属性保留、owner闸门）、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
+| P1 格式/保存/身份 | `Core/AssistantState.swift`、`ChatHistory.swift`（严格codec）、`HistoryStorage.swift`、`HistoryOwner.swift`、`HistoryFileEncoder.swift`、`HistoryLayout.swift`（会话在前、文件字段在后的稳定布局、从首个移动会话起的补丁计划、启动采用校验、并行编码）、`HistoryPatchStore.swift`（克隆补丁写、尺寸变化、身份守卫、启动按同一身份读取）、`HistoryEdits.swift`、`CanonicalDigest.swift`、`TranscriptCommitBarrier.swift`、`TurnGates.swift`；`App/ChatSessions.swift`、`ChatTurns.swift`、`AgentRunner.swift`、`PhoneAgent.swift` | AssistantHistoryCodecTests、HistoryOwnerTests、HistoryFileEncoderTests、HistoryLayoutTests/PatchingHistoryWriterTests（与codec同一JSON值、随机编辑下补丁结果逐字节等于整文件、写入中途ENOSPC/短写/EINTR/fsync与rename失败/不支持克隆/保护级别未确认/文件被外部改动、属性保留、owner闸门）、TurnGateRuntimeTests（真实AgentRuntime：replay/修复历史、未保存assistant不执行、provider-native与本地call混合） |
 | P2 预算/上下文/摘要 | `Core/ContextBudget.swift`、`AgentContextBuilder.swift`（有效链与checkpoint）、`ProviderContextLimit.swift`、`AssistantRequestProjection.swift`、`StreamingSummary.swift`、`SummaryMaintenance.swift`（逐fold发送前检查与读集登记）；`App/AssistantTurnSupport.swift`；`ProviderConfig.swift`（通用设置文件与 `ProviderSettingsStorage`）/`ProviderStore.swift`/`ProviderViews.swift`/`AssistantViews.swift`（本机预算） | ContextBuilderTests、SummaryChainDepthTests（127/128/129、checkpoint与伪造/环/roots失败、维护重建期变化不提交、最老3fold）、ProviderContextLimitTests（真实客户端夹具）、ContextBudgetLabelTests、SummaryDispatchGuardTests（大中文上一摘要不调用producer、遗忘/存储失败不再发送）、ContextEstimatorTests、ProviderConfigTests（早期version-1文件ID/origin/默认/预算保留）、StreamingSummaryTests、ConsumeIntegrationTests（fork真实 `consume`） |
 | P3 记忆/搜索/遗忘 | `Core/MemoryLedger.swift`、`PocketMemoryAdapter.swift`、`ReadCommit.swift`、`MemoryIntent.swift`、`ToolCatalog.swift`（ToolKind.memory）、`ExecutionStatus.swift`；`App/ChatMemory.swift`、`AssistantViews.swift`（面板/预览） | MemoryLedgerTests（含12k根长链）、MemoryAdapterTests、ReadCommitTests/ReadCommitRuntimeTests（两种检索经真实AgentRuntime：遗忘前后、单次登记写失败后事件写成功仍停轮且不再调度）、RememberModeTests、MemoryIntentTests |
 | P4 pending/恢复/sync/长历史 | `Core/PendingEdits.swift`（重排时root随确认scope移动）、`ClearPrimary.swift`（清空对话保留记忆）、`TurnLifecycle.swift`、`SyncApply.swift`、`PortableSync.swift`（envelope）；`App/CloudSync.swift`（`assistant-v1/`子目录）、`ChatComposer.swift`、`ChatRootView.swift`、`ChatTranscriptView.swift`（分页） | PendingLifecycleTests（含跨scope继续）、ClearPrimaryTests、AssistantSyncTests、PortableMergeTests、LongHistoryBenchmarkTests（opt-in量测） |
 
-实现与原形状的差异：checkpoint以builderVersion 1001标记、不新增字段；只读检索结果经 `ReadPlan`→`ReadCommitResult`；记住模式与候选卡共用 `ComposerDraft` 草稿引用；ScopedRoot增加 `verified`；屏蔽集合为ScopeIndex的maskedRoots/maskedMessages行；StoredCompaction增加summaryPromptVersion/summaryModel；PendingNext增加acceptedAt；MemoryTombstone增加forgottenAt。工具调度的保存水位是逐call `ResultKey(runID, callID)`（本地结果保存或provider-native ACK），而非依赖结果消息UUID。启动失败的设备复现用仅限启动参数 `-PocketAgentInjectStartFailure` 的注入（App内不可开启）；本地验收另有同样仅限启动参数的 `-PocketAgentLongHistoryBenchmark`（沙盒合成历史的写入量测）、`-PocketAgentViewportBenchmark`（只读控制器上的真实转写视图）与 `-PocketAgentHoldMaintenanceDispatch`（每个维护fold登记读取后、发送前可取消地等待20秒的故障注入）。
+实现与原形状的差异：checkpoint以builderVersion 1001标记、不新增字段；只读检索结果经 `ReadPlan`→`ReadCommitResult`；记住模式与候选卡共用 `ComposerDraft` 草稿引用；ScopedRoot增加 `verified`；屏蔽集合为ScopeIndex的maskedRoots/maskedMessages行；StoredCompaction增加summaryPromptVersion/summaryModel；PendingNext增加acceptedAt；MemoryTombstone增加forgottenAt。工具调度的保存水位是逐call `ResultKey(runID, callID)`（本地结果保存或provider-native ACK），而非依赖结果消息UUID。启动失败的设备复现用仅限启动参数 `-PocketAgentInjectStartFailure` 的注入（App内不可开启）；本地验收另有同样仅限启动参数的 `-PocketAgentLongHistoryBenchmark`（沙盒合成历史经生产writer的写入量测）、`-PocketAgentViewportBenchmark`（只读控制器上的真实转写视图）、`-PocketAgentHoldMaintenanceDispatch`（每个维护fold登记读取后、发送前可取消地等待20秒的故障注入）、`-PocketAgentRecordMaintenanceStream`（只记录每个fold实际收到的事件种类、数量与时间，不含内容）、`-PocketAgentInjectSlowSummaryStream`（故障注入：fold不发请求，每3秒收到新的摘要文本，用真实150秒期限结束）、`-PocketAgentStopAtFirstSummaryText`（在服务商流的第一段非空摘要文本时走停止按钮的同一路径）、`-PocketAgentDirtyAfterFirstScriptCall`（故障注入：运行的第一次脚本手机调用后，下一次历史写入失败一次）、`-PocketAgentScriptGateProbe`（嵌入Linux运行时与真实bridge对隔离owner的准入探针，放行的调用不做设备动作）与 `-PocketAgentProviderLimitProbe`（隔离URLProtocol夹具经固定客户端与两条路径的错误映射）。
 
 Looktech Android/iOS业务、BT/ISP/WiFi、schema/rpc/lt-vad不受影响，无共享通信变更。资源负责人/人日/版本/提测待确认，不猜测排期。
 
@@ -550,7 +550,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 332 项/70 组（macOS 主机，mock transport；2026-10-15；新writer套件与provider/consume套件另在Release优化下通过）；Chat Completions流开始后的裸 `error` 对象/字符串经固定客户端在主请求（AgentRuntime终态为超限说明、只发一次、不重试）与整理请求上映射，缺终态、非超限错误与 `error:null` 不误判（在旧pin `22fc575` 上这4项失败）；两种只读检索经固定AgentRuntime与模型/工具闸：快照与登记之间遗忘→stale且不发明文、登记后遗忘→下一请求前停轮、登记写一次失败而后续事件写成功→本轮epoch失败、同消息内后续手机调用被拒、无下一请求；摘要链127/128/129、checkpoint的伪造/父正文/roots/环与来源变化失败、重建期遗忘/写失败不提交、最老3fold；provider上下文超限经固定客户端真实HTTP/SSE/JSON夹具映射、字段名参数错误与401/429/5xx不误判；生产路径 `AssistantRequestPreparer` 经Runtime：运行中更正后下一请求带新revision、遗忘已读条目则停轮；脚本助手真实Python+Bridge+共享准入+真实owner：存储变脏/遗忘已读条目后的下一次调用被拒未执行、无关遗忘不停；中文词法召回评估表（见下）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
+| Core 测试 | 通过 | 339 项/70 组（macOS 主机，mock transport；2026-10-15；writer、provider/consume套件另在Release优化下通过；writer覆盖随机编辑含前插/删除/溢出的尺寸变化补丁逐字节等于整像、截断与写入中途失败、启动采用的拒绝情形（他种布局、同值异空白、同长同值换键序）与采用后补丁）；Chat Completions流开始后的裸 `error` 对象/字符串经固定客户端在主请求（AgentRuntime终态为超限说明、只发一次、不重试）与整理请求上映射，缺终态、非超限错误与 `error:null` 不误判（在旧pin `22fc575` 上这4项失败）；两种只读检索经固定AgentRuntime与模型/工具闸：快照与登记之间遗忘→stale且不发明文、登记后遗忘→下一请求前停轮、登记写一次失败而后续事件写成功→本轮epoch失败、同消息内后续手机调用被拒、无下一请求；摘要链127/128/129、checkpoint的伪造/父正文/roots/环与来源变化失败、重建期遗忘/写失败不提交、最老3fold；provider上下文超限经固定客户端真实HTTP/SSE/JSON夹具映射、字段名参数错误与401/429/5xx不误判；生产路径 `AssistantRequestPreparer` 经Runtime：运行中更正后下一请求带新revision、遗忘已读条目则停轮；脚本助手真实Python+Bridge+共享准入+真实owner：存储变脏/遗忘已读条目后的下一次调用被拒未执行、无关遗忘不停；中文词法召回评估表（见下）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
 | 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 代码ae324d3的开发包上：主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；第一次真实整理。代码841d3c0的最终开发包上：未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理经 `consume` 完成并CAS提交（第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume）。最终包（代码7fd93a8）上：启动失败注入→草稿归还且该prompt未授权，正常重启后同文本以新ID重发，真实模型只回答一次，追问“此前该消息出现几次”答1；新生成的摘要来源不含未启动root，覆盖未启动root的旧摘要不再采用；连接已有LocalDevVPN后，独立任务中真实读取应用清单（find_apps）、打开“设置”并新鲜观察首页成功；执行中途杀进程后任务为interrupted，25秒内无任何新动作（不重放） |
 | DDI 自身页面观察（修复包 5250b2d→7169080→最终2c47dcf，同一原生库） | 通过（物理UI＋真实模型） | 键盘显示系统粘贴建议时，长主线与全新空任务的 observe_screen 均成功（outside_app_elements=1，约50节点；三个包都跑过，最终包复测）；5250b2d：打开“设置”、滑动、点进“通用”每步后观察成功；7169080：让模型 tap_point 粘贴建议位置被触摸前拒绝（target_covered，未执行，随后新观察，输入框无粘贴），手机任务中途杀进程→interrupted、25秒内无新动作，新请求只做新观察，运行中Stop（按新截图确认停止键可见才点）→已取消、之后无动作、未打开设置 |
@@ -558,8 +558,9 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 | 整轮600秒期限（设备） | 通过 | 测试数据任务持续调用wait（每次回复4个，均低于本轮请求/工具上限）：7169080上85次调用/22次回复在600.2秒停止，原因显示笼统；最终包2c47dcf上84次/21次在600.6秒停止，原因为“本轮已达到 10 分钟上限”；未完成的wait报已取消、无重放 |
 | 补缺口六项（12 mini，开发签名同身份覆盖安装，真实UI＋真实模型；代码04db862起，最终6c3dd52） | 通过 | 跨天召回（跨过一次本地午夜，不证明多天稳定性）、记住模式、候选选择表（五条长条目＋键盘）、更正后按新revision召回、运行中新增记忆被同一轮后续请求使用、只读观察、冻结预算行、宿主超上限拒绝、Stop/重启不重放、清空对话保留记忆、超预算摘要拒发、维护准备期遗忘（故障注入）；后两项的范围见下节。测试记忆已遗忘，设置文件与独立任务与验收前备份一致；逐项记录留在本地 |
 | AgentKit e1c81c9 接入（12 mini，开发签名同身份覆盖安装，真实UI＋真实模型；代码c23d5ec） | 通过 | 安装与启动后历史除一条清空记录的时间被启动同步规整到整毫秒外不变；真实模型回复、严格 `记住：` 后由真实模型召回且登记读取；测试条目经面板遗忘、测试对话清空后，独立任务与设置文件与验收前一致，原有记忆账本与遮罩保留，仅新增该测试条目的遗忘记录及其保存/遗忘回执。裸 `error` 帧的超限映射只经主机固定客户端夹具验证，未用真实服务诱发超限 |
-| 设备长历史（12 mini，Release配置开发包，仅启动参数；沙盒临时文件或只读控制器，不碰真实历史/同步） | 补丁写通过；整写边界见下 | 写入（`-PocketAgentLongHistoryBenchmark`，owner经生产writer，合成10k/50k条）：补丁事件p95 50k 0.10–0.11秒（四次）、10k 0.02秒，文件逐字节等于发布的布局整像并解码为owner状态；整写：启动后首次（逐条编码）50k约1.2秒，热整写（溢出、每512次补丁、文件被改动）50k 0.30–0.35秒。绘制（`-PocketAgentViewportBenchmark`）：真实转写视图挂在只读控制器上，计时显示与程序化“加载更早”后的下一帧、外部滑动期间的帧间隔（不证明布局完成）；10k/50k上脚本滑动前后可见行移动，写入0次、存储为loadBlocked，真实历史前后一致 |
-| 设备未覆盖 / 边界 | 未验证或环境边界 | 改模型后召回：设备上的服务商只配置1个模型且没有模型目录地址，App内“连接并加载模型”不可用；要发现第二个模型只能新填目录地址（等于编造端点并改动用户配置），未做；150秒维护期限与真实摘要流中途取消只在主机验证（超预算摘要拒发与维护准备期遗忘见下节；600秒整轮期限已在设备上触发，见下一行）；灵动岛机型的任务面板收起手势只有原生边界测试（未用灵动岛设备）；被观察App在前台时SpringBoard系统弹窗上的坐标点击现在会被归属检查拒绝，未实测。“天气”首次运行欢迎页没有天气App进程：启动返回CoreDevice 10004（报为未确认），前台进程无法识别时观察按设计拒绝 |
+| 维护期限、真实流停止、脚本助手与错误形状（12 mini，开发签名同身份覆盖安装，真实UI＋真实模型；代码d3dfec0） | 通过（注入与诊断已标明） | 150秒：故障注入的慢流（不发请求，每3秒新文本）由真实期限在150.05秒结束，界面显示“上下文整理超过 150 秒，本轮不使用新的摘要”，无新摘要。真实流停止：配置的服务商流在第一段非空文本（8.4秒）时经停止按钮路径停止，传输以取消结束，无新摘要、无主请求。脚本助手：真实模型 `run_script` 经 `PhoneExecutor.executeScript`；注入的一次写失败使存储变脏后先撤销授权再终止脚本，第二次调用未发生，显式重试保存恢复；在输入框遗忘该轮已读的测试记忆，影响页显示任务将被停止，确认后脚本在第二次调用前取消、根被屏蔽。隔离准入探针另见变脏与遗忘后的调用被拒。错误形状：设备上隔离夹具经固定客户端，主请求（AgentRuntime）与整理两条路径把裸 `error` 对象/字符串映射为超限说明、不重试，截断流、非超限错误与 `error:null` 不误判。测试项目、记忆与预算已清理，独立任务、设置与原有账本保持 |
+| 设备长历史（12 mini，Release配置开发包，仅启动参数；沙盒临时文件或只读控制器，不碰真实历史/同步） | 补丁写通过；整写仍高于0.2秒 | 写入（`-PocketAgentLongHistoryBenchmark`，owner经生产writer，合成10k/50k条，三次）：补丁事件p95 50k 0.107–0.109秒、10k 0.02秒，文件逐字节等于发布的布局整像并解码为owner状态。整写：无法采用的首次写50k 0.65–0.67秒（原1.2秒，并行编码）、热整写（每512次补丁、文件被改动）0.31–0.36秒（主要是123 MB原子写）；启动采用（启动后台0.48–0.58秒，在1.9秒严格加载之后）后首次写是0.10–0.11秒补丁；末尾追加会话与后面会话溢出约0.085秒补丁（一次0.37秒）。绘制（`-PocketAgentViewportBenchmark`）：真实转写视图挂在只读控制器上，10k/50k上脚本滑动前后可见行移动，写入0次、存储为loadBlocked，真实历史前后一致 |
+| 设备未覆盖 / 边界 | 未验证或环境边界 | 改模型后召回：设备上的服务商只配置1个模型且没有模型目录地址，App内“连接并加载模型”不可用；要发现第二个模型只能新填目录地址（等于编造端点并改动用户配置），未做；真实服务的上下文超限未诱发（错误形状由设备上的隔离夹具验证）；灵动岛机型的任务面板收起手势只有原生边界测试（未用灵动岛设备）；被观察App在前台时SpringBoard系统弹窗上的坐标点击现在会被归属检查拒绝，未实测。“天气”首次运行欢迎页没有天气App进程：启动返回CoreDevice 10004（报为未确认），前台进程无法识别时观察按设计拒绝 |
 | 长历史 | 主机量测 | scope行复用后每事件写入 p95：10k 条约0.02秒、50k 条约0.12秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备量测见上 |
 | bounded streaming 维护 | 主机＋设备 | 经 fork 真实 `consume` 的Core集成测试：跨fold共享deadline、URLSession取消传播、超长SSE行拒绝、终态必需；设备上一次真实整理成功 |
 
@@ -572,10 +573,12 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 待处理项与验收边界：
 - 中文召回为词法匹配（NLTokenizer词＋查询中每段中文的相邻二字＋整句），无向量。评估表（15条合成记忆、31个问题，经 `memory_search` 排序与自动记忆块两条路径）在单字不再计分后：关键词10/10、作用域5/5、遗忘2/2、无关问题0/4、带额外条目3/31（都是真实共享词），同义改写1/7（修正前4/7，差额只靠单字巧合命中）。同义改写是词法召回的真实边界，不是语义支持。
 - 摘要单个安全段大于一次摘要输入（目标的60%）时不拆段，规划停在它之前；追赶期间较早原文仍按硬上限拒绝过大请求。设备上本机上限1000–3000时即为此情形：每个测试轮次都大于fold预算，没有fold，只由主请求硬上限拒绝。
-- 整文件写仍高于0.2秒：补丁事件在50k时p95约0.10秒，但启动后首次写（逐条编码，50k约1.2秒）与热整写（布局溢出、每512次补丁、文件被外部改动；50k 0.30–0.35秒）仍按整文件成本；容量使50k文件由110 MB增至124 MB。
+- 整文件写仍高于0.2秒：补丁事件在50k时p95约0.11秒；无法采用的首次写（50k 0.65–0.67秒）与热整写（每512次补丁、文件被外部改动、首个会话移动；50k 0.31–0.36秒，主要是整文件原子写的I/O）仍按整文件成本；容量使50k文件由110 MB增至123 MB。
+- 未解决：12 mini上一次脚本助手 `wait` 等待后的读屏没有返回（当时界面上有选择表与键盘），该轮停在“正在停止”十分钟以上，停止与600秒期限都无法结束，因为原生DDI调用没有宿主侧超时；重启App后为中断、不重放。原生读取为何不返回尚未查明。
+- 准备期被停止的轮次详情沿用未授权路由的“已取消排队任务。”，措辞不完全准确（未修改）。
 - 改模型后召回：设备上只有1个模型且无模型目录地址，未做（需要新填端点）。
 - 超预算摘要拒发在设备上以本机上限4000验证（宿主规划器在拉回的历史上算出：1000–3000没有fold，3500–4999有一段fold且整段整理请求超过上限）：界面显示整理请求估计超过输入上限、未发送不重试的说明，该轮未登记fold读取、无新摘要、无回复，随后主请求被硬上限拒绝；“未发送”依据源码顺序（预算检查在登记读取与producer之前），不是抓包。
-- 维护中遗忘只以故障注入在设备上验证：自然的整理窗口（登记读取到摘要提交）短于在界面上打开遗忘面板所需的时间（多次尝试中面板打开前整理已结束），故用 `-PocketAgentHoldMaintenanceDispatch`。等待期间遗忘预览显示当前任务将被停止，确认后该轮以来源已被遗忘停止（未开始执行、草稿归还），无回复、无新摘要；摘要数减少是遗忘闭包本身的失效。这不证明真实摘要流的中途取消或150秒期限，二者仍只在主机验证。脚本助手在设备上的存储变脏/遗忘停止未实测（主机经真实Python助手与共享准入验证）。
+- 维护中遗忘仍只以故障注入（发送前等待）验证准备期；真实服务商流的停止用停止按钮的同一路径在第一段文本时触发（诊断开关），不是人工点击时机。
 - 由于AX读取在本轮设备上被跨进程子元素拒绝（键盘），设备验收以截图、OCR定位与历史文件核对完成。
 
 原方案明确后置（不计入P1–P4漏实现）：跨设备统一助理、自动学习候选、并行与全天候/主动提醒、模型写记忆工具（exact grant）、向量检索。
@@ -601,6 +604,8 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - 宿主超上限拒绝文案为“超过本机输入上限 1000输入上限 1000”（预算标签已含上限）。改为只说一次上限并在括号中给出来源。
 - 记忆检索把单字（在、对、去）计为命中：评估表中“我对什么过敏”也返回健身房条目、无关的订票问题返回周末条目、31个问题中11个带额外条目。改为单字不计分、保留整句与查询中文段的二字（分词把“组会”拆成单字时仍能命中）。
 - 每写一个事件都把scope索引（50k成员行、8,334个root行）整体重新编码，root/遮罩行排序时在比较中反复格式化UUID：12 mini 50k每事件 p95 0.55秒。改为未变行复用已编码字节并按同一唯一哨兵拼接、排序键只格式化一次；格式与原子写不变。
+- 首版稳定布局下整文件写仍频繁：文件字段在前，助理部分超出余量、任一会话溢出或会话列表变化、以及每次启动后的首次写都整写（50k冷启动1.2秒）。改为会话在前、文件字段在后无余量，从首个移动会话起补丁，缺失项并行编码，启动文件经整字节校验后采用。
+- 运行中的主线轮次因遗忘被停止时，详情显示手机运行的笼统原因“手机助手未完成本轮”。已授权后被撤销的轮次改为给出来源已被遗忘的原因（`StartedTurnOutcome`）。
 - 每个事件都重写整份历史文件：12 mini上50k（110 MB）每事件p95 0.48–0.89秒，主要是整文件原子写，编码约0.14秒。改为稳定布局（文件字段、各会话字段与各消息数组后留空白容量，同一JSON值）加克隆补丁写：文件身份（设备、inode、大小、修改与变更时间，克隆前后各查一次）与最后发布一致时克隆、只写变化区间、fsync后rename；否则整文件原子写。补丁事件p95降至0.10–0.11秒。
 - 布局容量起初对每个会话套用由整份历史算出的下限：110 MB主线旁的1,000个小任务会各得1 MiB空白（约1 GB）。改为每个区域只按自身长度留余量（消息数组1/8且至少16 KiB、会话字段1/2且至少1 KiB、文件字段1/8且至少64 KiB）；回归覆盖大主线旁400个小任务与50个空任务的逐区余量、总量上界与JSON值。
 - JSONEncoder默认键序每次编码都不同（同一未变会话重编码200次全部不同），未变区域被当成已变。布局的外壳改用有序键；回归要求未变文件不产生写入区间。
@@ -618,6 +623,8 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 - 补丁写前逐字节核对克隆：克隆是新inode，页面全冷，12 mini上读取比较至少0.17秒；改为身份守卫加每512次整写。
 - 按结构体原始内存逐字节判断消息未变：依赖ABI与填充字节；改用普通相等比较（50k约9毫秒，主机）。
 - 拆成多文件或追加日志：改变单一原子文件格式；稳定布局保持同一JSON值。
+- 把消息数组整体一次编码再切片：主机50k上与逐条编码同为约0.39秒，没有收益；改为并行编码缺失项。
+- 启动时凭结构扫描或抽样解码采用文件：同长同值换键序的文件会被接受；改为逐条重编码后整字节相等。
 - 维护期遗忘验收时阻塞事件回调或伪造进度把整理拉长：阻塞或不可取消且伪造进度；改为发送前可取消等待的启动参数故障注入，150秒期限仍在主机验证。
 
 </details>
