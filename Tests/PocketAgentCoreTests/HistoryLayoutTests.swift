@@ -421,10 +421,18 @@ struct PatchingHistoryWriterTests {
     /// or not class C after setting it) is not published by a patch; the
     /// whole write publishes instead and the file stays exact.
     @Test func anUnconfirmedProtectionClassFallsBackToAWholeWrite() async throws {
+        // Only the clone's class is unconfirmable; the whole write's own file
+        // goes through the real calls (and must confirm class C itself).
+        func isClone(_ fd: Int32) -> Bool {
+            var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            return fcntl(fd, F_GETPATH, &path) == 0 && String(cString: path).contains(".patch-")
+        }
+        let real: (Int32) -> Int32 = { fcntl($0, F_GETPROTECTIONCLASS) }
+        let realSet: (Int32, Int32) -> Int32 = { fcntl($0, F_SETPROTECTIONCLASS, $1) }
         let cases: [(String, (Int32) -> Int32, (Int32, Int32) -> Int32)] = [
-            ("unreadable", { _ in errno = EINVAL; return -1 }, { _, _ in 0 }),
-            ("set fails", { _ in 2 }, { _, _ in errno = EPERM; return -1 }),
-            ("set does not stick", { _ in 2 }, { _, _ in 0 }),
+            ("unreadable", { isClone($0) ? { errno = EINVAL; return -1 }() : real($0) }, { isClone($0) ? 0 : realSet($0, $1) }),
+            ("set fails", { isClone($0) ? 2 : real($0) }, { isClone($0) ? { errno = EPERM; return -1 }() : realSet($0, $1) }),
+            ("set does not stick", { isClone($0) ? 2 : real($0) }, { isClone($0) ? 0 : realSet($0, $1) }),
         ]
         for (name, get, set) in cases {
             let fixture = Fixture()

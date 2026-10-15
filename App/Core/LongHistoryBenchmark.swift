@@ -77,6 +77,83 @@ enum LongHistoryBenchmark {
         return ProcessInfo.processInfo.systemUptime - start
     }
 
+    private static func stages(_ timing: HistoryWholeTiming?) -> Any {
+        guard let t = timing else { return NSNull() }
+        return ["createSeconds": t.create, "emitSeconds": t.emit, "writeSeconds": t.write, "writeCalls": t.writeCalls,
+                "fsyncSeconds": t.fsync, "closeSeconds": t.close, "renameSeconds": t.rename, "statSeconds": t.stat,
+                "totalSeconds": t.total]
+    }
+
+    /// The old whole path on the same layout, to a separate sandbox file:
+    /// assembling the image, `Data.write(.atomic, class C)`, then `stat`.
+    private static func foundationReference(_ layout: HistoryLayout, directory: URL) throws -> [String: Any] {
+        let storage = HistoryStorage(url: directory.appendingPathComponent("reference.json"))
+        var image = Data()
+        let assemble = seconds { image = layout.image() }
+        let write = try seconds { try storage.write(image) }
+        var info = stat(), statOK = false
+        let status = seconds { statOK = fstatat(AT_FDCWD, storage.url.path, &info, 0) == 0 }
+        return ["imageSeconds": assemble, "atomicWriteSeconds": write, "statSeconds": status, "statOK": statOK,
+                "totalSeconds": assemble + write + status, "bytes": image.count]
+    }
+
+    /// The region writer on the same final layout, to a separate sandbox file
+    /// (no planning; paired with `foundationReference`).
+    private static func regionPaired(_ layout: HistoryLayout, directory: URL) throws -> [String: Any] {
+        let storage = HistoryStorage(url: directory.appendingPathComponent("paired.json"))
+        let written = try storage.writeWhole(layout)
+        guard var timing = stages(written.timing) as? [String: Any] else { throw Failure(detail: "paired: timing") }
+        timing["statOK"] = written.identity != nil
+        timing["bytes"] = layout.size
+        return timing
+    }
+
+    /// The same image already in memory, through explicit calls to a separate
+    /// sandbox file: exclusive create with class C, one pwrite loop, fsync,
+    /// close, rename, fstatat. The I/O cost of this one strategy on this run.
+    private static func syscallFloor(_ image: Data, directory: URL) throws -> [String: Any] {
+        let dir = open(directory.path, O_RDONLY | O_DIRECTORY)
+        guard dir >= 0 else { throw Failure(detail: "floor: directory") }
+        defer { close(dir) }
+        let temporary = ".floor-\(UUID().uuidString)"
+        var mark = ProcessInfo.processInfo.systemUptime
+        func lap() -> Double { let now = ProcessInfo.processInfo.systemUptime; defer { mark = now }; return now - mark }
+        let fd = openat(dir, temporary, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw Failure(detail: "floor: create") }
+        _ = fcntl(fd, F_SETPROTECTIONCLASS, HistoryStorage.protectionClass)
+        let protected = fcntl(fd, F_GETPROTECTIONCLASS) == HistoryStorage.protectionClass
+        // Where class C is required it must be confirmed, or the sample is not
+        // a comparable durable write and nothing is published.
+        if !protected && HistoryPatchCalls.protectionRequiredByPlatform {
+            close(fd); unlinkat(dir, temporary, 0)
+            return ["valid": false, "invalidReason": "class C not confirmed"]
+        }
+        let create = lap()
+        var done = 0
+        try image.withUnsafeBytes { bytes in
+            while done < bytes.count {
+                let written = pwrite(fd, bytes.baseAddress! + done, bytes.count - done, off_t(done))
+                if written < 0, errno == EINTR { continue }
+                guard written > 0 else { close(fd); unlinkat(dir, temporary, 0); throw Failure(detail: "floor: pwrite") }
+                done += written
+            }
+        }
+        let write = lap()
+        guard fsync(fd) == 0 else { close(fd); unlinkat(dir, temporary, 0); throw Failure(detail: "floor: fsync") }
+        let sync = lap()
+        guard close(fd) == 0 else { unlinkat(dir, temporary, 0); throw Failure(detail: "floor: close") }
+        let closing = lap()
+        guard renameat(dir, temporary, dir, "floor.json") == 0 else { unlinkat(dir, temporary, 0); throw Failure(detail: "floor: rename") }
+        let rename = lap()
+        var info = stat()
+        let statOK = fstatat(dir, "floor.json", &info, AT_SYMLINK_NOFOLLOW) == 0
+        let status = lap()
+        return ["valid": true, "createSeconds": create, "writeSeconds": write, "fsyncSeconds": sync, "closeSeconds": closing,
+                "renameSeconds": rename, "statSeconds": status, "statOK": statOK,
+                "totalSeconds": create + write + sync + closing + rename + status,
+                "classCConfirmed": protected, "bytes": done]
+    }
+
     private static func percentile(_ values: [Double], _ p: Double) -> Double {
         let sorted = values.sorted()
         return sorted[min(sorted.count - 1, Int((Double(sorted.count - 1) * p).rounded()))]
@@ -85,6 +162,7 @@ enum LongHistoryBenchmark {
     /// Yields between samples and phases (never inside a write), so a long
     /// run does not hold the main actor for its whole duration.
     static func report(sizes: [Int], directory: URL, label: String) async throws -> Data {
+        let started = Date()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let storage = HistoryStorage(url: directory.appendingPathComponent("history.json"))
@@ -112,6 +190,7 @@ enum LongHistoryBenchmark {
             }
             let firstMode = store.lastMode?.rawValue ?? "none"
             let firstSplit = (plan: store.lastPlanSeconds, write: store.lastWriteSeconds)
+            let firstStages = stages(store.lastWholeTiming)
             var events: [Double] = [], plans: [Double] = [], writes: [Double] = [], changed: [Int] = []
             var modes: [String: Int] = [:]
             var durable = true
@@ -137,13 +216,14 @@ enum LongHistoryBenchmark {
             let relaunched = PatchingHistoryWriter(storage: storage, wholeWriteEvery: 4)
             let launchedOwner = HistoryOwner(file: source.file, store: relaunched)
             guard let hydration, launchedOwner.adopt(hydration) else { throw Failure(detail: "启动文件未被采用") }
-            var after: [(name: String, seconds: Double, mode: String, plan: Double, write: Double, bytes: Int)] = []
+            var after: [(name: String, seconds: Double, mode: String, plan: Double, write: Double, bytes: Int, stages: Any)] = []
             func timed(_ name: String, _ edit: @escaping @Sendable (inout HistoryFile) throws -> Void) throws {
                 var ok = false
                 let elapsed = seconds { ok = launchedOwner.record(edit) }
                 guard ok, launchedOwner.health == .ready else { throw Failure(detail: "\(name) 写入失败") }
+                // Read right away: the next write replaces these.
                 after.append((name, elapsed, relaunched.lastMode?.rawValue ?? "none", relaunched.lastPlanSeconds,
-                              relaunched.lastWriteSeconds, relaunched.lastChangedBytes))
+                              relaunched.lastWriteSeconds, relaunched.lastChangedBytes, stages(relaunched.lastWholeTiming)))
             }
             for index in 0..<5 {
                 await Task.yield()
@@ -156,6 +236,13 @@ enum LongHistoryBenchmark {
             try timed("identityChangeWhole") {
                 try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "整体写"), to: primary, root: root)
             }
+            for index in 0..<3 {
+                await Task.yield()
+                guard utimes(storage.url.path, nil) == 0 else { throw Failure(detail: "无法更新文件时间") }
+                try timed("identityChangeWholeRepeat") {
+                    try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "整体写 \(index)"), to: primary, root: root)
+                }
+            }
             // A session added after the others, then outgrowing its capacity.
             let task = ChatSession(selection: nil, title: "量测任务")
             try timed("appendSession") { $0.sessions.append(task) }
@@ -165,13 +252,26 @@ enum LongHistoryBenchmark {
                 }
             }
             let expected: [String: String] = ["firstAfterAdoption": "patch", "periodicWhole": "whole",
-                                              "identityChangeWhole": "wholeAfterIdentityChange", "appendSession": "patch",
+                                              "identityChangeWhole": "wholeAfterIdentityChange",
+                                              "identityChangeWholeRepeat": "wholeAfterIdentityChange", "appendSession": "patch",
                                               "laterSessionOverflow": "patch"]
             guard after.allSatisfy({ path in expected[path.name].map { $0 == path.mode } ?? true }) else {
                 throw Failure(detail: "写入方式与预期不符")
             }
             let paths = after.map { ["name": $0.name, "seconds": $0.seconds, "mode": $0.mode, "planSeconds": $0.plan,
-                                     "writeSeconds": $0.write, "changedBytes": $0.bytes] as [String: Any] }
+                                     "writeSeconds": $0.write, "changedBytes": $0.bytes, "wholeStages": $0.stages] as [String: Any] }
+            // The old whole path and the explicit-call floor on the same final
+            // layout, separate sandbox files, after the production writes.
+            guard let finalLayout = relaunched.published?.layout else { throw Failure(detail: "缺少发布的布局") }
+            var references: [[String: Any]] = [], paired: [[String: Any]] = [], floors: [[String: Any]] = []
+            for _ in 0..<3 {
+                await Task.yield()
+                references.append(try foundationReference(finalLayout, directory: directory))
+                await Task.yield()
+                paired.append(try regionPaired(finalLayout, directory: directory))
+                await Task.yield()
+                floors.append(try syscallFloor(finalLayout.image(), directory: directory))
+            }
             // Complete bytes: the file is exactly the published layout's whole
             // image, and decodes to the owner's state.
             let onDisk = try Data(contentsOf: storage.url)
@@ -196,6 +296,8 @@ enum LongHistoryBenchmark {
             let display = seconds { items = TranscriptItem.build(file.sessions[0].messages) }
             let tail = seconds { _ = TranscriptItem.build(Array(file.sessions[0].messages.suffix(400))) }
             results.append(["messages": size, "fileBytes": data.count, "layoutFileBytes": onDisk.count,
+                            "firstRecordWholeStages": firstStages, "foundationReference": references,
+                            "regionPaired": paired, "syscallFloor": floors, "finalLayoutBytes": finalLayout.size,
                             "encodeSeconds": encode, "writeSeconds": write,
                             "decodeSeconds": decode, "roots": allRoots.count, "registerReadsSeconds": register,
                             "forgetPreviewSeconds": preview, "forgetClosureRoots": closure, "validateGraphSeconds": validate,
@@ -213,7 +315,19 @@ enum LongHistoryBenchmark {
                             "fullDisplayBuildSeconds": display,
                             "displayItems": items.count, "tail400DisplayBuildSeconds": tail])
         }
-        return try JSONSerialization.data(withJSONObject: ["configuration": label, "results": results],
+        let labels = [
+            "encodeSeconds/writeSeconds": "generic codec encoding + HistoryStorage.write (Foundation .atomic), not the layout writer",
+            "firstRecord/afterLaunchPaths": "production PatchingHistoryWriter; whole writes are the region writer (exclusive temp, class C, bounded buffer, fsync, close, rename)",
+            "periodicWhole": "benchmark interval 4 (production 512)",
+            "foundationReference": "old whole path on the same final layout: image() + Data.write(.atomic, class C) + stat, separate sandbox file",
+            "regionPaired": "region writer on that same final layout, no planning, separate sandbox file; paired with foundationReference (production cold/periodic/identity writes are earlier, smaller layouts and include planning)",
+            "syscallFloor": "the same image prebuilt in memory: one pwrite loop + fsync + close + rename + fstatat, separate sandbox file; this strategy on this run only",
+            "memory": "not measured; the region writer's explicit buffer is 4 MiB (a bound, not a process measurement)",
+        ]
+        return try JSONSerialization.data(withJSONObject: ["configuration": label, "results": results, "labels": labels,
+                                                           "runNonce": UUID().uuidString,
+                                                           "startedAt": ISO8601DateFormatter().string(from: started),
+                                                           "pid": Int(ProcessInfo.processInfo.processIdentifier)],
                                           options: [.prettyPrinted, .sortedKeys])
     }
 }
