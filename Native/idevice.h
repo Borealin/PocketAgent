@@ -9866,6 +9866,45 @@ void wda_bridge_free(struct WdaBridgeHandle *handle);
 
 /**
  * # Safety
+ * Borrowed adapter/handshake and output pointers must be valid; the caller
+ * serializes them with every other tunnel use. `expires_at_ms` is the
+ * wall-clock expiry the app fixed before the handoff (at most 15 s is used);
+ * a passed expiry checks nothing. `installed` receives whether the developer
+ * disk image is mounted; a timeout or failure is an error, never "not installed".
+ */
+struct IdeviceFfiError *pocket_ddi_installed(struct AdapterHandle *a,
+                                             struct RsdHandshakeHandle *h,
+                                             uint64_t expires_at_ms,
+                                             bool *installed);
+
+/**
+ * # Safety
+ * As `pocket_ddi_installed` (at most 120 s of the expiry is used; a passed
+ * expiry mounts nothing); `assets` comes from `cryptex1_assets_load` and stays
+ * owned by the caller. Installs (mounts) the developer disk image; after a
+ * timeout the outcome is unknown.
+ */
+struct IdeviceFfiError *pocket_ddi_mount(struct AdapterHandle *a,
+                                         struct RsdHandshakeHandle *h,
+                                         struct Cryptex1AssetsHandle *assets,
+                                         uint64_t expires_at_ms);
+
+/**
+ * # Safety
+ * As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
+ * expiry reads nothing). The installed applications' InstallationProxy
+ * records, unfiltered, as the plist array `installation_proxy_get_apps`
+ * returns; free it with `installation_proxy_free_apps(out, len)`. One fresh
+ * InstallationProxy connection, closed when the limit ends the read.
+ */
+struct IdeviceFfiError *pocket_installed_apps(struct AdapterHandle *a,
+                                              struct RsdHandshakeHandle *h,
+                                              uint64_t expires_at_ms,
+                                              void **out_result,
+                                              size_t *out_result_len);
+
+/**
+ * # Safety
  * Borrowed adapter/handshake and output pointers must be valid. The caller
  * serializes all operations and frees the DDI session before tunnel handles.
  */

@@ -425,10 +425,14 @@ fn unix_ms() -> u64 {
 /// handing the call to its worker thread, at most 35 s. Handoff delay is
 /// deducted, never replenished; an absent or passed expiry dispatches nothing.
 fn admission_window(expires_at_ms: u64, now_ms: u64) -> Result<Duration, IdeviceError> {
+    expiry_window(expires_at_ms, now_ms, MAX_CALL_BUDGET_MS)
+}
+/// As `admission_window`, with the caller's cap.
+fn expiry_window(expires_at_ms: u64, now_ms: u64, cap_ms: u64) -> Result<Duration, IdeviceError> {
     if expires_at_ms == 0 || now_ms >= expires_at_ms {
         return Err(error(BUDGET_REFUSED));
     }
-    Ok(Duration::from_millis((expires_at_ms - now_ms).min(MAX_CALL_BUDGET_MS)))
+    Ok(Duration::from_millis((expires_at_ms - now_ms).min(cap_ms)))
 }
 /// Admission before each stage and physical effect: not cancelled and not past
 /// the call's expiry. Cleanup and finalization never consult it.
@@ -1426,6 +1430,130 @@ mod keyboard_sequence_tests {
     }
 }
 
+/// Phone preparation steps before a session exists (image check and mount,
+/// app inventory), bounded. Each owns one fresh service connection, so ending
+/// it at the limit closes only that connection, never the tunnel. The limit
+/// holds while the step polls cooperatively; it cannot preempt synchronous
+/// work. Without a bound, a cryptexd that never answered kept a turn's phone
+/// preparation (and a script waiting on it) alive past Stop and the deadline.
+async fn within<T>(
+    limit: Duration,
+    what: &str,
+    f: impl Future<Output = Result<T, IdeviceError>>,
+) -> Result<T, IdeviceError> {
+    tokio::time::timeout(limit, f).await.map_err(|_| {
+        tracing::warn!(what, "DDI image check timed out");
+        error(format!("{what} timed out"))
+    })?
+}
+const IMAGE_CHECK_CAP_MS: u64 = 15_000;
+const IMAGE_MOUNT_CAP_MS: u64 = 120_000;
+/// # Safety
+/// Borrowed adapter/handshake and output pointers must be valid; the caller
+/// serializes them with every other tunnel use. `expires_at_ms` is the
+/// wall-clock expiry the app fixed before the handoff (at most 15 s is used);
+/// a passed expiry checks nothing. `installed` receives whether the developer
+/// disk image is mounted; a timeout or failure is an error, never "not installed".
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_ddi_installed(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    expires_at_ms: u64,
+    installed: *mut bool,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() || installed.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    unsafe { *installed = false };
+    let result = run_sync_local(async {
+        // Measured once the runtime runs this future, before any connection.
+        let limit = expiry_window(expires_at_ms, unix_ms(), IMAGE_CHECK_CAP_MS)?;
+        within(limit, "DDI image status check",
+            idevice::cryptexd::installed_ddi(unsafe { &mut (*a).0 }, unsafe { &mut (*h).0 })).await
+    });
+    match result {
+        Ok(found) => {
+            unsafe { *installed = found.is_some() };
+            null_mut()
+        }
+        Err(e) => ffi_err!(e),
+    }
+}
+/// # Safety
+/// As `pocket_ddi_installed` (at most 120 s of the expiry is used; a passed
+/// expiry mounts nothing); `assets` comes from `cryptex1_assets_load` and stays
+/// owned by the caller. Installs (mounts) the developer disk image; after a
+/// timeout the outcome is unknown.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_ddi_mount(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    assets: *mut crate::cryptexd::Cryptex1AssetsHandle,
+    expires_at_ms: u64,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() || assets.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    let result = run_sync_local(async {
+        // Measured once the runtime runs this future, before any connection.
+        let limit = expiry_window(expires_at_ms, unix_ms(), IMAGE_MOUNT_CAP_MS)?;
+        within(limit, "DDI image mount",
+            idevice::cryptexd::install_ddi(unsafe { &mut (*a).0 }, unsafe { &mut (*h).0 }, unsafe { &(*assets).0 })).await
+    });
+    match result {
+        Ok(_) => null_mut(),
+        Err(e) => ffi_err!(e),
+    }
+}
+
+const APP_INVENTORY_CAP_MS: u64 = 15_000;
+/// # Safety
+/// As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
+/// expiry reads nothing). The installed applications' InstallationProxy
+/// records, unfiltered, as the plist array `installation_proxy_get_apps`
+/// returns; free it with `installation_proxy_free_apps(out, len)`. One fresh
+/// InstallationProxy connection, closed when the limit ends the read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_installed_apps(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    expires_at_ms: u64,
+    out_result: *mut *mut std::ffi::c_void,
+    // Same ABI as `installation_proxy_get_apps` (size_t), freed the same way.
+    out_result_len: *mut libc::size_t,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() || out_result.is_null() || out_result_len.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    unsafe {
+        *out_result = null_mut();
+        *out_result_len = 0;
+    }
+    let result: Result<Vec<plist_ffi::plist_t>, IdeviceError> = run_sync_local(async {
+        let limit = expiry_window(expires_at_ms, unix_ms(), APP_INVENTORY_CAP_MS)?;
+        within(limit, "Installed application inventory", async {
+            let mut client = idevice::installation_proxy::InstallationProxyClient::connect_rsd(
+                unsafe { &mut (*a).0 }, unsafe { &mut (*h).0 }).await?;
+            let apps = client.get_apps(None, None).await?;
+            Ok(apps.into_values().map(|v| plist_ffi::PlistWrapper::new_node(v).into_ptr()).collect())
+        })
+        .await
+    });
+    match result {
+        Ok(apps) => {
+            let apps = apps.into_boxed_slice();
+            let len = apps.len();
+            let apps = Box::into_raw(apps);
+            unsafe {
+                *out_result_len = len;
+                *out_result = apps as *mut plist_ffi::plist_t as *mut std::ffi::c_void;
+            }
+            null_mut()
+        }
+        Err(e) => ffi_err!(e),
+    }
+}
+
 /// # Safety
 /// Borrowed adapter/handshake and output pointers must be valid. The caller
 /// serializes all operations and frees the DDI session before tunnel handles.
@@ -1893,6 +2021,20 @@ mod call_lifecycle_tests {
         let released = hid.exchange(async |w| bounded(w.call(99, false)).await).await;
         assert_eq!(released.unwrap(), 99);
         assert!(release_confirmed(true, dirty_before));
+    }
+    #[tokio::test]
+    async fn an_unanswered_image_check_ends_at_its_limit_as_an_error() {
+        let started = Instant::now();
+        let result = within(Duration::from_millis(30), "DDI image status check",
+            std::future::pending::<Result<bool, IdeviceError>>()).await;
+        assert_eq!(message(result.unwrap_err()), "DDI image status check timed out");
+        assert!(started.elapsed() < Duration::from_millis(1000));
+        assert!(within(Duration::from_millis(30), "x", async { Ok::<_, IdeviceError>(true) }).await.unwrap());
+        // The app's expiry, less the handoff delay, under each operation's own cap.
+        assert_eq!(expiry_window(100_000, 99_000, IMAGE_CHECK_CAP_MS).unwrap(), Duration::from_secs(1));
+        assert_eq!(expiry_window(500_000, 0, IMAGE_CHECK_CAP_MS).unwrap(), Duration::from_secs(15));
+        assert_eq!(expiry_window(500_000, 0, IMAGE_MOUNT_CAP_MS).unwrap(), Duration::from_secs(120));
+        assert_eq!(message(expiry_window(100_000, 100_000, IMAGE_MOUNT_CAP_MS).unwrap_err()), BUDGET_REFUSED);
     }
     #[test]
     fn a_diagnostic_stall_happens_once_per_session_and_stage() {

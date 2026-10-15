@@ -602,7 +602,8 @@ final class PhoneExecutor {
         control.cancellationCheck = proceed
         let deadline = deadline, cap = DeviceSettings.ddiCallBudgetCap
         control.budget = { DDICallBudget.seconds(remaining: deadline.remaining, cap: cap) }
-        defer { control.cancellationCheck = nil; control.budget = nil }
+        control.turnEnd = deadline.end
+        defer { control.cancellationCheck = nil; control.budget = nil; control.turnEnd = nil }
         let args = call.arguments.objectValue ?? [:], name = call.name
         do {
             try proceed()

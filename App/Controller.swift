@@ -159,22 +159,23 @@ final class DeviceConnection {
         defer { inputReleaseUnconfirmed = inputReleaseUnconfirmed || unconfirmed }
         try check(pocket_ddi_close(session, cancel, &unconfirmed))
     }
-    func hasDDI() -> Bool {
-        var installed: UnsafeMutablePointer<InstalledCryptexC>?
-        if let error = cryptexd_installed_ddi(adapter, handshake, &installed) {
-            idevice_error_free(error)
-            return false
-        }
-        guard let installed else { return false }
-        cryptexd_free_installed_cryptex(installed)
-        return true
+    /// Whether the developer disk image is mounted, by the wall-clock expiry
+    /// fixed before this call was handed over. A check that times out or fails
+    /// throws; it is never read as "not installed" (which would download and
+    /// mount an image).
+    func hasDDI(expiresAt: UInt64) throws -> Bool {
+        var installed = false
+        try check(pocket_ddi_installed(adapter, handshake, expiresAt, &installed))
+        return installed
     }
-    func mountDDI(_ directory: URL) throws {
+    /// Mounts the image by its expiry (natively bounded; a passed expiry mounts
+    /// nothing). After a timeout the outcome is unknown; it is never retried here.
+    func mountDDI(_ directory: URL, expiresAt: UInt64) throws {
         var assets: OpaquePointer?
         try directory.path.withCString { try check(cryptex1_assets_load($0, &assets)) }
         guard let assets else { throw failure("Missing Cryptex assets") }
         defer { cryptex1_assets_free(assets) }
-        try check(cryptexd_install_ddi(adapter, handshake, assets, nil))
+        try check(pocket_ddi_mount(adapter, handshake, assets, expiresAt))
     }
     func connectRunnerDVT() throws {
         guard !ownsRunner else { throw failure("This turn already owns a runner") }
@@ -182,15 +183,14 @@ final class DeviceConnection {
         try check(remote_server_connect_rsd(adapter, handshake, &server))
         guard server != nil else { throw failure("Missing DVT server") }
     }
-    func installedApplications() throws -> [InstalledApp] {
+    /// The installed applications' InstallationProxy records, read by the
+    /// wall-clock expiry fixed before this call was handed over (natively
+    /// bounded; a passed expiry reads nothing).
+    func installedApplications(expiresAt: UInt64) throws -> [InstalledApp] {
         guard let adapter, let handshake, process == nil else { throw failure("Missing available device tunnel") }
-        var client: OpaquePointer?
-        defer { if let client { installation_proxy_client_free(client) } }
-        try check(installation_proxy_connect_rsd(adapter, handshake, &client))
-        guard let client else { throw failure("Missing installation service") }
         var raw: UnsafeMutableRawPointer?
         var count = 0
-        try check(installation_proxy_get_apps(client, nil, nil, 0, &raw, &count))
+        try check(pocket_installed_apps(adapter, handshake, expiresAt, &raw, &count))
         let apps = raw?.assumingMemoryBound(to: plist_t?.self)
         defer { if let apps { installation_proxy_free_apps(apps, UInt(count)) } }
         guard count == 0 || apps != nil else { throw failure("Missing installed application records") }
@@ -589,7 +589,11 @@ final class Model: ObservableObject {
             Task { await runtime.cancel() }
         } else { job?.cancel() }
     }
-    private func preparePhoneTransport() async throws -> DeviceConnection {
+    /// `stopRequested` is the executor's own check (Stop, turn deadline, script
+    /// lease, storage gates), rechecked between preparation steps; `turnEnd`
+    /// bounds every step's expiry.
+    private func preparePhoneTransport(turnEnd: Date,
+                                       stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws -> DeviceConnection {
         let device: DeviceConnection
         if let existing = connection {
             // A failed HTTP/session setup may already own a running process.
@@ -611,50 +615,126 @@ final class Model: ObservableObject {
             connection = device
             log("rp_tunnel_connected")
         }
-        if !(try await ffi { device.hasDDI() }) {
-            log("ddi_download")
+        if stopRequested() { throw PhonePreparationStopped() }
+        guard let checkExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+        let checkExpiresAt = DDIImagePreparation.milliseconds(checkExpiry)
+        let checkStarted = ContinuousClock.now
+        func checkMs() -> Int { Int((ContinuousClock.now - checkStarted) / .milliseconds(1)) }
+        log("ddi_check_started")
+        let installed: Bool
+        do { installed = try await ffi { try device.hasDDI(expiresAt: checkExpiresAt) } } catch {
+            log("ddi_check_finished", ["ms": checkMs(), "outcome": error.localizedDescription.contains("timed out") ? "timeout" : "error"])
+            throw failure("无法确认手机上的开发者磁盘映像状态；未执行手机操作。请稍后重试或检查 VPN 与手机连接。")
+        }
+        log("ddi_check_finished", ["ms": checkMs(), "outcome": installed ? "installed" : "missing"])
+        if stopRequested() { throw PhonePreparationStopped() }
+        if !installed {
+            // Downloads and the mount share one budget, cut by the turn's end.
+            let preparationEnd = DDIImagePreparation.preparationEnd(now: Date(), turnEnd: turnEnd)
+            let stopped = PhonePreparationStopped()
             let directory = documents.appendingPathComponent("DDI", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
-                let destination = directory.appendingPathComponent(name)
-                if !FileManager.default.fileExists(atPath: destination.path) {
-                    let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
-                    let (temporary, response) = try await URLSession.shared.download(from: url)
-                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
-                    try FileManager.default.moveItem(at: temporary, to: destination)
+            let names = ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"]
+            let missing = names.filter { !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
+            log("ddi_download", ["files": missing.count])
+            for (index, name) in missing.enumerated() {
+                if stopRequested() { throw stopped }
+                let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
+                let started = ContinuousClock.now
+                do { try await downloadImageFile(url, to: directory.appendingPathComponent(name), until: preparationEnd,
+                                                 stopRequested: stopRequested) } catch {
+                    log("ddi_download_file", ["index": index, "ms": Int((ContinuousClock.now - started) / .milliseconds(1)), "outcome": "failed"])
+                    throw stopRequested() ? stopped : error
                 }
+                log("ddi_download_file", ["index": index, "ms": Int((ContinuousClock.now - started) / .milliseconds(1)), "outcome": "ok"])
             }
-            try await ffi { try device.mountDDI(directory) }
+            if stopRequested() { throw stopped }
+            guard let mountExpiry = DDIImagePreparation.mountExpiry(now: Date(), preparationEnd: preparationEnd) else {
+                throw failure("开发者磁盘映像准备超出时限；未挂载，未执行手机操作。")
+            }
+            // Fixed before the handoff; native code deducts the delay.
+            let mountExpiresAt = DDIImagePreparation.milliseconds(mountExpiry)
+            log("ddi_mount_started", ["limitMs": Int(mountExpiry.timeIntervalSinceNow * 1000)])
+            let mountStarted = ContinuousClock.now
+            do { try await ffi { try device.mountDDI(directory, expiresAt: mountExpiresAt) } } catch {
+                log("ddi_mount_finished", ["ms": Int((ContinuousClock.now - mountStarted) / .milliseconds(1)),
+                                           "outcome": error.localizedDescription.contains("timed out") ? "timeout" : "error"])
+                throw failure("开发者磁盘映像挂载未在限时内确认，结果未知；不会自动重试。下一次手机操作会先检查实际状态。")
+            }
+            log("ddi_mount_finished", ["ms": Int((ContinuousClock.now - mountStarted) / .milliseconds(1)), "outcome": "ok"])
         }
         log("ddi_ready")
         try Task.checkCancellation()
         return device
     }
-    func prepareDDI() async throws {
+    /// One image file under the preparation's absolute deadline. Stop, the turn
+    /// deadline or a revoked script lease cancel the transfer (URLSession
+    /// cancellation; no native code is involved). The file is moved into place
+    /// only after a complete 200 response.
+    private func downloadImageFile(_ url: URL, to destination: URL, until end: Date,
+                                   stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws {
+        let overrun = failure("开发者磁盘映像下载超出准备时限；未挂载，未执行手机操作。")
+        if stopRequested() { throw PhonePreparationStopped() }
+        guard Date() < end else { throw overrun }
+        let temporary = try await withThrowingTaskGroup(of: URL.self) { group in
+            group.addTask {
+                let (temporary, response) = try await URLSession.shared.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw failure("DDI download failed: \(url.lastPathComponent)")
+                }
+                return temporary
+            }
+            group.addTask {
+                while Date() < end {
+                    if await stopRequested() { throw PhonePreparationStopped() }
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+                throw overrun
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CancellationError() }
+            return first
+        }
+        // A complete file is committed only while the preparation still stands.
+        guard !stopRequested(), Date() < end else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw stopRequested() ? PhonePreparationStopped() : overrun
+        }
+        try FileManager.default.moveItem(at: temporary, to: destination)
+    }
+    func prepareDDI(turnEnd: Date, stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws {
         await acquireDeviceConnection()
         defer { releaseDeviceConnection() }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
-        let device = try await preparePhoneTransport()
+        if stopRequested() { throw PhonePreparationStopped() }
+        let device = try await preparePhoneTransport(turnEnd: turnEnd, stopRequested: stopRequested)
         guard device.ddi == nil else { return }
+        if stopRequested() { throw PhonePreparationStopped() }
         // Do not publish native readiness before the shared app catalog exists.
         // A failed catalog read leaves no DDI session that can skip this stage.
-        installedApps = try await ffi { try device.installedApplications() }
+        guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+        let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
+        installedApps = try await ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
+        if stopRequested() { throw PhonePreparationStopped() }
         try await runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
             try await self.ffi { try device.openDDI() }
         }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
+        if stopRequested() { throw PhonePreparationStopped() }
         log("ddi_services_ready")
     }
-    func prepareWDA() async throws -> String {
+    func prepareWDA(turnEnd: Date, stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws -> String {
         await acquireDeviceConnection()
         defer { releaseDeviceConnection() }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
-        let device = try await preparePhoneTransport()
+        if stopRequested() { throw PhonePreparationStopped() }
+        let device = try await preparePhoneTransport(turnEnd: turnEnd, stopRequested: stopRequested)
+        if stopRequested() { throw PhonePreparationStopped() }
         if !device.ownsRunner {
             wdaSessionBase = nil
             let override = DeviceSettings.runnerBundleIDOverride
@@ -664,8 +744,11 @@ final class Model: ObservableObject {
                 try await self.ffi { try device.connectRunnerDVT() }
             }
             try Task.checkCancellation()
+            if stopRequested() { throw PhonePreparationStopped() }
+            guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+            let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
             let apps = try await runnerStage("runner_apps_listing", description: "App 安装列表读取失败") {
-                try await self.ffi { try device.installedApplications() }
+                try await self.ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
             }
             installedApps = apps
             let installedIDs = Set(apps.map(\.bundleID))

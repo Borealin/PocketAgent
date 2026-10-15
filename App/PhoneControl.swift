@@ -10,6 +10,8 @@ protocol PhoneControl: AnyObject {
     /// Seconds the next native call may take, or nil when the turn cannot
     /// afford one (DDI only; set beside `cancellationCheck`).
     var budget: (() -> TimeInterval?)? { get set }
+    /// The end of the turn, which bounds phone preparation (set beside `cancellationCheck`).
+    var turnEnd: Date? { get set }
     func prepare() async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
@@ -42,8 +44,14 @@ final class WDAControl: PhoneControl {
     var base: String?
     var cancellationCheck: (() throws -> Void)?
     var budget: (() -> TimeInterval?)?
+    var turnEnd: Date?
     init(_ model: Model) { self.model = model }
-    func prepare() async throws { if base == nil { base = try await model.prepareWDA() } }
+    func prepare() async throws {
+        guard let turnEnd else { throw PhonePreparationStopped() }
+        if base == nil { base = try await model.prepareWDA(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true } }
+    }
+    /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
+    private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
     private var session: String { base ?? "" }
     func activeApp() async throws -> String {
         (try await model.request("GET", "\(session)/wda/activeAppInfo")["value"] as? [String: Any])?["bundleId"] as? String ?? ""
@@ -96,6 +104,12 @@ final class WDAControl: PhoneControl {
     func home() async throws { try await effect("/wda/homescreen", [:]) }
 }
 
+/// Phone preparation ended by Stop, the turn deadline, a revoked script lease
+/// or a storage gate, before anything was sent.
+struct PhonePreparationStopped: LocalizedError {
+    var errorDescription: String? { "手机准备已停止；未执行手机操作。" }
+}
+
 /// Releasing input held on the phone (touch, home, keyboard) could not be
 /// confirmed earlier in this app run; no input is sent until PocketAgent is
 /// relaunched. Raised before anything is sent.
@@ -110,6 +124,7 @@ final class DDIControl: PhoneControl {
     let model: Model
     var cancellationCheck: (() throws -> Void)?
     var budget: (() -> TimeInterval?)?
+    var turnEnd: Date?
     private var observedFrame: CGRect?
     private var observedApp: String?
     private var preparedText: String?
@@ -120,7 +135,12 @@ final class DDIControl: PhoneControl {
     static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
                                                "ax_replace", "home"]
     init(_ model: Model) { self.model = model }
-    func prepare() async throws { try await model.prepareDDI() }
+    func prepare() async throws {
+        guard let turnEnd else { throw PhonePreparationStopped() }
+        try await model.prepareDDI(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true }
+    }
+    /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
+    private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
     /// One native call on the turn's session. The expiry is fixed on the wall
     /// clock before the worker thread starts, so the handoff delay counts. The
     /// worker is always awaited to its end, cleanup included: there is no
