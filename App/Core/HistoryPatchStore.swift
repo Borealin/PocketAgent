@@ -22,7 +22,7 @@ nonisolated struct HistoryFileIdentity: Equatable, Sendable {
     }
 }
 
-/// The system calls of a patch write, replaceable in tests to inject
+/// The system calls of a patch or whole write, replaceable in tests to inject
 /// failures (ENOSPC, short writes, EINTR, rename failure, no cloning).
 nonisolated struct HistoryPatchCalls: @unchecked Sendable {
     var clone: (_ source: Int32, _ directory: Int32, _ name: String) -> Int32 = { fclonefileat($0, $1, $2, 0) }
@@ -38,6 +38,20 @@ nonisolated struct HistoryPatchCalls: @unchecked Sendable {
     var requireProtection = HistoryPatchCalls.protectionRequiredByPlatform
     /// Runs after the clone and before any byte is written (tests only).
     var afterClone: () -> Void = {}
+    /// The whole write's exclusive temporary file (no following links, 0600).
+    var create: (_ directory: Int32, _ name: String) -> Int32 = {
+        openat($0, $1, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    }
+    /// Closes the descriptor whatever it returns; never retried.
+    var close: (_ fd: Int32) -> Int32 = { Darwin.close($0) }
+    /// The published file's status after the rename.
+    var publishedStat: (_ directory: Int32, _ name: String, _ info: inout stat) -> Int32 = {
+        fstatat($0, $1, &$2, AT_SYMLINK_NOFOLLOW)
+    }
+    /// Runs after the whole write's temporary file is created (tests only).
+    var afterCreate: () -> Void = {}
+    /// The whole write's one write buffer.
+    var wholeBufferSize = 4 << 20
     static let system = HistoryPatchCalls()
     #if os(iOS)
     static let protectionRequiredByPlatform = true
@@ -58,16 +72,160 @@ nonisolated enum HistoryPatchError: Error, Equatable {
     case failed(String, Int32)
 }
 
+/// Time spent in each step of the last whole write; the steps do not overlap.
+nonisolated struct HistoryWholeTiming: Sendable {
+    /// Temporary file creation and its protection class.
+    var create = 0.0
+    /// Producing the pieces into the buffer (the write calls excluded).
+    var emit = 0.0
+    /// The write calls themselves, and how many there were.
+    var write = 0.0
+    var writeCalls = 0
+    var fsync = 0.0
+    var close = 0.0
+    var rename = 0.0
+    var stat = 0.0
+    var total: Double { create + emit + write + fsync + close + rename + stat }
+}
+
+/// Writes a layout's pieces in file order through one bounded buffer, every
+/// byte at its offset (no holes); a piece at least the buffer's size is
+/// written directly. One raw buffer for the whole write.
+nonisolated final class HistoryLayoutEmitter {
+    let fd: Int32
+    let calls: HistoryPatchCalls
+    private let buffer: UnsafeMutableRawPointer
+    private let capacity: Int
+    private var used = 0
+    /// Bytes written to the file so far.
+    private(set) var offset = 0
+
+    init(fd: Int32, calls: HistoryPatchCalls) {
+        self.fd = fd; self.calls = calls
+        capacity = max(1, calls.wholeBufferSize)
+        buffer = .allocate(byteCount: capacity, alignment: 16)
+    }
+    deinit { buffer.deallocate() }
+
+    func add(_ piece: HistoryLayout.Piece) throws {
+        switch piece {
+        case .byte(let value):
+            if used == capacity { try flush() }
+            buffer.storeBytes(of: value, toByteOffset: used, as: UInt8.self)
+            used += 1
+        case .data(let data):
+            let count = data.count
+            guard count > 0 else { return }
+            if count >= capacity {
+                try flush()
+                try data.withUnsafeBytes { try write($0.baseAddress!, count) }
+            } else {
+                if used + count > capacity { try flush() }
+                let target = buffer + used
+                data.withUnsafeBytes { target.copyMemory(from: $0.baseAddress!, byteCount: count) }
+                used += count
+            }
+        case .spaces(let count):
+            guard count >= 0 else { throw HistoryPatchError.failed("negative capacity", EINVAL) }
+            var left = count
+            while left > 0 {
+                if used == capacity { try flush() }
+                let run = min(left, capacity - used)
+                memset(buffer + used, 0x20, run)
+                used += run; left -= run
+            }
+        }
+    }
+
+    func flush() throws {
+        guard used > 0 else { return }
+        try write(UnsafeRawPointer(buffer), used)
+        used = 0
+    }
+
+    private func write(_ bytes: UnsafeRawPointer, _ count: Int) throws {
+        var done = 0
+        while done < count {
+            let written = calls.pwrite(fd, bytes + done, count - done, off_t(offset + done))
+            if written < 0, errno == EINTR { continue }
+            guard written >= 0 else { throw HistoryPatchError.failed("pwrite", errno) }
+            // Zero bytes is a failure with its own cause, not a stale errno.
+            guard written > 0 else { throw HistoryPatchError.failed("pwrite wrote nothing", EIO) }
+            done += written
+        }
+        offset += count
+    }
+}
+
 extension HistoryStorage {
     /// Data protection class C (`completeUntilFirstUserAuthentication`).
     static let protectionClass: Int32 = 3
 
-    /// The whole file through the atomic write, then its identity (nil when
-    /// it cannot be read after publication; never throws after the rename).
-    func writeWhole(_ data: Data) throws -> HistoryFileIdentity? {
-        try write(data)
-        var info = stat()
-        return stat(url.path, &info) == 0 ? HistoryFileIdentity(info) : nil
+    /// The whole file without assembling its image: an exclusive temporary
+    /// file confirmed as class C (iOS; elsewhere as `requireProtection`), the
+    /// layout's pieces written in order through one bounded buffer, fsync,
+    /// checked close, then the atomic rename. Before the rename every failure
+    /// removes the temporary file and leaves the published file untouched;
+    /// nothing throws after it. Returns the new identity (nil when it cannot be
+    /// read after the rename) and the time of each step.
+    func writeWhole(_ layout: HistoryLayout,
+                    calls: HistoryPatchCalls = .system) throws -> (identity: HistoryFileIdentity?, timing: HistoryWholeTiming) {
+        func failure(_ step: String) -> HistoryPatchError { .failed(step, errno) }
+        var timing = HistoryWholeTiming()
+        var mark = ProcessInfo.processInfo.systemUptime
+        func lap() -> Double { let now = ProcessInfo.processInfo.systemUptime; defer { mark = now }; return now - mark }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let directory = open(url.deletingLastPathComponent().path, O_RDONLY | O_DIRECTORY)
+        guard directory >= 0 else { throw failure("open directory") }
+        defer { Darwin.close(directory) }
+        let name = url.lastPathComponent
+        let temporary = ".\(name).whole-\(UUID().uuidString)"
+        let target = calls.create(directory, temporary)
+        guard target >= 0 else { throw failure("create") }
+        var open = true, committed = false
+        defer {
+            if open { _ = calls.close(target) }
+            if !committed { unlinkat(directory, temporary, 0) }
+        }
+        calls.afterCreate()
+        let current = calls.protection(target)
+        if current < 0 {
+            if calls.requireProtection { throw HistoryPatchError.protectionUnconfirmed }
+        } else if current != Self.protectionClass {
+            guard calls.setProtection(target, Self.protectionClass) == 0, calls.protection(target) == Self.protectionClass else {
+                throw HistoryPatchError.protectionUnconfirmed
+            }
+        }
+        timing.create = lap()
+        // The write calls are timed where they happen (a few dozen per write),
+        // so producing the pieces and writing them are reported apart.
+        var counted = calls
+        counted.pwrite = { fd, bytes, count, offset in
+            let started = ProcessInfo.processInfo.systemUptime
+            let written = calls.pwrite(fd, bytes, count, offset)
+            timing.write += ProcessInfo.processInfo.systemUptime - started
+            timing.writeCalls += 1
+            return written
+        }
+        let emitter = HistoryLayoutEmitter(fd: target, calls: counted)
+        try layout.visit { try emitter.add($0) }
+        try emitter.flush()
+        guard emitter.offset == layout.size else { throw HistoryPatchError.failed("size", EIO) }
+        timing.emit = lap() - timing.write
+        while calls.fsync(target) != 0 {
+            guard errno == EINTR else { throw failure("fsync") }
+        }
+        timing.fsync = lap()
+        open = false
+        guard calls.close(target) == 0 else { throw failure("close") }
+        timing.close = lap()
+        guard calls.rename(directory, temporary, name) == 0 else { throw failure("rename") }
+        committed = true
+        timing.rename = lap()
+        var published = stat()
+        let identity = calls.publishedStat(directory, name, &published) == 0 ? HistoryFileIdentity(published) : nil
+        timing.stat = lap()
+        return (identity, timing)
     }
 
     /// Loads like `load()`, reading the bytes through one descriptor; when
@@ -185,8 +343,11 @@ nonisolated final class PatchingHistoryWriter {
     /// Diagnostics of the last successful write.
     private(set) var lastMode: Mode?
     private(set) var lastPlanSeconds = 0.0
+    /// Everything after planning, as before (a whole write's steps included).
     private(set) var lastWriteSeconds = 0.0
     private(set) var lastChangedBytes = 0
+    /// The steps of the last write when it was whole; nil after a patch.
+    private(set) var lastWholeTiming: HistoryWholeTiming?
 
     /// The one writer of `storage`. A clone left by a process that ended
     /// between cloning and renaming would keep the old file's blocks alive;
@@ -197,8 +358,9 @@ nonisolated final class PatchingHistoryWriter {
     init(storage: HistoryStorage, calls: HistoryPatchCalls = .system, wholeWriteEvery: Int = PatchingHistoryWriter.patchesPerWholeWrite) {
         self.storage = storage; self.calls = calls; self.wholeWriteEvery = wholeWriteEvery
         let directory = storage.url.deletingLastPathComponent()
-        let prefix = ".\(storage.url.lastPathComponent).patch-"
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasPrefix(prefix) {
+        let prefixes = [".\(storage.url.lastPathComponent).patch-", ".\(storage.url.lastPathComponent).whole-"]
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        where prefixes.contains(where: name.hasPrefix) {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
         }
     }
@@ -213,7 +375,7 @@ nonisolated final class PatchingHistoryWriter {
             do {
                 let next = try storage.writePatch(chunks, size: plan.layout.size, expected: identity, calls: calls)
                 record(plan.layout, next, mode: .patch, changed: chunks.reduce(0) { $0 + $1.bytes.count },
-                       started: started, planned: planned)
+                       whole: nil, started: started, planned: planned)
                 patches += 1
                 return
             } catch HistoryPatchError.identityChanged {
@@ -225,9 +387,9 @@ nonisolated final class PatchingHistoryWriter {
                 mode = .wholeAfterProtectionCheck
             }
         }
-        let image = plan.layout.image()
-        let next = try storage.writeWhole(image)
-        record(plan.layout, next, mode: mode, changed: image.count, started: started, planned: planned)
+        let next = try storage.writeWhole(plan.layout, calls: calls)
+        record(plan.layout, next.identity, mode: mode, changed: plan.layout.size, whole: next.timing,
+               started: started, planned: planned)
         patches = 0
     }
 
@@ -244,10 +406,11 @@ nonisolated final class PatchingHistoryWriter {
 
     /// The file has been replaced; only now does the baseline move.
     private func record(_ layout: HistoryLayout, _ identity: HistoryFileIdentity?, mode: Mode, changed: Int,
-                        started: Double, planned: Double) {
+                        whole: HistoryWholeTiming?, started: Double, planned: Double) {
         published = (layout, identity)
         lastMode = mode
         lastChangedBytes = changed
+        lastWholeTiming = whole
         lastPlanSeconds = planned - started
         lastWriteSeconds = ProcessInfo.processInfo.systemUptime - planned
     }

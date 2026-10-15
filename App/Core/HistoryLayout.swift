@@ -119,6 +119,40 @@ nonisolated struct HistoryLayout: Sendable {
         return data
     }
 
+    /// One piece of the whole file, in file order.
+    enum Piece {
+        case data(Data)
+        case byte(UInt8)
+        /// A run of ASCII spaces (capacity).
+        case spaces(Int)
+    }
+
+    /// The whole file's pieces in order, for writing it without assembling
+    /// the image: the same bytes as `image()`, every byte from offset 0 to
+    /// `size`, capacity as spaces.
+    func visit(_ body: (Piece) throws -> Void) rethrows {
+        try body(.data(Self.fileHead))
+        for index in sessions.indices {
+            if index > 0 { try body(.byte(0x2C)) }
+            let session = sessions[index]
+            try body(.data(Self.sessionHead))
+            for (position, fragment) in session.fragments.enumerated() {
+                if position > 0 { try body(.byte(0x2C)) }
+                try body(.data(fragment))
+            }
+            try body(.byte(0x5D))
+            try body(.spaces(session.contentCapacity - session.contentLength))
+            try body(.byte(0x2C))
+            try body(.data(session.header))
+            try body(.spaces(session.headerCapacity - session.header.count))
+            try body(.byte(0x7D))
+        }
+        try body(.byte(0x5D))
+        try body(.byte(0x2C))
+        try body(.data(tail))
+        try body(.byte(0x7D))
+    }
+
     private func appendSuffix(_ first: Int, to data: inout Data) {
         for index in first..<sessions.count {
             if index > 0 { data.append(0x2C) }
