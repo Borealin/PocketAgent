@@ -5,11 +5,15 @@ use idevice::{
     dvt::message::{Aux, AuxValue, Message, MessageHeader, PayloadHeader},
 };
 use plist::Value;
+use super::{CancelState, stage, until_cancelled};
 use std::{
     collections::{HashSet, VecDeque},
+    sync::Arc,
     time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+const CANCELLED: &str = "DDI action cancelled";
 
 pub struct Ax {
     stream: Box<dyn ReadWrite>,
@@ -18,6 +22,11 @@ pub struct Ax {
     subscribed: bool,
     closing: Option<u32>,
     close_header_ended: bool,
+    /// Semantic reads end on cancellation; `set_text` and `close` never do.
+    cancel: Arc<CancelState>,
+    /// Local acceptance only: the next semantic read stalls until Stop or the
+    /// call budget ends it.
+    pub(super) stall_next_read: bool,
 }
 struct Incoming {
     id: u32,
@@ -95,7 +104,7 @@ fn arguments(bytes: &[u8]) -> Result<Vec<Value>, String> {
     Ok(result)
 }
 impl Ax {
-    pub async fn new(stream: Box<dyn ReadWrite>) -> Result<Self, String> {
+    pub async fn new(stream: Box<dyn ReadWrite>, cancel: Arc<CancelState>) -> Result<Self, String> {
         let mut ax = Self {
             stream,
             next: 1,
@@ -103,8 +112,12 @@ impl Ax {
             subscribed: false,
             closing: None,
             close_header_ended: false,
+            cancel: cancel.clone(),
+            stall_next_read: false,
         };
-        let setup = tokio::time::timeout(Duration::from_secs(6), async {
+        // Only the setup body is raced, so a cancelled setup still reaches the
+        // unsubscribe below before its socket is dropped.
+        let setup = until_cancelled(&cancel, tokio::time::timeout(Duration::from_secs(6), async {
             let id = ax.invoke("deviceAPIVersion", vec![]).await?;
             let api = ax.ack(id).await?;
             if api.as_ref().and_then(Value::as_unsigned_integer) != Some(26) {
@@ -120,9 +133,10 @@ impl Ax {
                 .await?;
             ax.ack(id).await?;
             Ok(())
-        })
+        }))
         .await
-        .map_err(|_| "AX setup timed out".to_string())
+        .ok_or_else(|| CANCELLED.to_string())
+        .and_then(|timed| timed.map_err(|_| "AX setup timed out".to_string()))
         .and_then(|r| r);
         if let Err(e) = setup {
             // Keep the owner alive after a deadline so unsubscribe is attempted
@@ -299,6 +313,23 @@ impl Ax {
         parameters: Value,
         token: Option<&Value>,
     ) -> Result<Value, String> {
+        self.request(kind, parameters, token, true).await
+    }
+    /// `raced`: a semantic read that cancellation may end. The AX connection is
+    /// closed after any failed call, so a read dropped mid-frame is never reused.
+    async fn request(
+        &mut self,
+        kind: u64,
+        parameters: Value,
+        token: Option<&Value>,
+        raced: bool,
+    ) -> Result<Value, String> {
+        let cancel = self.cancel.clone();
+        cancel.progress().enter(stage::AX_READ, kind as u32);
+        if raced && std::mem::take(&mut self.stall_next_read) {
+            until_cancelled(&cancel, std::future::pending::<()>()).await;
+            return Err(CANCELLED.into());
+        }
         let body = archive::request(kind, parameters, token)?;
         let operation = async {
             self.invoke(
@@ -345,19 +376,24 @@ impl Ax {
             }
             Err("AX callback budget".into())
         };
-        tokio::time::timeout(Duration::from_secs(4), operation)
-            .await
-            .map_err(|_| {
-                tracing::error!(kind, "AX semantic request timed out");
-                "AX semantic request timed out; session must close".to_string()
-            })?
+        let timed = tokio::time::timeout(Duration::from_secs(4), operation);
+        let timed = if raced {
+            until_cancelled(&cancel, timed).await.ok_or_else(|| CANCELLED.to_string())?
+        } else {
+            timed.await
+        };
+        timed.map_err(|_| {
+            tracing::error!(kind, "AX semantic request timed out");
+            "AX semantic request timed out; session must close".to_string()
+        })?
     }
     pub async fn hit(&mut self, x: f64, y: f64) -> Result<Value, String> {
         self.read(6, format!("{{{x}, {y}}}").into(), None).await
     }
     /// Submit once; a nil result is submission, never text/business confirmation.
+    /// An effect: once sent it is awaited to its own limit, not cancelled.
     pub async fn set_text(&mut self, token: &Value, text: &str) -> Result<(), String> {
-        self.read(8, fields(&[("value", text.into())]), Some(token)).await?;
+        self.request(8, fields(&[("value", text.into())]), Some(token), false).await?;
         Ok(())
     }
     async fn attributes(&mut self, token: &Value, ids: &[u64]) -> Result<Value, String> {
@@ -538,10 +574,72 @@ mod tests {
             server.write_all(&ack).await.unwrap();
         });
         let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
-            closing: None, close_header_ended: false };
+            closing: None, close_header_ended: false,
+            cancel: Arc::new(CancelState::new()), stall_next_read: false };
         let result = ax.close().await;
         peer.await.unwrap();
         result
+    }
+    /// One method invocation read by the device side: (id, method name).
+    async fn invocation(server: &mut tokio::io::DuplexStream) -> (u32, Option<String>) {
+        let mut h = [0u8; 32];
+        server.read_exact(&mut h).await.unwrap();
+        let mut p = vec![0; u32_at(&h, 12).unwrap() as usize];
+        server.read_exact(&mut p).await.unwrap();
+        let aux = u32_at(&p, 4).unwrap() as usize;
+        (u32_at(&h, 16).unwrap(), archive::decode(&p[16 + aux..]).unwrap().as_string().map(str::to_owned))
+    }
+    fn ack(id: u32) -> Vec<u8> {
+        Message::new(MessageHeader::new(0, 1, id, 1, 0, false), PayloadHeader::default(), None, None).serialize()
+    }
+    #[tokio::test]
+    async fn a_cancelled_read_returns_promptly_and_close_still_unsubscribes() {
+        let (mut server, reader) = tokio::io::duplex(8192);
+        let cancel = Arc::new(CancelState::new());
+        let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true, closing: None,
+            close_header_ended: false, cancel: cancel.clone(), stall_next_read: false };
+        let signal = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            signal.cancel();
+        });
+        // The device never answers the read.
+        let started = std::time::Instant::now();
+        assert_eq!(ax.hit(1.0, 2.0).await.unwrap_err(), CANCELLED);
+        assert!(started.elapsed() < Duration::from_millis(1000));
+        // With the flag still set, close sends the unsubscribe and waits for its ACK.
+        let peer = tokio::spawn(async move {
+            let (_, read) = invocation(&mut server).await;
+            let (id, close) = invocation(&mut server).await;
+            server.write_all(&ack(id)).await.unwrap();
+            (read, close)
+        });
+        assert_eq!(ax.close().await.unwrap(), "acknowledged");
+        let (read, close) = peer.await.unwrap();
+        assert_eq!(read.as_deref(), Some("processDataFromHost:"));
+        assert_eq!(close.as_deref(), Some("clientNeedsAccessibility:"));
+    }
+    #[tokio::test]
+    async fn a_cancelled_setup_still_attempts_the_unsubscribe() {
+        let (mut server, reader) = tokio::io::duplex(8192);
+        let cancel = Arc::new(CancelState::new());
+        let signal = cancel.clone();
+        let peer = tokio::spawn(async move {
+            let (id, name) = invocation(&mut server).await;
+            assert_eq!(name.as_deref(), Some("deviceAPIVersion"));
+            let reply = Message::new(MessageHeader::new(0, 1, id, 1, 0, false), PayloadHeader::default(), None,
+                Some(26u64.into())).serialize();
+            server.write_all(&reply).await.unwrap();
+            // The subscribe is never answered; Stop arrives meanwhile.
+            let (_, name) = invocation(&mut server).await;
+            assert_eq!(name.as_deref(), Some("clientNeedsAccessibility:"));
+            signal.cancel();
+            let (id, name) = invocation(&mut server).await;
+            assert_eq!(name.as_deref(), Some("clientNeedsAccessibility:"));
+            server.write_all(&ack(id)).await.unwrap();
+        });
+        assert_eq!(Ax::new(Box::new(reader), cancel).await.err().as_deref(), Some(CANCELLED));
+        peer.await.unwrap();
     }
     #[tokio::test]
     async fn unsubscribe_ack_ignores_an_older_error_conversation() {
@@ -563,7 +661,8 @@ mod tests {
             server.write_all(&reply[..32 + body_bytes]).await.unwrap();
         });
         let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
-            closing: None, close_header_ended: false };
+            closing: None, close_header_ended: false,
+            cancel: Arc::new(CancelState::new()), stall_next_read: false };
         let result = ax.close().await;
         peer.await.unwrap();
         result
@@ -588,7 +687,8 @@ mod tests {
         server.write_all(&reply[..32]).await.unwrap();
         drop(server);
         let mut ax = Ax { stream: Box::new(reader), next: 20, bytes: 0, subscribed: true,
-            closing: None, close_header_ended: false };
+            closing: None, close_header_ended: false,
+            cancel: Arc::new(CancelState::new()), stall_next_read: false };
         assert_eq!(ax.ack(20).await.unwrap_err(), "Short AX DTX payload");
     }
     #[test]
@@ -682,7 +782,7 @@ mod tests {
             .serialize();
             server.write_all(&reply).await.unwrap();
         });
-        assert!(Ax::new(Box::new(reader)).await.is_err());
+        assert!(Ax::new(Box::new(reader), Arc::new(CancelState::new())).await.is_err());
         peer.await.unwrap();
     }
     #[tokio::test]
@@ -706,7 +806,8 @@ mod tests {
             assert!(tokio::time::timeout(Duration::from_millis(40), server.read_exact(&mut extra)).await.is_err());
         });
         let token = archive::fields(&[("pid", 7u64.into()), ("objectID", 9u64.into())]);
-        let mut ax = Ax { stream: Box::new(reader), next: 1, bytes: 0, subscribed: false, closing: None, close_header_ended: false };
+        let mut ax = Ax { stream: Box::new(reader), next: 1, bytes: 0, subscribed: false, closing: None, close_header_ended: false,
+            cancel: Arc::new(CancelState::new()), stall_next_read: false };
         assert!(ax.set_text(&token, "hello").await.is_err());
         peer.await.unwrap();
     }
@@ -738,6 +839,8 @@ mod tests {
             subscribed: false,
             closing: None,
             close_header_ended: false,
+            cancel: Arc::new(CancelState::new()),
+            stall_next_read: false,
         };
         let received = ax.incoming().await.unwrap();
         assert_eq!(received.id, 42);

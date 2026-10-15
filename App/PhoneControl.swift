@@ -7,6 +7,9 @@ import UIKit
 @MainActor
 protocol PhoneControl: AnyObject {
     var cancellationCheck: (() throws -> Void)? { get set }
+    /// Seconds the next native call may take, or nil when the turn cannot
+    /// afford one (DDI only; set beside `cancellationCheck`).
+    var budget: (() -> TimeInterval?)? { get set }
     func prepare() async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
@@ -38,6 +41,7 @@ final class WDAControl: PhoneControl {
     let model: Model
     var base: String?
     var cancellationCheck: (() throws -> Void)?
+    var budget: (() -> TimeInterval?)?
     init(_ model: Model) { self.model = model }
     func prepare() async throws { if base == nil { base = try await model.prepareWDA() } }
     private var session: String { base ?? "" }
@@ -55,7 +59,9 @@ final class WDAControl: PhoneControl {
         guard let data = Data(base64Encoded: text) else { throw failure("截屏失败。") }; return data
     }
     private func effect(_ path: String, _ body: [String: Any]) async throws {
-        try cancellationCheck?(); _ = try await model.request("POST", path, body)
+        try cancellationCheck?()
+        if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
+        _ = try await model.request("POST", path, body)
     }
     func activate(_ bundle: String) async throws { try await effect("\(session)/wda/apps/activate", ["bundleId": bundle]) }
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws {
@@ -90,44 +96,112 @@ final class WDAControl: PhoneControl {
     func home() async throws { try await effect("/wda/homescreen", [:]) }
 }
 
+/// Releasing input held on the phone (touch, home, keyboard) could not be
+/// confirmed earlier in this app run; no input is sent until PocketAgent is
+/// relaunched. Raised before anything is sent.
+struct InputReleaseUnconfirmed: LocalizedError {
+    var errorDescription: String? {
+        "此前一次手机输入的释放未能确认；为安全起见，本次运行中不再向手机发送输入（观察仍可用）。请先检查手机上没有被按住的触摸或按键，然后重新打开 PocketAgent。"
+    }
+}
+
 @MainActor
 final class DDIControl: PhoneControl {
     let model: Model
     var cancellationCheck: (() throws -> Void)?
+    var budget: (() -> TimeInterval?)?
     private var observedFrame: CGRect?
     private var observedApp: String?
     private var preparedText: String?
+    /// Local acceptance launch arguments (fault injection).
+    private let stall = DeviceSettings.injectDDIStall
+    private let dropReleaseConfirmation = DeviceSettings.dropInputReleaseConfirmation
+    /// Operations that send input to the phone.
+    static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
+                                               "ax_replace", "home"]
     init(_ model: Model) { self.model = model }
     func prepare() async throws { try await model.prepareDDI() }
-    private func call(_ object: [String: Any]) async throws -> [String: Any] {
+    /// One native call on the turn's session. The expiry is fixed on the wall
+    /// clock before the worker thread starts, so the handoff delay counts. The
+    /// worker is always awaited to its end, cleanup included: there is no
+    /// Swift-side timeout, and the connection outlives the call.
+    private func native<T>(_ op: String, encode: (UInt64) throws -> String,
+                           run: @escaping (OpaquePointer, String, UInt64) throws -> T) async throws -> T {
         guard let device = model.connection, let handle = device.ddi, let cancel = device.ddiCancellation else { throw failure("DDI 连接尚未准备。") }
         try cancellationCheck?()
+        if Self.inputOperations.contains(op), model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
+        guard let seconds = budget?() else { throw failure("本轮剩余时间不足以安全执行手机操作；未执行。") }
+        let expiresAt = DDICallBudget.expiry(now: Date(), seconds: seconds)
+        let request = try encode(expiresAt)
+        let seq = model.nextDDICallSequence()
+        let started = ContinuousClock.now
+        func elapsed() -> Int { Int((ContinuousClock.now - started) / .milliseconds(1)) }
         pocket_ddi_reset_cancel(cancel)
+        model.log("ddi_call_enter", ["seq": seq, "op": op, "budgetMs": Int(seconds * 1000)])
         // Lease revocation/Stop is observed during a native await as well as
-        // between primitives. Await the worker and its input cleanup fully.
+        // between primitives; progress is logged while the call is outstanding.
         let watcher = Task { @MainActor in
+            var signalled = false, ticks = 0
             while !Task.isCancelled {
-                do { try cancellationCheck?() }
-                catch { pocket_ddi_cancel(cancel); return }
+                if !signalled {
+                    do { try cancellationCheck?() } catch {
+                        pocket_ddi_cancel(cancel); signalled = true
+                        model.log("ddi_cancel_signalled", ["seq": seq, "ms": elapsed()])
+                    }
+                }
+                ticks += 1
+                if ticks % 250 == 0 { model.log("ddi_call_outstanding", Self.progressFields(cancel, seq: seq, op: op, ms: elapsed())) }
                 do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
             }
         }
         defer { watcher.cancel() }
+        let outcome: Result<T, any Error>
+        do { outcome = .success(try await model.ffi { try run(handle, request, expiresAt) }) }
+        catch { outcome = .failure(error) }
+        var progress = PocketDDIProgress()
+        _ = pocket_ddi_progress(cancel, &progress)
+        if progress.input_unconfirmed { model.latchInputReleaseUnconfirmed(op: op) }
+        var fields = Self.progressFields(cancel, seq: seq, op: op, ms: elapsed())
+        switch outcome {
+        case .success: fields["outcome"] = "ok"
+        case .failure(let error):
+            let text = error.localizedDescription
+            fields["outcome"] = text.contains("DDI action cancelled") ? "cancelled"
+                : text.contains("DDI call budget") ? "budget" : "error"
+        }
+        model.log("ddi_call_exit", fields)
+        // The connection, and with it the native session and cancellation,
+        // stays alive until the worker has returned.
+        withExtendedLifetime(device) {}
+        return try outcome.get()
+    }
+    private static func progressFields(_ cancel: OpaquePointer, seq: Int, op: String, ms: Int) -> [String: Any] {
+        var p = PocketDDIProgress()
+        guard pocket_ddi_progress(cancel, &p) else { return ["seq": seq, "op": op, "ms": ms] }
+        return ["seq": seq, "op": op, "ms": ms, "nativeSeq": p.seq, "inCall": p.in_call, "stage": p.stage, "detail": p.detail,
+                "stageAgeMs": p.stage_age_ms, "beats": p.beats, "beatAgeMs": p.beat_age_ms, "reconnects": p.reconnects,
+                "inputUnconfirmed": p.input_unconfirmed]
+    }
+    private func call(_ object: [String: Any]) async throws -> [String: Any] {
+        let op = object["op"] as? String ?? "request"
         var requestObject = object
-        if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(object["op"] as? String ?? "") {
+        if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(op) {
             if let observedApp { requestObject["expected_app"] = observedApp }
             if let frame = observedFrame { requestObject["expected_frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height] }
         }
-        let data = try JSONSerialization.data(withJSONObject: requestObject)
-        let request = String(decoding: data, as: UTF8.self)
+        if let stall, stall != "screenshot" { requestObject["diagnostic_stall"] = stall }
+        if dropReleaseConfirmation { requestObject["diagnostic_release_unconfirmed"] = true }
         let result: Data
-        do { result = try await model.ffi {
+        do { result = try await native(op, encode: { expiresAt in
+            requestObject["expires_at_ms"] = expiresAt
+            return String(decoding: try JSONSerialization.data(withJSONObject: requestObject), as: UTF8.self)
+        }) { handle, request, _ in
             var result: UnsafeMutablePointer<CChar>?
             try request.withCString { try check(pocket_ddi_call(handle, $0, &result)) }
             guard let result else { throw failure("DDI 返回为空。") }
             defer { idevice_string_free(result) }
             return Data(String(cString: result).utf8)
-        } } catch {
+        } } catch let refused as InputReleaseUnconfirmed { throw refused } catch {
             if error.localizedDescription.contains("AX foreground or root changed") { throw PhoneObservationIssue.foregroundChanged }
             // The device can refuse attributes with error 8 during a UI transition.
             // The executor retries only observation, after the old AX socket closes.
@@ -158,11 +232,10 @@ final class DDIControl: PhoneControl {
         return tree
     }
     func screenshot() async throws -> Data {
-        guard let device = model.connection, let handle = device.ddi else { throw failure("DDI 连接尚未准备。") }
-        try cancellationCheck?()
-        let result: Data = try await model.ffi {
+        let stall: UInt32 = self.stall == "screenshot" ? 1 : 0
+        let result: Data = try await native("screenshot", encode: { _ in "" }) { handle, _, expiresAt in
             var bytes: UnsafeMutablePointer<UInt8>?, count: UInt = 0
-            try check(pocket_ddi_screenshot(handle, &bytes, &count))
+            try check(pocket_ddi_screenshot(handle, expiresAt, stall, &bytes, &count))
             guard let bytes, count > 0 else { throw failure("DDI 截图为空。") }
             defer { pocket_ddi_bytes_free(bytes, count) }
             return Data(bytes: bytes, count: Int(count))

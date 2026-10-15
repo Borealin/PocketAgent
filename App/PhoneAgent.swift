@@ -177,6 +177,7 @@ extension Model {
                         default: break
                         }
                     }
+                    log("agent_events_drained")
                 } onCancel: { Task { await runtime.cancel() } }
                 guard successful else { throw failure("手机助手未完成本轮") }
                 log("phone_agent_completed", ["requests": phone.requests, "toolCalls": phone.calls])
@@ -286,8 +287,10 @@ final class PhoneExecutor {
     var nodes: [[String: String]] = []
     var screen = CGRect.zero
     var image: AgentImageAttachment?
-    private var actionInFlight = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// The serial phone action queue: one owner, arrival order; a cancelled
+    /// waiter leaves without acting.
+    private let actionGate = SerialGate()
+    private var actionHeldSince: ContinuousClock.Instant?
     /// Captured while our app is foreground. Unknown, notched and landscape
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
@@ -312,17 +315,27 @@ final class PhoneExecutor {
 
     var remainingTime: TimeInterval { deadline.remaining }
 
-    private func acquire() async {
-        guard actionInFlight else { actionInFlight = true; return }
-        await withCheckedContinuation { waiting.append($0) }
+    /// Waits for the action queue; throws without acting when cancelled first.
+    private func acquire() async throws {
+        let contended = actionGate.isHeld
+        let started = ContinuousClock.now
+        if contended { model.log("action_lock_wait", ["waiters": actionGate.waiting + 1]) }
+        do { try await actionGate.acquire() } catch { model.log("action_lock_wait_cancelled"); throw error }
+        if contended { model.log("action_lock_acquired", ["waitedMs": Int((ContinuousClock.now - started) / .milliseconds(1))]) }
+        actionHeldSince = .now
     }
     private func release() {
-        if waiting.isEmpty { actionInFlight = false } else { waiting.removeFirst().resume() }
+        if let since = actionHeldSince, actionGate.waiting > 0 || ContinuousClock.now - since > .seconds(30) {
+            model.log("action_lock_released", ["heldMs": Int((ContinuousClock.now - since) / .milliseconds(1)),
+                                               "waiters": actionGate.waiting])
+        }
+        actionHeldSince = nil
+        actionGate.release()
     }
 
     /// AgentKit phone tools; the approval handler applied the registry decision.
     func executeModel(_ call: AgentToolCall) async throws -> AgentToolResult {
-        await acquire()
+        do { try await acquire() } catch { throw CancellationError() }
         defer { release() }
         do {
             let result = try await perform(call)
@@ -339,7 +352,7 @@ final class PhoneExecutor {
                                                       leaseActive: lease.isActive, effectsBlocked: effectsBlocked()) {
             return (refusal, true, true)
         }
-        await acquire()
+        do { try await acquire() } catch { return ("本轮已取消。动作未执行。", true, true) }
         defer { release() }
         do {
             let result = try await perform(call, lease: lease)
@@ -409,7 +422,9 @@ final class PhoneExecutor {
                                     proceed: () throws -> Void) async throws -> PhoneTree {
         // Home and system search are navigated through their observed controls.
         // Do not inject another status-area gesture during their transitions.
-        guard !["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(app),
+        // No input at all while an earlier release is unconfirmed; observe as is.
+        guard !model.inputReleaseUnconfirmed,
+              !["com.apple.springboard", "com.apple.Spotlight", "com.apple.spotlight"].contains(app),
               self.base != nil, let geometry = taskSurfaceGeometry,
               tree.frame == geometry.bounds else { return tree }
         try proceed()
@@ -568,6 +583,8 @@ final class PhoneExecutor {
         }
         func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
+            // Refused before anything is sent: an earlier input release was not confirmed.
+            if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
             let before = callEffects.beginAction()
             do { try await operation() } catch PhoneObservationIssue.targetCovered {
                 // The native preflight refused before any touch was sent; an
@@ -578,7 +595,9 @@ final class PhoneExecutor {
             try proceed()
         }
         control.cancellationCheck = proceed
-        defer { control.cancellationCheck = nil }
+        let deadline = deadline, cap = DeviceSettings.ddiCallBudgetCap
+        control.budget = { DDICallBudget.seconds(remaining: deadline.remaining, cap: cap) }
+        defer { control.cancellationCheck = nil; control.budget = nil }
         let args = call.arguments.objectValue ?? [:], name = call.name
         do {
             try proceed()
@@ -927,7 +946,9 @@ final class TurnTools {
                 await MainActor.run { NotificationCenter.default.post(name: DeviceSettings.diagnosticDirty, object: nil) }
             }
             return result
-        } stage: { stage in Task { @MainActor in reportStage(stage) } }
+        } stage: { stage in Task { @MainActor in reportStage(stage) } } diagnostic: { event, fields in
+            Task { @MainActor in phone.model.log(event, fields) }
+        }
         phone.model.log("script_finished", ["exitCode": outcome.exitCode ?? -1, "signal": outcome.exit.signal ?? 0,
                                             "cancelled": outcome.cancelled, "timedOut": outcome.timedOut,
                                             "remaining": outcome.remainingProcesses ?? -1,

@@ -97,8 +97,12 @@ final class DeviceConnection {
     private var process: OpaquePointer?
     private var runnerPID: UInt64?
     var ownsRunner: Bool { runnerPID != nil }
+    /// Set when the closed DDI session reported that releasing held input was
+    /// left unconfirmed (its typed outcome, not an AX unsubscribe failure).
+    private(set) var inputReleaseUnconfirmed = false
     deinit {
-        if let ddi { if let error = pocket_ddi_close(ddi, ddiCancellation) { idevice_error_free(error) } }
+        // Only a session that never reached `closeDDI` (no turn used it) ends here.
+        if let ddi { if let error = pocket_ddi_close(ddi, ddiCancellation, nil) { idevice_error_free(error) } }
         closeDVT()
         if let handshake { rsd_handshake_free(handshake) }
         if let adapter { adapter_free(adapter) }
@@ -150,7 +154,9 @@ final class DeviceConnection {
     func closeDDI() throws {
         let session = ddi, cancel = ddiCancellation
         ddi = nil; ddiCancellation = nil
-        try check(pocket_ddi_close(session, cancel))
+        var unconfirmed = false
+        defer { inputReleaseUnconfirmed = inputReleaseUnconfirmed || unconfirmed }
+        try check(pocket_ddi_close(session, cancel, &unconfirmed))
     }
     func hasDDI() -> Bool {
         var installed: UnsafeMutablePointer<InstalledCryptexC>?
@@ -316,8 +322,17 @@ final class Model: ObservableObject {
             MainActor.assumeIsolated { self?.networkPath = PhoneNetworkPath(path) }
         }
         pathMonitor.start(queue: .main)
-        // Native file logging only when the user opted in (read at launch).
-        if DeviceSettings.saveDiagnosticLogs {
+        for (name, phase) in [(UIApplication.willResignActiveNotification, "willResignActive"),
+                              (UIApplication.didEnterBackgroundNotification, "didEnterBackground"),
+                              (UIApplication.willEnterForegroundNotification, "willEnterForeground"),
+                              (UIApplication.didBecomeActiveNotification, "didBecomeActive")] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if self?.busy == true { self?.log("scene_phase", ["phase": phase]) } }
+            }
+        }
+        // Native file logging only when the user opted in (read at launch) or
+        // the diagnostics launch argument is present.
+        if DeviceSettings.diagnosticsEnabled {
             let path = documents.appendingPathComponent("idevice-stages.log").path
             _ = path.withCString {
                 idevice_init_logger(IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 3), UnsafeMutablePointer(mutating: $0))
@@ -333,6 +348,18 @@ final class Model: ObservableObject {
 
     func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
         try await runOnFFIThread(action)
+    }
+    private var ddiCallSequence = 0
+    func nextDDICallSequence() -> Int { ddiCallSequence += 1; return ddiCallSequence }
+    /// App-instance latch: a DDI session reported (typed) that releasing held
+    /// input was left unconfirmed. Every later input is refused before it is
+    /// sent, in this and later turns and over new connections; observation
+    /// still runs. Only relaunching the app clears it, and nothing here claims
+    /// the phone's input was physically released.
+    private(set) var inputReleaseUnconfirmed = false
+    func latchInputReleaseUnconfirmed(op: String) {
+        if !inputReleaseUnconfirmed { log("input_release_unconfirmed_latched", ["op": op]) }
+        inputReleaseUnconfirmed = true
     }
     /// Settings handshakes and turn startup share this gate. A turn may begin
     /// model work while preparation finishes, but cannot touch the phone yet.
@@ -356,7 +383,7 @@ final class Model: ObservableObject {
     /// turn's runID/logURL. Callers supply only the non-sensitive fields below.
     private func logPhoneConnection(_ event: String, context: PhoneConnectionDiagnosticContext,
                                     fields: [String: Any] = [:]) {
-        guard DeviceSettings.saveDiagnosticLogs else { return }
+        guard DeviceSettings.diagnosticsEnabled else { return }
         let allowed = Set(["networkPath", "usesWiFi", "usesCellular", "usesOtherInterface",
                            "isExpensive", "isConstrained", "connectionStage", "connectionError",
                            "nativeErrorCode", "errorDomain", "errorCode"])
@@ -532,11 +559,14 @@ final class Model: ObservableObject {
     /// Writes run metadata (event names, counts, IDs; never prompts, keys,
     /// arguments, results or response bodies) only when diagnostics are on.
     func log(_ event: String, _ fields: [String: Any] = [:]) {
-        guard DeviceSettings.saveDiagnosticLogs else { return }
+        guard DeviceSettings.diagnosticsEnabled else { return }
         var record = fields
         record["event"] = event
         record["runID"] = runID
         record["time"] = ISO8601DateFormatter().string(from: Date())
+        // Uptime stops while the system sleeps; the raw monotonic clock does not.
+        record["upMs"] = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_000_000
+        record["rawMs"] = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1_000_000
         record["appState"] = UIApplication.shared.applicationState.rawValue
         guard let logURL, let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil,
@@ -549,6 +579,7 @@ final class Model: ObservableObject {
         }
     }
     func cancel() {
+        log("agent_cancel_requested", ["hadRuntime": activeAgentRuntime != nil])
         releasePreparedPhoneConnection(message: "已停止并释放准备连接")
         pendingAgentCancellation = true
         if let runtime = activeAgentRuntime {
@@ -672,7 +703,11 @@ final class Model: ObservableObject {
     /// Called in an uncancelled task after the agent has stopped using tools.
     /// Keep the serial queue occupied until activation and runner teardown finish.
     func finishPhoneAutomation() async -> String {
+        let waitStarted = ContinuousClock.now
+        func elapsed() -> Int { Int((ContinuousClock.now - waitStarted) / .milliseconds(1)) }
+        if deviceConnectionBusy { log("finish_gate_wait") }
         await acquireDeviceConnection()
+        log("finish_gate_acquired", ["waitedMs": elapsed()])
         defer { releaseDeviceConnection() }
         defer {
             wdaSessionBase = nil; connection = nil; installedApps = []
@@ -688,6 +723,7 @@ final class Model: ObservableObject {
             // App activation can otherwise race late accessibility callbacks.
             // A failed unsubscribe still drops its socket and must not prevent
             // returning to this app or releasing the owned input services.
+            log("finish_step_enter", ["step": "stop_observing", "ms": elapsed()])
             do {
                 let closed = try await ffi { try device.ddiRequest(["op": "stop_observing"]) }
                 log("ddi_observation_closed", ["subscription_stop": closed["subscription_stop"] as? String ?? "unknown"])
@@ -695,11 +731,18 @@ final class Model: ObservableObject {
             do {
                 // Finalization runs uncancelled. Returning to our app is a
                 // cleanup effect, even after Stop or a failed AX observation.
+                log("finish_step_enter", ["step": "return", "ms": elapsed()])
                 _ = try await ffi { try device.ddiRequest(["op": "return", "bundle_id": DeviceSettings.assistantBundleID]) }
                 log("assistant_returned")
             } catch { warnings.append("未能自动返回 App，请手动切回。"); log("assistant_return_failed", Model.errorFields(error)) }
+            log("finish_step_enter", ["step": "close", "ms": elapsed()])
             do { try await ffi { try device.closeDDI() }; log("ddi_services_closed") }
             catch { warnings.append("DDI 服务清理未完全确认，连接已释放。"); log("ddi_close_failed", Model.errorFields(error)) }
+            if device.inputReleaseUnconfirmed {
+                latchInputReleaseUnconfirmed(op: "close")
+                warnings.append(InputReleaseUnconfirmed().localizedDescription)
+            }
+            log("finish_step", ["step": "ddi_finished", "ms": elapsed()])
             return warnings.joined(separator: " ")
         }
         guard device.ownsRunner else { return "" }
