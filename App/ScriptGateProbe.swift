@@ -36,8 +36,12 @@ enum ScriptGateProbe {
         import json, os, subprocess, time
         results = []
         for n in range(\(count)):
-            r = subprocess.run(["pocketagent-phone", "observe_screen", "{}"], capture_output=True, text=True, timeout=120)
-            results.append({"rc": r.returncode, "denied": '"denied"' in r.stdout and 'true' in r.stdout})
+            r = subprocess.run(["pocketagent-phone", "wait", json.dumps({"seconds": 0.5})], capture_output=True, text=True, timeout=120)
+            try:
+                response = json.loads(r.stdout)
+                results.append({"rc": r.returncode, "json": True, "denied": response.get("denied") is True})
+            except Exception as error:
+                results.append({"rc": r.returncode, "json": False, "error": type(error).__name__})
             with open("/workspace/result.json", "w") as f:
                 json.dump(results, f)
             if n == \(count) - 1:
