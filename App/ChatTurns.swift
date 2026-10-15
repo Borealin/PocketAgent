@@ -457,11 +457,10 @@ extension ChatController {
             let reason = job.revoked ? ContextSourceRevoked().errorDescription : status.failure
             notStarted(job, reason ?? "本轮未开始。", cancelled: job.cancelled, warning: cleanupWarning)
         } else {
-            let reason = (status.failure.map { "原因：\($0)" } ?? "").trimmingCharacters(in: .whitespaces)
             let state: ChatState = successful ? .completed : (job.cancelled ? .interrupted : .failed)
-            finish(job, state: state, detail: ([successful ? "" : (job.cancelled ? "已取消。" : "本轮未完成，请发送新消息继续；已执行的动作不会重放。"),
-                                               successful || job.cancelled ? "" : reason, cleanupWarning]
-                .filter { !$0.isEmpty }).joined(separator: " "))
+            finish(job, state: state, detail: StartedTurnOutcome.detail(successful: successful, cancelled: job.cancelled,
+                                                                        revoked: job.revoked, failure: status.failure,
+                                                                        cleanupWarning: cleanupWarning))
             if job.primary { settlePendingAfterPrimaryTurn(successful: successful, stopEpochAtFinish: stopEpoch) }
         }
     }
