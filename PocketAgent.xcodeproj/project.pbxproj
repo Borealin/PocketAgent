@@ -21,6 +21,7 @@
 		2FAAC4FED004B6859EA38070 /* AgentKit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4FDF0727D964C511CFA108F4 /* AgentKit-LICENSE.txt */; };
 		34099A8780B4604D642B7DDF /* HistoryLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83CF5CA29D35FDB6F28D3800 /* HistoryLayout.swift */; };
 		341233CF7A70637134AD1A8B /* iSHLicenses in Resources */ = {isa = PBXBuildFile; fileRef = E53F96B6F3F454BD229C1E52 /* iSHLicenses */; };
+		36550301116F5E77E3453891 /* SummaryMaintenanceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1886BBBBAFC254584C69CDD /* SummaryMaintenanceProbe.swift */; };
 		37A88190EBAF73315C8CFD03 /* PhoneAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */; };
 		3EAEB6390011ADC26F49BC4F /* ChatPolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19938EABD2390F0D02B28600 /* ChatPolicies.swift */; };
 		44F4187565D0FE5BDA5973E5 /* HistoryEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */; };
@@ -156,6 +157,7 @@
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
 		9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIOperationFailure.swift; sourceTree = "<group>"; };
 		A187CEE22A5291401CCFC137 /* DDICallBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDICallBudget.swift; sourceTree = "<group>"; };
+		A1886BBBBAFC254584C69CDD /* SummaryMaintenanceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryMaintenanceProbe.swift; sourceTree = "<group>"; };
 		AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderToolSchema.swift; sourceTree = "<group>"; };
 		AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryFileEncoder.swift; sourceTree = "<group>"; };
 		ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingEdits.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				6C405D30C26DD74E9D43D252 /* SerialGate.swift */,
 				925006F86E0B486805C14187 /* StreamingSummary.swift */,
 				B63FEC8E86A7377406E9127B /* SummaryMaintenance.swift */,
+				A1886BBBBAFC254584C69CDD /* SummaryMaintenanceProbe.swift */,
 				7F385985B41CF2BDD68B588A /* SyncApply.swift */,
 				7F4597769ADE790DBCF5243A /* TextInputRequest.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
@@ -518,6 +521,7 @@
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 				73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */,
 				F7493659461238130C24AB4D /* SummaryMaintenance.swift in Sources */,
+				36550301116F5E77E3453891 /* SummaryMaintenanceProbe.swift in Sources */,
 				531747ABA296FFBD9252BB24 /* SyncApply.swift in Sources */,
 				CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
