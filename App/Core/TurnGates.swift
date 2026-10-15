@@ -48,7 +48,11 @@ nonisolated struct CommitGatedModel: AgentModelStreaming {
                     let required = try RequestCommitRequirement.messages(in: request.messages, promptID: promptID,
                                                                          synthetic: synthetic())
                     try await barrier.wait(epoch: epoch, .messages(required), timeout: commitTimeout)
+                    try Task.checkCancellation()
                     let prepared = try await prepare(request)
+                    // A Stop while the preparation was suspended must not dispatch:
+                    // nothing awaits between here and the provider call.
+                    try Task.checkCancellation()
                     var trace = ModelStreamTrace(path: .main)
                     observe?(trace)
                     do {

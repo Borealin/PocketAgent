@@ -133,4 +133,49 @@ struct TurnGateRuntimeTests {
             try RequestCommitRequirement.messages(in: [reply], promptID: prompt.id, synthetic: [])
         }
     }
+
+    /// A Stop while the request's preparation is suspended (memory refresh,
+    /// projections, phone observation) must not reach the provider when the
+    /// preparation returns afterwards. The positive control dispatches once.
+    @Test(arguments: [true, false])
+    func aStopDuringPreparationDispatchesNothing(cancelled: Bool) async throws {
+        let barrier = TranscriptCommitBarrier()
+        let prompt = AgentTranscriptMessage(role: .user, text: "p")
+        barrier.open(epoch: 1, seed: [prompt.id: try CommittedMessage(prompt)])
+        let base = ScriptedModel(turns: [])
+        let held = HeldPreparation()
+        let traces = CallCounter()
+        var model = CommitGatedModel(base: base, barrier: barrier, epoch: 1, promptID: prompt.id, synthetic: { [] },
+                                     prepare: { await held.prepare($0) })
+        model.observe = { _ in traces.increment() }
+        let request = AgentModelRequest(systemPrompt: "s", messages: [prompt], tools: [])
+        let consumer = Task { for try await _ in model.stream(request) {} }
+        while !(await held.entered) { try await Task.sleep(for: .milliseconds(5)) }
+        if cancelled {
+            consumer.cancel()
+            _ = await consumer.result
+        }
+        await held.release()
+        // Nothing awaits between the preparation's return and the provider
+        // call, so its effect (or its absence) is settled once it returned.
+        while !(await held.returned) { try await Task.sleep(for: .milliseconds(5)) }
+        try await Task.sleep(for: .milliseconds(50))
+        if !cancelled { _ = await consumer.result }
+        #expect(base.requests.count == (cancelled ? 0 : 1))
+        #expect(traces.count == (cancelled ? 0 : 2))
+    }
+}
+
+/// A request preparation that suspends until released.
+private actor HeldPreparation {
+    private(set) var entered = false
+    private(set) var returned = false
+    private var held: CheckedContinuation<Void, Never>?
+    func prepare(_ request: AgentModelRequest) async -> AgentModelRequest {
+        entered = true
+        await withCheckedContinuation { held = $0 }
+        returned = true
+        return request
+    }
+    func release() { held?.resume(); held = nil }
 }
