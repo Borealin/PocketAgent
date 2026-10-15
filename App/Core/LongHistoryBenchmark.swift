@@ -111,6 +111,7 @@ enum LongHistoryBenchmark {
                 owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "预热"), to: primary, root: root) }
             }
             let firstMode = store.lastMode?.rawValue ?? "none"
+            let firstSplit = (plan: store.lastPlanSeconds, write: store.lastWriteSeconds)
             var events: [Double] = [], plans: [Double] = [], writes: [Double] = [], changed: [Int] = []
             var modes: [String: Int] = [:]
             var durable = true
@@ -124,20 +125,58 @@ enum LongHistoryBenchmark {
                 modes[store.lastMode?.rawValue ?? "none", default: 0] += 1
             }
             guard durable else { throw Failure(detail: "写入失败") }
-            // A warm whole write (as every 512 patches, on overflow or after an
-            // outside change): touching the file changes its identity.
-            guard utimes(storage.url.path, nil) == 0 else { throw Failure(detail: "无法更新文件时间") }
-            var wholeDurable = false
-            let warmWhole = seconds {
-                wholeDurable = owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "整体写"), to: primary, root: root) }
+            // Relaunch: the file read through one descriptor and strictly
+            // decoded, proven to be this layout's image of that decoding
+            // (launch cost, off the main actor in the app), then the first
+            // record patches. Whole writes every 4 patches here, to time one.
+            var source: HistoryLoadSource?
+            let load = try seconds { source = try storage.loadForAdoption().source }
+            guard let source else { throw Failure(detail: "启动读取未得到同一身份的字节") }
+            var hydration: HistoryHydration?
+            let hydrate = seconds { hydration = HistoryHydration.make(source) }
+            let relaunched = PatchingHistoryWriter(storage: storage, wholeWriteEvery: 4)
+            let launchedOwner = HistoryOwner(file: source.file, store: relaunched)
+            guard let hydration, launchedOwner.adopt(hydration) else { throw Failure(detail: "启动文件未被采用") }
+            var after: [(name: String, seconds: Double, mode: String, plan: Double, write: Double, bytes: Int)] = []
+            func timed(_ name: String, _ edit: @escaping @Sendable (inout HistoryFile) throws -> Void) throws {
+                var ok = false
+                let elapsed = seconds { ok = launchedOwner.record(edit) }
+                guard ok, launchedOwner.health == .ready else { throw Failure(detail: "\(name) 写入失败") }
+                after.append((name, elapsed, relaunched.lastMode?.rawValue ?? "none", relaunched.lastPlanSeconds,
+                              relaunched.lastWriteSeconds, relaunched.lastChangedBytes))
             }
-            let warmWholeMode = store.lastMode?.rawValue ?? "none"
-            guard wholeDurable, store.lastMode == .wholeAfterIdentityChange else { throw Failure(detail: "整体写未按预期发生") }
+            for index in 0..<5 {
+                await Task.yield()
+                try timed(index == 0 ? "firstAfterAdoption" : index == 4 ? "periodicWhole" : "patch") {
+                    try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "启动后 \(index)"), to: primary, root: root)
+                }
+            }
+            // A warm whole write after an outside change: touching the file changes its identity.
+            guard utimes(storage.url.path, nil) == 0 else { throw Failure(detail: "无法更新文件时间") }
+            try timed("identityChangeWhole") {
+                try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "整体写"), to: primary, root: root)
+            }
+            // A session added after the others, then outgrowing its capacity.
+            let task = ChatSession(selection: nil, title: "量测任务")
+            try timed("appendSession") { $0.sessions.append(task) }
+            try timed("laterSessionOverflow") { file in
+                try file.editSession(task.id) {
+                    $0.messages.append(AgentTranscriptMessage(role: .user, text: String(repeating: "溢", count: 20_000)))
+                }
+            }
+            let expected: [String: String] = ["firstAfterAdoption": "patch", "periodicWhole": "whole",
+                                              "identityChangeWhole": "wholeAfterIdentityChange", "appendSession": "patch",
+                                              "laterSessionOverflow": "patch"]
+            guard after.allSatisfy({ path in expected[path.name].map { $0 == path.mode } ?? true }) else {
+                throw Failure(detail: "写入方式与预期不符")
+            }
+            let paths = after.map { ["name": $0.name, "seconds": $0.seconds, "mode": $0.mode, "planSeconds": $0.plan,
+                                     "writeSeconds": $0.write, "changedBytes": $0.bytes] as [String: Any] }
             // Complete bytes: the file is exactly the published layout's whole
             // image, and decodes to the owner's state.
             let onDisk = try Data(contentsOf: storage.url)
-            let bytesMatch = onDisk == store.published?.layout.image()
-            let decodesToState = try HistoryCodec.decode(onDisk) == owner.file
+            let bytesMatch = onDisk == relaunched.published?.layout.image()
+            let decodesToState = try HistoryCodec.decode(onDisk) == launchedOwner.file
             guard bytesMatch, decodesToState else { throw Failure(detail: "补丁后的文件与期望不一致") }
             // Read registration of a request whose context holds the chain of
             // every earlier root; then a forget preview whose closure spans it.
@@ -161,7 +200,8 @@ enum LongHistoryBenchmark {
                             "decodeSeconds": decode, "roots": allRoots.count, "registerReadsSeconds": register,
                             "forgetPreviewSeconds": preview, "forgetClosureRoots": closure, "validateGraphSeconds": validate,
                             "firstRecordSeconds": firstRecord, "firstRecordMode": firstMode,
-                            "warmWholeRecordSeconds": warmWhole, "warmWholeRecordMode": warmWholeMode,
+                            "firstRecordPlanSeconds": firstSplit.plan, "firstRecordWriteSeconds": firstSplit.write,
+                            "launchLoadSeconds": load, "hydrationSeconds": hydrate, "afterLaunchPaths": paths,
                             "recordP50Seconds": percentile(events, 0.5), "recordP95Seconds": percentile(events, 0.95),
                             "recordMaxSeconds": events.max() ?? 0,
                             "planP50Seconds": percentile(plans, 0.5), "planP95Seconds": percentile(plans, 0.95),
