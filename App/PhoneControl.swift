@@ -12,6 +12,9 @@ protocol PhoneControl: AnyObject {
     var budget: (() -> TimeInterval?)? { get set }
     /// The end of the turn, which bounds phone preparation (set beside `cancellationCheck`).
     var turnEnd: Date? { get set }
+    /// Native calls handed to the device so far (DDI); an effect whose failure
+    /// is a refusal before dispatch is reported unsent only if this did not move.
+    var dispatchedCalls: Int { get }
     func prepare() async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
@@ -45,6 +48,7 @@ final class WDAControl: PhoneControl {
     var cancellationCheck: (() throws -> Void)?
     var budget: (() -> TimeInterval?)?
     var turnEnd: Date?
+    var dispatchedCalls: Int { 0 }
     init(_ model: Model) { self.model = model }
     func prepare() async throws {
         guard let turnEnd else { throw PhonePreparationStopped() }
@@ -131,6 +135,11 @@ final class DDIControl: PhoneControl {
     /// Local acceptance launch arguments (fault injection).
     private let stall = DeviceSettings.injectDDIStall
     private let dropReleaseConfirmation = DeviceSettings.dropInputReleaseConfirmation
+    private var refuseNextDispatch = DeviceSettings.refuseNextDDIDispatch
+    private(set) var dispatchedCalls = 0
+    /// Native entry's refusal of a passed expiry, exactly as `check` reports
+    /// it (`ffi_err!`: code 16 `InternalError`, debug-formatted): nothing ran.
+    static let nativeNotDispatched = #"idevice 16/0: InternalError("DDI call budget missing or exhausted; not dispatched")"#
     /// Operations that send input to the phone.
     static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
                                                "ax_replace", "home"]
@@ -150,7 +159,10 @@ final class DDIControl: PhoneControl {
         guard let device = model.connection, let handle = device.ddi, let cancel = device.ddiCancellation else { throw failure("DDI 连接尚未准备。") }
         try cancellationCheck?()
         if Self.inputOperations.contains(op), model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
-        guard let seconds = budget?() else { throw failure("本轮剩余时间不足以安全执行手机操作；未执行。") }
+        // Local acceptance: this one operation finds no budget, as near the turn's end.
+        let refused = refuseNextDispatch == op
+        if refused { refuseNextDispatch = nil }
+        guard !refused, let seconds = budget?() else { throw PhoneCallNotDispatched.insufficientTime }
         let expiresAt = DDICallBudget.expiry(now: Date(), seconds: seconds)
         let request = try encode(expiresAt)
         let seq = model.nextDDICallSequence()
@@ -175,9 +187,17 @@ final class DDIControl: PhoneControl {
             }
         }
         defer { watcher.cancel() }
-        let outcome: Result<T, any Error>
+        // Counted as handed over before the worker starts; a refusal of the
+        // expiry at native entry is typed and uncounted (nothing was sent).
+        dispatchedCalls += 1
+        var outcome: Result<T, any Error>
         do { outcome = .success(try await model.ffi { try run(handle, request, expiresAt) }) }
         catch { outcome = .failure(error) }
+        if case .failure(let error) = outcome, (error as NSError).domain == "PocketAgent",
+           error.localizedDescription == Self.nativeNotDispatched {
+            dispatchedCalls -= 1
+            outcome = .failure(PhoneCallNotDispatched(reason: "手机操作的期限在交给设备前已过；未执行。"))
+        }
         var progress = PocketDDIProgress()
         _ = pocket_ddi_progress(cancel, &progress)
         if progress.input_unconfirmed { model.latchInputReleaseUnconfirmed(op: op) }
@@ -221,7 +241,8 @@ final class DDIControl: PhoneControl {
             guard let result else { throw failure("DDI 返回为空。") }
             defer { idevice_string_free(result) }
             return Data(String(cString: result).utf8)
-        } } catch let refused as InputReleaseUnconfirmed { throw refused } catch {
+        } } catch let refused as InputReleaseUnconfirmed { throw refused }
+        catch let refused as PhoneCallNotDispatched { throw refused } catch {
             if error.localizedDescription.contains("AX foreground or root changed") { throw PhoneObservationIssue.foregroundChanged }
             // The device can refuse attributes with error 8 during a UI transition.
             // The executor retries only observation, after the old AX socket closes.

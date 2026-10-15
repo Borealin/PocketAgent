@@ -85,6 +85,13 @@ extension Model {
                 }
                 let provider = AgentProviderClient(provider: config.agentProvider, model: config.agentModel,
                     secret: config.secret, reasoning: .low)
+                // Model stream metadata goes to this run's own log with the time
+                // and order it happened, whenever it is written.
+                let streamStamp = runLogStamp()
+                let observeStream: @Sendable (ModelStreamTrace) -> Void = { [weak self] trace in
+                    let origin = streamStamp.origin(), fields = trace.fields
+                    Task { @MainActor in self?.log("model_stream", fields, origin: origin) }
+                }
                 var loop = AgentLoopConfiguration()
                 loop.toolExecution = .sequential; loop.maximumToolConcurrency = 1
                 loop.modelRetryPolicy = AgentModelRetryPolicy(delays: [.seconds(1)])
@@ -93,6 +100,7 @@ extension Model {
                 var systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
                     capabilities: capabilities, workspaceName: workspace?.name, rules: rules)
                 if let assistant = gates.assistant {
+                    assistant.observeStream = observeStream
                     // Primary line: bounded context (summary + same-scope recent
                     // history), refreshed memory per request, read-only memory tools.
                     loop.contextPipeline = { _, _, _ in AssistantContextPipeline.pipeline }
@@ -122,13 +130,14 @@ extension Model {
                     status.value.phase = .connecting
                     publish("context_ready"); onStatus?(status.value)
                 }
-                let gatedModel = CommitGatedModel(base: provider, barrier: gates.barrier, epoch: gates.epoch,
+                var gatedModel = CommitGatedModel(base: provider, barrier: gates.barrier, epoch: gates.epoch,
                     promptID: promptID, synthetic: { gates.assistant?.syntheticIDs ?? [] },
                     prepare: { request in
                         var prepared = try await phone.prepare(request)
                         if let assistant = gates.assistant { prepared = try await assistant.prepareRequest(prepared) }
                         return prepared
                     })
+                gatedModel.observe = observeStream
                 let approval = CommitGatedApproval(barrier: gates.barrier, epoch: gates.epoch) { request in
                     switch ToolCatalog.decision(for: request.descriptor.name, capabilities: capabilities) {
                     case .allow: .allow
@@ -586,11 +595,15 @@ final class PhoneExecutor {
             // Refused before anything is sent: an earlier input release was not confirmed.
             if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
             let before = callEffects.beginAction()
-            do { try await operation() } catch PhoneObservationIssue.targetCovered {
-                // The native preflight refused before any touch was sent; an
-                // executor preparation gesture already sent stays reported.
-                callEffects.refusedBeforeTouch(restoring: before)
-                throw PhoneObservationIssue.targetCovered
+            let dispatched = control.dispatchedCalls
+            do { try await operation() } catch {
+                // A native refusal before any touch, or a refusal before dispatch
+                // when nothing of this operation was handed to the device, is
+                // not an action; anything else may follow a sent effect.
+                // Preparation gestures already sent stay reported.
+                callEffects.settle(after: error, restoring: before,
+                                   dispatchedDuringOperation: control.dispatchedCalls - dispatched)
+                throw error
             }
             try proceed()
         }
@@ -938,6 +951,7 @@ final class TurnTools {
         let lease = ScriptLease()
         let phone = phone, report = onScriptEvent, reportStage = onScriptStage
         let dirtyOnce = DeviceSettings.dirtyAfterFirstScriptCall ? ScriptLease() : nil   // local acceptance only
+        let stamp = phone.model.runLogStamp()
         let outcome = await ScriptRuntime.shared.run(request, workspace: workspace, lease: lease) { phoneCall in
             await MainActor.run { report(.started(phoneCall)) }
             let result = await phone.executeScript(phoneCall, lease: lease)
@@ -947,8 +961,10 @@ final class TurnTools {
                 await MainActor.run { NotificationCenter.default.post(name: DeviceSettings.diagnosticDirty, object: nil) }
             }
             return result
-        } stage: { stage in Task { @MainActor in reportStage(stage) } } diagnostic: { event, fields in
-            Task { @MainActor in phone.model.log(event, fields) }
+        } stage: { stage in Task { @MainActor in reportStage(stage) } } diagnostic: { [stamp] event, fields in
+            // Time and order are taken here; the write may happen later.
+            let origin = stamp.origin()
+            Task { @MainActor in phone.model.log(event, fields, origin: origin) }
         }
         phone.model.log("script_finished", ["exitCode": outcome.exitCode ?? -1, "signal": outcome.exit.signal ?? 0,
                                             "cancelled": outcome.cancelled, "timedOut": outcome.timedOut,

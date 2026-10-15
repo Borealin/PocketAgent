@@ -30,6 +30,8 @@ final class AssistantTurnSupport {
     private let requests: AssistantRequestPreparer
     /// Outcome of context maintenance this turn (shown in the status detail).
     private(set) var maintenanceNote: String?
+    /// Metadata of each summary fold's provider request (opt-in run log).
+    var observeStream: (@Sendable (ModelStreamTrace) -> Void)?
     /// Receives the estimate of every complete request, before the ceiling check.
     var onEstimate: (@MainActor (Int) -> Void)? {
         get { requests.onEstimate }
@@ -104,20 +106,25 @@ final class AssistantTurnSupport {
         let injected = DeviceSettings.injectSlowSummaryStream
         let recorder = DeviceSettings.recordMaintenanceStream ? MaintenanceStreamRecorder(injected: injected) : nil
         let stopAtText = DeviceSettings.stopAtFirstSummaryText
+        let observe = observeStream
         let producer: StreamingSummary.Producer = { request, onEvent in
             if let hold { try await Task.sleep(for: hold) }
             recorder?.started()
+            var trace = ModelStreamTrace(path: .summary)
+            observe?(trace)
             do {
                 if injected {
                     for index in 0..<80 {
                         try await Task.sleep(for: .seconds(3))
                         let event = AgentModelStreamEvent.textDelta("整理测试\(index)。")
                         recorder?.saw(event)
+                        trace.saw(event)
                         try onEvent(event)
                     }
                 } else {
                     try await provider.consume(request, limits: .maintenance) { event in
                         recorder?.saw(event)
+                        trace.saw(event)
                         if stopAtText, recorder?.takeFirstText(event) == true {
                             Task { @MainActor in NotificationCenter.default.post(name: DeviceSettings.diagnosticStop, object: nil) }
                         }
@@ -125,8 +132,10 @@ final class AssistantTurnSupport {
                     }
                 }
                 recorder?.finished("completed")
+                trace.finished(); observe?(trace)
             } catch {
                 recorder?.finished(String(describing: type(of: error)) + (Task.isCancelled ? " after cancellation" : ""))
+                trace.failed(error, cancelled: Task.isCancelled); observe?(trace)
                 throw ProviderContextLimit.classify(error, path: .summary) ?? error
             }
         }

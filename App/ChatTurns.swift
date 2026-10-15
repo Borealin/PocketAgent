@@ -453,9 +453,10 @@ extension ChatController {
         if runningJob === job { runningJob = nil; phoneSessionID = nil }
         statuses[job.sessionID] = status
         if !job.permitted {
-            // Nothing was dispatched for this request.
+            // No startup permit: the main request did not start (context
+            // maintenance may already have sent summary requests).
             let reason = job.revoked ? ContextSourceRevoked().errorDescription : status.failure
-            notStarted(job, reason ?? "本轮未开始。", cancelled: job.cancelled, warning: cleanupWarning)
+            notStarted(job, reason ?? "本轮未开始。", cancelled: job.cancelled, stage: .preparing, warning: cleanupWarning)
         } else {
             let state: ChatState = successful ? .completed : (job.cancelled ? .interrupted : .failed)
             finish(job, state: state, detail: StartedTurnOutcome.detail(successful: successful, cancelled: job.cancelled,
@@ -485,7 +486,10 @@ extension ChatController {
     }
 
     /// A request that never received its startup permit.
-    private func notStarted(_ job: ChatJob, _ message: String, cancelled: Bool, warning: String = "") {
+    /// `stage` words a cancellation by where it happened; the route (restore
+    /// the draft, abandon, hold) does not depend on it.
+    private func notStarted(_ job: ChatJob, _ message: String, cancelled: Bool, stage: NotStartedCancellation = .queued,
+                            warning: String = "") {
         var status = statuses[job.sessionID] ?? ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         if !status.phase.isTerminal { status.failure = message; status.finish(successful: false, cancelled: cancelled) }
         if jobs[job.sessionID] === job { statuses[job.sessionID] = status }
@@ -493,13 +497,13 @@ extension ChatController {
         case .restoreDraft:
             let restored = restoreDraft(job)
             finish(job, state: cancelled ? .interrupted : .failed,
-                   detail: (cancelled ? "已取消排队任务。" : message + " 未开始执行。") + DraftRestore.note(restored: restored)
+                   detail: (cancelled ? stage.detail : message + " 未开始执行。") + DraftRestore.note(restored: restored)
                        + (warning.isEmpty ? "" : " " + warning))
         case .abandon:
             // Pending-origin cancellation and the abandon are one write; if it
             // fails the receipt stays and restart asks again.
-            transact { try $0.abandonUnstarted(promptID: job.prompt.id, detail: "已取消，未开始执行。") }
-            finish(job, state: .interrupted, detail: "已取消，未开始执行。")
+            transact { try $0.abandonUnstarted(promptID: job.prompt.id, detail: stage.abandonDetail) }
+            finish(job, state: .interrupted, detail: stage.abandonDetail)
         case .hold:
             transact { try $0.holdPending(message) }
             finish(job, state: .failed, detail: message)

@@ -47,6 +47,31 @@ nonisolated enum NotStartedRoute: Equatable, Sendable {
     }
 }
 
+/// What a cancelled request that never received its startup permit says.
+/// A Stop during context preparation may follow summary requests that were
+/// already sent, so it reports only what is known: the preparation stopped, the
+/// main request did not start and no new phone action follows.
+nonisolated enum NotStartedCancellation: Equatable, Sendable {
+    /// Still waiting in the phone queue.
+    case queued
+    /// Stopped while preparing (context maintenance, before the main request).
+    case preparing
+
+    var detail: String {
+        switch self {
+        case .queued: "已取消排队任务。"
+        case .preparing: "已在准备阶段停止：本轮主请求未开始，不会再有新的手机操作。"
+        }
+    }
+    /// The pending-origin abandon's receipt detail.
+    var abandonDetail: String {
+        switch self {
+        case .queued: "已取消，未开始执行。"
+        case .preparing: "已在准备阶段停止，主请求未开始。"
+        }
+    }
+}
+
 /// The detail of a turn that ended after its startup permit. A turn an
 /// explicit forget revoked gives that reason, not whatever its interrupted
 /// run reported (the phone run only knows it did not finish).

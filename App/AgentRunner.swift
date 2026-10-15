@@ -39,6 +39,7 @@ extension Model {
             guard !goal.isEmpty || !images.isEmpty else { throw failure("消息不能为空。") }
             runID = UUID().uuidString
             logURL = documents.appendingPathComponent("run-\(runID).jsonl")
+            runStamp = RunLogStamp(runID: runID, url: logURL)
             busy = true
             pendingAgentCancellation = false
             // The turn's single status and identity exist before the system can

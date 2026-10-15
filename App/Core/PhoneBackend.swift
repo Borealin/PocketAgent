@@ -24,6 +24,27 @@ nonisolated struct PhoneCallEffects: Equatable, Sendable {
     mutating func refusedBeforeTouch(restoring previous: Bool) { action = previous }
     /// Called before the gesture is sent: a failed send may still have touched.
     mutating func preparationSent() { preparation = true }
+
+    /// An effect operation failed. Only a refusal proven to precede anything
+    /// it could have sent restores the action flag: a native refusal before
+    /// any touch, or a typed refusal before dispatch when no native call of
+    /// this operation was dispatched at all (a composite operation whose
+    /// first call already acted stays reported). A timeout, a cancellation or
+    /// any other failure may follow a sent effect and is kept. Preparation
+    /// stays reported either way.
+    mutating func settle(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int) {
+        if case PhoneObservationIssue.targetCovered = error { action = previous; return }
+        if error is PhoneCallNotDispatched, dispatchedDuringOperation == 0 { action = previous }
+    }
+}
+
+/// A phone call refused before it was handed to the device: not enough of the
+/// turn is left for the call and its cleanup, or native code refused the
+/// expiry at entry. Nothing of this call was sent.
+nonisolated struct PhoneCallNotDispatched: LocalizedError, Equatable {
+    var reason: String
+    var errorDescription: String? { reason }
+    static let insufficientTime = PhoneCallNotDispatched(reason: "本轮剩余时间不足以安全执行手机操作；未执行。")
 }
 
 nonisolated enum DDIResultError: LocalizedError, Equatable {
