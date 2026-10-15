@@ -113,6 +113,13 @@ enum DeviceSettings {
     static var dropInputReleaseConfirmation: Bool {
         ProcessInfo.processInfo.arguments.contains("-PocketAgentDropInputReleaseConfirmation")
     }
+    /// Local acceptance launch argument only (not reachable from the UI): the
+    /// `PKATEST_` marker of one own memory entry that a running primary turn,
+    /// after reading it, forgets once through the panel's own preview and
+    /// commit (`ChatController.diagnosticForgetDuringRun`).
+    static var forgetDuringRunMarker: String? {
+        argument(after: "-PocketAgentForgetDuringRun").flatMap { $0.hasPrefix("PKATEST_") ? $0 : nil }
+    }
 
     /// Writes `Documents/summary-maintenance-probe.json`: the probe's cases
     /// with a fresh run nonce, start and end time, process and build.

@@ -86,6 +86,8 @@ final class ChatController: ObservableObject {
     /// restore its draft.
     var draftRevisions: [UUID: Int] = [:]
     func noteDraftEdit(_ id: UUID) { draftRevisions[id, default: 0] += 1 }
+    /// The acceptance forget during a run has been attempted (one-shot).
+    var diagnosticForgetConsumed = false
     private var draftWrite: Task<Void, Never>?
     /// Draft text changed in memory but not yet written.
     private var draftDirty = false
