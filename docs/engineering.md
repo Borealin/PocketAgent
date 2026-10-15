@@ -516,14 +516,18 @@ the running turn had read showed that the task would stop; confirming it
 cancelled the script before its second call (guest processes 0, root masked).
 An isolated provider fixture (`-PocketAgentProviderLimitProbe`) mapped bare SSE
 error objects and strings through the pinned client in the optimized iOS build
-on both paths; it is not a service actually rejecting a request. Device long
+on both paths (the summary path through the `StreamingSummary` producer, not
+the full `SummaryMaintenance` compare-and-swap); it is not a service actually
+rejecting a request, and no real provider overflow was induced. Device long
 history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
 the production writer, three runs): a patched event at 50k messages records in
 p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
 image. Whole writes stay above 0.2 s at 50k: the first write of a file that
 cannot be adopted takes 0.65–0.67 s (was 1.2 s; encoding now in parallel) and a
-warm whole write (every 512 patches, a changed file) 0.31–0.36 s, mostly the
-123 MB atomic write. After adoption (0.48–0.58 s off the main actor at launch,
+warm whole write 0.31–0.36 s, mostly the 123 MB atomic write, both after an
+outside change to the file and for the periodic whole write (the benchmark sets
+the adopted writer's interval to 4 so the same path runs after the fourth patch;
+production keeps every 512 patches, never run 512 times on the device). After adoption (0.48–0.58 s off the main actor at launch,
 after the 1.9 s strict load) the first write is a 0.10–0.11 s patch; appending a
 session or a later session overflowing patches in about 0.085 s (one run 0.37 s).
 The capacity makes the 50k file 123 MB instead of 110 MB. The real transcript
