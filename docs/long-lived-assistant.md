@@ -2,7 +2,7 @@
 
 > 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@e1c81c9`（含窄 bounded `consume` API 与裸SSE `error` 帧失败）；模型服务复用App通用设置；Core 测试、iOS 构建/IPA 检查与 iPhone 12 mini 真实模型场景通过，未覆盖项见第 3 节“验证范围”
 >
-> 最后核对：2026-10-14（实现与验证范围）
+> 最后核对：2026-10-15（实现与验证范围；AgentKit e1c81c9 接入与12 mini验收）
 >
 > 面向读者：PocketAgent iOS、AgentKit 集成与测试开发者
 >
@@ -301,7 +301,7 @@ ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。�
 | 模型循环 | AgentRuntime、provider编码/解析、steer/cancel、工具调度/语法修复 | ContextBuilder、统一Estimator、每请求wrapper、无工具摘要编排与真实进度 |
 | 记忆/搜索 | AgentMemoryAccessing、Operation/Scanner/applying、SearchQuery、只读工具 | ID/revision定位、scope/来源、已知副本遗忘、exact宿主写入与受限搜索 |
 | 手机执行 | PhoneExecutor串行owner、DDI/WDA、fresh snapshot、脚本lease、取消清理 | commit gate接到所有入口，同一deadline；不替换后端/loop |
-| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口 `consume(_:limits:onEvent:)` 已发布于 fork `Borealin/AgentKit` 分支 `codex/pocketagent-bounded-consume`（`e1c81c9`），PocketAgent 已固定该不可变提交；默认stream/complete/loop不变 |
+| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口 `consume(_:limits:onEvent:)` 已发布于 fork `Borealin/AgentKit` 分支 `codex/pocketagent-bounded-consume`（`e1c81c9`），PocketAgent 已固定该不可变提交；公开API与loop保留，默认stream/complete的错误解析已补齐（裸 `error` 帧使流失败） |
 
 实现状态：P1–P4 已落在 `App/Core`（纯逻辑与可 fake 的 owner/屏障）和 `App/`（ChatController 扩展与界面），Core 测试覆盖格式、事务、屏障（经真实 AgentRuntime）、scope/DAG/遗忘、上下文与摘要（含经 fork 真实 `consume` 的流式整理）、记忆与搜索、pending 崩溃点与 sync 交叉。
 
@@ -480,7 +480,7 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 
 旧屏幕投影只针对phone工具已知screen/element内容，最多保留最新2个完整观察；旧结果保ok/error/code/message/action_issued/action_outcome/replay_allowed/input_method/input_verified和工具结构，删除旧snapshot节点/坐标并明确“过期观察，重新observe”。不能裁其他file/network/script结果；最新screen仍唯一动作依据，projection不改PhoneExecutor授权。
 
-上游AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2做了一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete/loop不变，未复制provider解码器，未新增本地化字符串（超事件数复用responseTooLarge）。该提交发布在 fork `Borealin/AgentKit`（parent AkinoKaede/AgentKit）分支 `codex/pocketagent-bounded-consume`，PocketAgent在Package.swift/Package.resolved/project.yml/Xcode工程与lockfile/dependencies.json中固定不可变revision `e1c81c911564c39d5f78ccec6808ba96c1acd2e8`；SwiftSoup仍锁2.13.9（2.14.2与ScrubberKit的平台声明在当前工具链下无法解析）。
+上游AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2做了一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，loop不变，未复制provider解码器（其后的e1c81c9只补齐了stream/complete对裸 `error` 帧的错误解析），未新增本地化字符串（超事件数复用responseTooLarge）。该提交发布在 fork `Borealin/AgentKit`（parent AkinoKaede/AgentKit）分支 `codex/pocketagent-bounded-consume`，PocketAgent在Package.swift/Package.resolved/project.yml/Xcode工程与lockfile/dependencies.json中固定不可变revision `e1c81c911564c39d5f78ccec6808ba96c1acd2e8`；SwiftSoup仍锁2.13.9（2.14.2与ScrubberKit的平台声明在当前工具链下无法解析）。
 
 整理链路：每个fold用 `SummaryRequest`（AgentCompaction.serialized + AgentCompactionService.systemPrompt，上一摘要折叠）经 `consume(limits: .maintenance)` 进入Core `SummaryCollector`：只保text（≤64KiB，textDelta追加、textSnapshot覆盖，空snapshot不清除已收文本），reasoning不保正文；只有新的非空内容计为真实工作（整个响应的snapshot以16字节digest去重，上限即事件上限，重复/交替/循环/空snapshot都不刷新idle）；tool call/超限立即拒绝并停止producer；只接受finished(.completed)，`.length`/缺终态/空文本拒绝；宿主校验完整结果后经CAS保存，不采用Service.summarize的静默截断。
 
@@ -557,6 +557,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 | 清空对话，保留记忆（Core＋设备，代码f65aba9） | 通过 | Core：清空范围与保留字段、上下文/检索/飞行中同步计划/下一轮合并不复活、冲突副本root转unknown、清空后记忆召回与遗忘、运行/待处理/恢复提示拒绝、写失败原子、空主线同ID远端不回填（对照组会回填）、当前格式重启往返。12 mini物理UI＋真实模型：alert取消后内容不变（仅主线updatedAt不同）；准备中与待处理请求挂起时均被拒绝并显示原因；确认后主线换新ID且为空、模型与项目不变、3个独立任务与验收前备份一致、记忆账本与遮罩不变、设置文件原有键值不变；杀进程重启仍为空，真实模型按记忆答出测试口令；模型三次 session_search 均未找回清空对话的标记并回答没有；新消息只出现一次，只读观察成功；测试记忆已遗忘，验收后再次清空（第二次同样新ID）。飞行中同步计划、同ID远端回填、冲突副本与写失败原子性只在Core验证；设备上只观察到每次安装后的启动同步没有改变会话与设置 |
 | 整轮600秒期限（设备） | 通过 | 测试数据任务持续调用wait（每次回复4个，均低于本轮请求/工具上限）：7169080上85次调用/22次回复在600.2秒停止，原因显示笼统；最终包2c47dcf上84次/21次在600.6秒停止，原因为“本轮已达到 10 分钟上限”；未完成的wait报已取消、无重放 |
 | 补缺口六项（12 mini，开发签名同身份覆盖安装，真实UI＋真实模型；代码04db862起，最终6c3dd52） | 通过 | 跨天召回（跨过一次本地午夜，不证明多天稳定性）、记住模式、候选选择表（五条长条目＋键盘）、更正后按新revision召回、运行中新增记忆被同一轮后续请求使用、只读观察、冻结预算行、宿主超上限拒绝、Stop/重启不重放、清空对话保留记忆、超预算摘要拒发、维护准备期遗忘（故障注入）；后两项的范围见下节。测试记忆已遗忘，设置文件与独立任务与验收前备份一致；逐项记录留在本地 |
+| AgentKit e1c81c9 接入（12 mini，开发签名同身份覆盖安装，真实UI＋真实模型；代码c23d5ec） | 通过 | 安装与启动后历史除一条清空记录的时间被启动同步规整到整毫秒外不变；真实模型回复、严格 `记住：` 后由真实模型召回且登记读取；测试条目经面板遗忘、测试对话清空后，独立任务、设置文件、记忆账本与遮罩与验收前一致。裸 `error` 帧的超限映射只经主机固定客户端夹具验证，未用真实服务诱发超限 |
 | 设备长历史（12 mini，Release配置开发包，仅启动参数；沙盒临时文件或只读控制器，不碰真实历史/同步） | 补丁写通过；整写边界见下 | 写入（`-PocketAgentLongHistoryBenchmark`，owner经生产writer，合成10k/50k条）：补丁事件p95 50k 0.10–0.11秒（四次）、10k 0.02秒，文件逐字节等于发布的布局整像并解码为owner状态；整写：启动后首次（逐条编码）50k约1.2秒，热整写（溢出、每512次补丁、文件被改动）50k 0.30–0.35秒。绘制（`-PocketAgentViewportBenchmark`）：真实转写视图挂在只读控制器上，计时显示与程序化“加载更早”后的下一帧、外部滑动期间的帧间隔（不证明布局完成）；10k/50k上脚本滑动前后可见行移动，写入0次、存储为loadBlocked，真实历史前后一致 |
 | 设备未覆盖 / 边界 | 未验证或环境边界 | 改模型后召回：设备上的服务商只配置1个模型且没有模型目录地址，App内“连接并加载模型”不可用；要发现第二个模型只能新填目录地址（等于编造端点并改动用户配置），未做；150秒维护期限与真实摘要流中途取消只在主机验证（超预算摘要拒发与维护准备期遗忘见下节；600秒整轮期限已在设备上触发，见下一行）；灵动岛机型的任务面板收起手势只有原生边界测试（未用灵动岛设备）；被观察App在前台时SpringBoard系统弹窗上的坐标点击现在会被归属检查拒绝，未实测。“天气”首次运行欢迎页没有天气App进程：启动返回CoreDevice 10004（报为未确认），前台进程无法识别时观察按设计拒绝 |
 | 长历史 | 主机量测 | scope行复用后每事件写入 p95：10k 条约0.02秒、50k 条约0.12秒（110 MB）；含 scope/DAG 形状时读集登记 3/74 毫秒、遗忘闭包 0.7/3 毫秒；设备量测见上 |
