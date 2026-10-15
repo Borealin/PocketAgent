@@ -1,6 +1,6 @@
 # 单入口与长期记忆技术方案
 
-> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@22fc575`（含窄 bounded `consume` API）；模型服务复用App通用设置；Core 测试、iOS 构建/IPA 检查与 iPhone 12 mini 真实模型场景通过，未覆盖项见第 3 节“验证范围”
+> 状态：P1–P4 已实现（分支 `codex/long-lived-assistant-implementation`），AgentKit 固定到已发布 fork `Borealin/AgentKit@e1c81c9`（含窄 bounded `consume` API 与裸SSE `error` 帧失败）；模型服务复用App通用设置；Core 测试、iOS 构建/IPA 检查与 iPhone 12 mini 真实模型场景通过，未覆盖项见第 3 节“验证范围”
 >
 > 最后核对：2026-10-14（实现与验证范围）
 >
@@ -272,7 +272,7 @@ iOS 的实际链路为 `NanoMuseMainChat → ChatStore/AIChatViewModel load → 
 
 ### 可直接复用的 AgentKit 原语
 
-方案阶段核实了当时锁定的上游 `8108c9bb87c546860cfc1769571e115af919fe8a` 源码；实现后依赖固定为 fork `Borealin/AgentKit` 的 `22fc575009bde3a2097ac1a49908ffa239b9c029`（上游该提交＋窄 `consume` API，未改其他 API）。
+方案阶段核实了当时锁定的上游 `8108c9bb87c546860cfc1769571e115af919fe8a` 源码；实现后依赖固定为 fork `Borealin/AgentKit` 的 `e1c81c911564c39d5f78ccec6808ba96c1acd2e8`（上游该提交＋窄 `consume` API＋裸SSE `error` 帧使流失败，未改其他 API；由 `22fc575` 快进发布）。
 
 - [AgentCompaction / AgentCompactionService](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentCompactionService.swift)：安全切分历史、保留近期预算、限制摘要输入中的工具输出，并用无工具模型调用生成摘要。`shouldCompact` 在未知窗口时返回 false，宿主需要明确预算来源。
 - [AgentContextPipeline](https://github.com/AkinoKaede/AgentKit/blob/8108c9bb87c546860cfc1769571e115af919fe8a/Sources/AgentKit/Runtime/AgentContextPipeline.swift)：只变换发送给模型的上下文，不改写保留的历史。默认 chat pipeline 修复工具语法并重放上下文快照，没有自动长期摘要。
@@ -301,7 +301,7 @@ ChatController/MainActor是新命名空间内唯一原子HistoryFile的owner。�
 | 模型循环 | AgentRuntime、provider编码/解析、steer/cancel、工具调度/语法修复 | ContextBuilder、统一Estimator、每请求wrapper、无工具摘要编排与真实进度 |
 | 记忆/搜索 | AgentMemoryAccessing、Operation/Scanner/applying、SearchQuery、只读工具 | ID/revision定位、scope/来源、已知副本遗忘、exact宿主写入与受限搜索 |
 | 手机执行 | PhoneExecutor串行owner、DDI/WDA、fresh snapshot、脚本lease、取消清理 | commit gate接到所有入口，同一deadline；不替换后端/loop |
-| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口 `consume(_:limits:onEvent:)` 已发布于 fork `Borealin/AgentKit` 分支 `codex/pocketagent-bounded-consume`（`22fc575`），PocketAgent 已固定该不可变提交；默认stream/complete/loop不变 |
+| AgentKit依赖 | 固定公开API与loop | 窄producer callback维护接口 `consume(_:limits:onEvent:)` 已发布于 fork `Borealin/AgentKit` 分支 `codex/pocketagent-bounded-consume`（`e1c81c9`），PocketAgent 已固定该不可变提交；默认stream/complete/loop不变 |
 
 实现状态：P1–P4 已落在 `App/Core`（纯逻辑与可 fake 的 owner/屏障）和 `App/`（ChatController 扩展与界面），Core 测试覆盖格式、事务、屏障（经真实 AgentRuntime）、scope/DAG/遗忘、上下文与摘要（含经 fork 真实 `consume` 的流式整理）、记忆与搜索、pending 崩溃点与 sync 交叉。
 
@@ -472,7 +472,7 @@ StoredCompaction复用原生record、summary指令和安全cut逻辑，宿主独
 
 ### 每请求预算与流式维护
 
-通用ProviderFile（version 1）以附加键保存本机ContextBudgetOverrides（providerID/modelID），portable只投影明确的provider/model字段。ProviderStore.load/persist/applySync完整带回override与其余本机字段，保存model列表或同步provider不得归零本地预算；同一provider/model重复设置视为无效文件。接受时freeze到RunConfiguration；knownWindow配置来自用户/已验证能力，inputCeiling=W-4096-max(2048,ceil(0.08W))；输入预算<=0拒绝。未知窗口用24k估计作为自动整理软目标（宿主策略，不声称provider窗口），只对knownWindow或用户明确输入inputCeiling实施hardguard；输出仍4096。估计未知默认不把大手机观察直接停在24k，用户可设定硬上限。模型可能实际更小：provider的上下文超限拒绝映射为 `ProviderContextLimit`（主请求在CommitGatedModel内、摘要请求在维护producer内映射），终止本轮、不重试、不降级模型、不重放动作；摘要请求被拒同样停止本轮（主请求只会更大）。只认400/413/422响应或流内失败，且需明确的溢出码（context_length_exceeded等）或溢出语义（maximum context length is…、prompt is too long、exceeds the maximum number of tokens…，或“上下文/输入长度”与“超过/超出/too long”同时出现）；仅出现context_length/context window等字段名的参数错误、401/403/429/5xx、限流/配额、网络错误均保持原处理。413或请求体积码（request_too_large）且无上下文码时归为“请求体积”（建议减少图片/附件、缩短输入）。文案只给HTTP状态、已知码与服务报告的上限数字，不含响应正文/key/endpoint；说明拒绝后不再执行新的手机动作、此前动作和结果保留，新一轮会“尝试”按上限整理（无安全切点或单段过大时仍可能超限）。流内失败经 `StreamFailureBridge` 读取AgentKit内部类型 `AgentKit.AgentProviderStreamFailure{code: String?, message}` 的私有形状（依赖固定修订22fc575；形状变化时退化为通用失败文本），以真实SSE/JSON/Responses夹具经固定客户端验证。任何默认都不能证明兼容未知provider。
+通用ProviderFile（version 1）以附加键保存本机ContextBudgetOverrides（providerID/modelID），portable只投影明确的provider/model字段。ProviderStore.load/persist/applySync完整带回override与其余本机字段，保存model列表或同步provider不得归零本地预算；同一provider/model重复设置视为无效文件。接受时freeze到RunConfiguration；knownWindow配置来自用户/已验证能力，inputCeiling=W-4096-max(2048,ceil(0.08W))；输入预算<=0拒绝。未知窗口用24k估计作为自动整理软目标（宿主策略，不声称provider窗口），只对knownWindow或用户明确输入inputCeiling实施hardguard；输出仍4096。估计未知默认不把大手机观察直接停在24k，用户可设定硬上限。模型可能实际更小：provider的上下文超限拒绝映射为 `ProviderContextLimit`（主请求在CommitGatedModel内、摘要请求在维护producer内映射），终止本轮、不重试、不降级模型、不重放动作；摘要请求被拒同样停止本轮（主请求只会更大）。只认400/413/422响应或流内失败，且需明确的溢出码（context_length_exceeded等）或溢出语义（maximum context length is…、prompt is too long、exceeds the maximum number of tokens…，或“上下文/输入长度”与“超过/超出/too long”同时出现）；仅出现context_length/context window等字段名的参数错误、401/403/429/5xx、限流/配额、网络错误均保持原处理。413或请求体积码（request_too_large）且无上下文码时归为“请求体积”（建议减少图片/附件、缩短输入）。文案只给HTTP状态、已知码与服务报告的上限数字，不含响应正文/key/endpoint；说明拒绝后不再执行新的手机动作、此前动作和结果保留，新一轮会“尝试”按上限整理（无安全切点或单段过大时仍可能超限）。流内失败经 `StreamFailureBridge` 读取AgentKit内部类型 `AgentKit.AgentProviderStreamFailure{code: String?, message}` 的私有形状（依赖固定修订e1c81c9；形状变化时退化为通用失败文本），以真实SSE/JSON/Responses夹具经固定客户端验证；该修订下Chat Completions流开始后无事件名/type的裸 `error` 对象或非空字符串同样是流内失败，只在流以缺终态结束时不推断为超限。任何默认都不能证明兼容未知provider。
 
 Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，另加结构headroom；这是待实测估算而非token上界证明，图片按config模型估计/未知按每张4,096 token工程初值，最多沿用现有attachment cap；使用同一provider/model/input-mode的真实usage作有界校准（初值1，范围0.5–2，异常样本不用于调整），不据usage推窗口/自动抬hardcap；工程估计不宣称token上界。主线状态条显示本轮冻结的模型名与预算（已确认窗口的输入上限、本机输入上限，或“窗口未知：按约24000 token软目标整理，不是模型上限”）以及最近一次完整请求的估计（取自phone.prepare、图片、当前记忆块与旧观察投影之后、硬上限检查之前，因此超上限拒绝也显示数字）；不是进度也不是provider usage，停止/结束后保留，界面切换模型不改变运行中轮次的标签，不额外估算。70%触发准备期摘要，recent目标35%；有known/显式inputCeiling时final hardguard不允许估计超过它；未知只保持同样的软目标整理和图片限制，实际超长错误不可重试并提示配置窗口。中文/大量JSON/图片路径必须有provider实测用例，无法tokenizer精确证明。
 
@@ -480,7 +480,7 @@ Estimate v1：CJK每Unicode scalar计2估计token，其余UTF8每3字节计1，�
 
 旧屏幕投影只针对phone工具已知screen/element内容，最多保留最新2个完整观察；旧结果保ok/error/code/message/action_issued/action_outcome/replay_allowed/input_method/input_verified和工具结构，删除旧snapshot节点/坐标并明确“过期观察，重新observe”。不能裁其他file/network/script结果；最新screen仍唯一动作依据，projection不改PhoneExecutor授权。
 
-上游AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2做了一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete/loop不变，未复制provider解码器，未新增本地化字符串（超事件数复用responseTooLarge）。该提交发布在 fork `Borealin/AgentKit`（parent AkinoKaede/AgentKit）分支 `codex/pocketagent-bounded-consume`，PocketAgent在Package.swift/Package.resolved/project.yml/Xcode工程与lockfile/dependencies.json中固定不可变revision `22fc575009bde3a2097ac1a49908ffa239b9c029`；SwiftSoup仍锁2.13.9（2.14.2与ScrubberKit的平台声明在当前工具链下无法解析）。
+上游AgentKit的client.stream是unbounded AsyncThrowingStream且SSE无总byte cap，仅宿主text64KiB上限不能证明总内存有界。因此P2做了一个窄依赖变更：AgentKit provider层新增 `AgentProviderClient.consume(_:limits:onEvent:)` 与 `AgentResponseLimits`（总transport 16MiB、单SSE line 256KiB、最多65,536 events），callback在producer task中同步调用、不累计事件数组，必须收到provider终态，callback抛错即停止读取并取消传输；复用现有request encoder/transport/parser，默认stream/complete/loop不变，未复制provider解码器，未新增本地化字符串（超事件数复用responseTooLarge）。该提交发布在 fork `Borealin/AgentKit`（parent AkinoKaede/AgentKit）分支 `codex/pocketagent-bounded-consume`，PocketAgent在Package.swift/Package.resolved/project.yml/Xcode工程与lockfile/dependencies.json中固定不可变revision `e1c81c911564c39d5f78ccec6808ba96c1acd2e8`；SwiftSoup仍锁2.13.9（2.14.2与ScrubberKit的平台声明在当前工具链下无法解析）。
 
 整理链路：每个fold用 `SummaryRequest`（AgentCompaction.serialized + AgentCompactionService.systemPrompt，上一摘要折叠）经 `consume(limits: .maintenance)` 进入Core `SummaryCollector`：只保text（≤64KiB，textDelta追加、textSnapshot覆盖，空snapshot不清除已收文本），reasoning不保正文；只有新的非空内容计为真实工作（整个响应的snapshot以16字节digest去重，上限即事件上限，重复/交替/循环/空snapshot都不刷新idle）；tool call/超限立即拒绝并停止producer；只接受finished(.completed)，`.length`/缺终态/空文本拒绝；宿主校验完整结果后经CAS保存，不采用Service.summarize的静默截断。
 
@@ -540,7 +540,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 | 端 / 共享层 | 影响 | 原因 |
 |---|---|---|
 | PocketAgent iOS | 受影响 | 入口、唯一历史数据、上下文、记忆、输入调度；已实现 |
-| AgentKit | 窄provider API受影响 | fork `Borealin/AgentKit@22fc575` 新增 `consume`，PocketAgent已固定；现有loop/手机后端保留 |
+| AgentKit | 窄provider API受影响 | fork `Borealin/AgentKit@e1c81c9`：新增 `consume`，裸SSE `error` 帧使流失败；PocketAgent已固定；现有loop/手机后端保留 |
 | PortableSync / iCloud Drive | 新格式隔离与apply回归 | 新目录/generation仅接同格式客户端，不同步助理身份/ledger/scope/屏蔽集 |
 | Looktech Android / iOS App | 不受影响 | 独立PocketAgent，不改眼镜业务 |
 | 蓝牙 / ISP / Wi-Fi | 不受影响 | 无设备通信、媒体、电源或固件变化 |
@@ -550,7 +550,7 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 
 | 层 | 结果 | 范围 |
 |---|---|---|
-| Core 测试 | 通过 | 328 项/70 组（macOS 主机，mock transport；2026-10-15；新writer套件另在Release优化下通过）；两种只读检索经固定AgentRuntime与模型/工具闸：快照与登记之间遗忘→stale且不发明文、登记后遗忘→下一请求前停轮、登记写一次失败而后续事件写成功→本轮epoch失败、同消息内后续手机调用被拒、无下一请求；摘要链127/128/129、checkpoint的伪造/父正文/roots/环与来源变化失败、重建期遗忘/写失败不提交、最老3fold；provider上下文超限经固定客户端真实HTTP/SSE/JSON夹具映射、字段名参数错误与401/429/5xx不误判；生产路径 `AssistantRequestPreparer` 经Runtime：运行中更正后下一请求带新revision、遗忘已读条目则停轮；脚本助手真实Python+Bridge+共享准入+真实owner：存储变脏/遗忘已读条目后的下一次调用被拒未执行、无关遗忘不停；中文词法召回评估表（见下）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
+| Core 测试 | 通过 | 332 项/70 组（macOS 主机，mock transport；2026-10-15；新writer套件与provider/consume套件另在Release优化下通过）；Chat Completions流开始后的裸 `error` 对象/字符串经固定客户端在主请求（AgentRuntime终态为超限说明、只发一次、不重试）与整理请求上映射，缺终态、非超限错误与 `error:null` 不误判（在旧pin `22fc575` 上这4项失败）；两种只读检索经固定AgentRuntime与模型/工具闸：快照与登记之间遗忘→stale且不发明文、登记后遗忘→下一请求前停轮、登记写一次失败而后续事件写成功→本轮epoch失败、同消息内后续手机调用被拒、无下一请求；摘要链127/128/129、checkpoint的伪造/父正文/roots/环与来源变化失败、重建期遗忘/写失败不提交、最老3fold；provider上下文超限经固定客户端真实HTTP/SSE/JSON夹具映射、字段名参数错误与401/429/5xx不误判；生产路径 `AssistantRequestPreparer` 经Runtime：运行中更正后下一请求带新revision、遗忘已读条目则停轮；脚本助手真实Python+Bridge+共享准入+真实owner：存储变脏/遗忘已读条目后的下一次调用被拒未执行、无关遗忘不停；中文词法召回评估表（见下）；DDI原生 24 项（主机 cargo test）；屏障经固定版本 AgentRuntime 实跑；pending 崩溃点、sync 交叉、12k 根依赖链、固定 digest 值；早期version-1设置文件的ID/origin/默认/tombstone/预算保留与拒读文件不变；发送前检查（约60 KB中文上一摘要在未知软目标与已知窗口下均不调用producer、维护中遗忘与存储失败不再发送、维护期遗忘预览显示正在准备的轮次受影响）；未启动请求不进自动上下文/摘要/自动检索（归还草稿+同文本新ID重发只投影一次、覆盖未启动root的旧摘要失效、permit后失败结果保留）；跨scope继续 |
 | iOS 构建 / IPA | 通过 | Release unsigned（`build.py --skip-bootstrap --app-only`）与开发签名构建；仓库 inspector 检查 Release IPA（无描述文件/团队权限/本机路径） |
 | 指定设备（iPhone 12 mini，开发签名同身份覆盖安装） | 通过（物理UI＋真实模型） | 代码ae324d3的开发包上：主界面直接显示设置中的模型，主线selection取设置默认值；原设置文件原有键值不变（启动时iCloud同步写回一次，仅新增空的 `budgetOverrides`）；`记住：` 只写记忆不启动；真实模型按记忆回答；面板遗忘（预览1段）后模型以中文 `memory_search`/`session_search` 检索未找回并回答不知道；重启后历史/遗忘标记保留；下一件事在前台完成后自动推进，运行中Stop后held并可移回草稿；启动失败注入归还草稿且不授权；第一次真实整理。代码841d3c0的最终开发包上：未启动的promoted请求held后把主线改到已有项目再继续，root随之移到该项目、同ID一条、结果归属该root；真实整理经 `consume` 完成并CAS提交（第二个fold正确接链；整理中途杀进程后不重放，待处理请求needsResume）。最终包（代码7fd93a8）上：启动失败注入→草稿归还且该prompt未授权，正常重启后同文本以新ID重发，真实模型只回答一次，追问“此前该消息出现几次”答1；新生成的摘要来源不含未启动root，覆盖未启动root的旧摘要不再采用；连接已有LocalDevVPN后，独立任务中真实读取应用清单（find_apps）、打开“设置”并新鲜观察首页成功；执行中途杀进程后任务为interrupted，25秒内无任何新动作（不重放） |
 | DDI 自身页面观察（修复包 5250b2d→7169080→最终2c47dcf，同一原生库） | 通过（物理UI＋真实模型） | 键盘显示系统粘贴建议时，长主线与全新空任务的 observe_screen 均成功（outside_app_elements=1，约50节点；三个包都跑过，最终包复测）；5250b2d：打开“设置”、滑动、点进“通用”每步后观察成功；7169080：让模型 tap_point 粘贴建议位置被触摸前拒绝（target_covered，未执行，随后新观察，输入框无粘贴），手机任务中途杀进程→interrupted、25秒内无新动作，新请求只做新观察，运行中Stop（按新截图确认停止键可见才点）→已取消、之后无动作、未打开设置 |
@@ -569,7 +569,6 @@ ChatController（MainActor）持有唯一 `HistoryOwner`：`transact` 复制已�
 2026-10-14 列出的六项缺口均已实现并有Core回归：只读检索返回前重验与同事务登记、摘要链128层checkpoint、provider上下文超限映射、每轮估计与冻结预算显示、输入框记住模式、自然语言更正/遗忘候选选择表。设备上（真实UI＋真实模型）验收的是可直接操作的范围：记住模式、候选选择表、更正后召回、运行中新增记忆被下一请求使用、冻结预算行、宿主超上限拒绝、只读观察、Stop/重启、清空保留记忆、跨天召回、超预算摘要拒发、维护准备期遗忘（故障注入）；127/128/129与checkpoint、检索在快照与登记之间的竞态、provider真实HTTP/SSE超限映射、150秒维护期限只在主机（固定AgentRuntime与固定provider客户端夹具）验证。
 
 待处理项与验收边界：
-- 固定SDK版本下，Chat Completions 在流开始后以无type/事件名的裸 `error` 对象（或字符串）报超限时不会抛出流内失败，本轮以AgentKit通用的“流在完成前结束”失败结束而不是专门的超限提示。本地已准备SDK补丁与回归（不发布、未改pin），发布fork与重新固定待用户授权；HTTP 400/413/422、`error`/`response.failed`事件与JSON错误体已映射。
 - 中文召回为词法匹配（NLTokenizer词＋查询中每段中文的相邻二字＋整句），无向量。评估表（15条合成记忆、31个问题，经 `memory_search` 排序与自动记忆块两条路径）在单字不再计分后：关键词10/10、作用域5/5、遗忘2/2、无关问题0/4、带额外条目3/31（都是真实共享词），同义改写1/7（修正前4/7，差额只靠单字巧合命中）。同义改写是词法召回的真实边界，不是语义支持。
 - 摘要单个安全段大于一次摘要输入（目标的60%）时不拆段，规划停在它之前；追赶期间较早原文仍按硬上限拒绝过大请求。设备上本机上限1000–3000时即为此情形：每个测试轮次都大于fold预算，没有fold，只由主请求硬上限拒绝。
 - 整文件写仍高于0.2秒：补丁事件在50k时p95约0.10秒，但启动后首次写（逐条编码，50k约1.2秒）与热整写（布局溢出、每512次补丁、文件被外部改动；50k 0.30–0.35秒）仍按整文件成本；容量使50k文件由110 MB增至124 MB。

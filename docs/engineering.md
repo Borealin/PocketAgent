@@ -230,8 +230,9 @@ phase bubble and Doubao's official task-queue illustration.
 ## Decisions
 
 Pin AgentKit to the published fork Borealin/AgentKit at
-22fc575009bde3a2097ac1a49908ffa239b9c029 (upstream 8108c9b plus the bounded
-`consume` API used for context maintenance) and keep the verified
+e1c81c911564c39d5f78ccec6808ba96c1acd2e8 (upstream 8108c9b plus the bounded
+`consume` API used for context maintenance, and a bare SSE `error` frame
+failing the stream) and keep the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
@@ -388,8 +389,10 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   retry, model change or replay, and the text names only the status, a known code
   and a reported limit, with request-size rejections (413) advised separately. The
   in-stream case reads AgentKit's internal failure type through a bounded bridge
-  pinned to its shape; at the pinned SDK a bare Chat Completions SSE `error` object
-  ends the stream without a failure (a local SDK patch exists, not published). The
+  pinned to its shape. At the pinned SDK a Chat Completions SSE frame whose root
+  `error` is an object or a non-empty string, without an event name or type,
+  fails the stream too, so it maps on both paths; a stream that only ends early
+  is never read as a limit. The
   status line shows the turn's frozen model, budget source and the latest complete
   request estimate (kept after Stop or finish; not progress or usage).
 - Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`, the
@@ -500,15 +503,17 @@ view over synthetic 10k/50k histories is timed with
 `-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
 load-blocked, real history unchanged). Memory search no longer counts single
 characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
-evaluation table). Remaining boundaries (bare SSE error objects at the pinned
-SDK, oversized single segments, model-change recall) are listed in the plan.
+evaluation table). Remaining boundaries (oversized single segments,
+model-change recall) are listed in the plan.
 Transcript paging renders 400 messages per page.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
 SSE line, 65,536 events, terminal required, callback in the producer task) is
 published on the fork branch `codex/pocketagent-bounded-consume` and pinned at
-its immutable revision; default stream/complete and the loop are unchanged.
+its immutable revision e1c81c9, which also fails a stream on a bare SSE `error`
+frame (published 2026-10-15 as a fast-forward from 22fc575); default
+stream/complete and the loop are otherwise unchanged.
 Summary folds stream through it into the Core collector under one 150-second
 maintenance deadline shared by up to three folds and capped by the turn
 deadline, a 45-second idle limit refreshed only by new real content, coalesced
