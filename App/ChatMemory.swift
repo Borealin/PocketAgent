@@ -169,6 +169,68 @@ extension ChatController {
         return true
     }
 
+    // MARK: Acceptance: a forget while the turn runs (launch argument only)
+
+    /// The guards, from the live controller state only.
+    private struct DiagnosticForgetCheck {
+        var target: MemoryReadRevision?
+        var preview: ForgetPreview?
+        var uniqueEntry = false, activePermitted = false, readsCurrentRevision = false, previewStops = false
+        var fields: [String: Any] {
+            ["uniqueEntry": uniqueEntry, "activePermitted": activePermitted,
+             "readsCurrentRevision": readsCurrentRevision, "previewStops": previewStops]
+        }
+    }
+
+    private func diagnosticForgetCheck(_ job: ChatJob, marker: String) -> DiagnosticForgetCheck {
+        var check = DiagnosticForgetCheck()
+        let matches = assistant.memory.visible(in: job.scope).filter { $0.content.hasPrefix(marker) }
+        check.uniqueEntry = matches.count == 1
+        check.activePermitted = job.primary && runningJob === job && jobs[job.sessionID] === job && job.permitted
+            && !job.terminal && !job.cancelled && !job.revoked && activePrimaryRoot == job.prompt.id
+        guard check.uniqueEntry, let entry = matches.first else { return check }
+        let target = MemoryReadRevision(entryID: entry.id, revision: entry.revision)
+        check.target = target
+        let reads = file.assistant.scopeIndex.scopedRoot(job.prompt.id)?.dependencies.memoryReads ?? []
+        check.readsCurrentRevision = reads.contains(target)
+        guard check.activePermitted, check.readsCurrentRevision,
+              let preview = try? file.forgetPreview(selected: [target], activeRoot: activePrimaryRoot) else { return check }
+        check.previewStops = preview.stopsActiveRoot && preview.entries == [target]
+        if check.previewStops { check.preview = preview }
+        return check
+    }
+
+    /// `-PocketAgentForgetDuringRun <PKATEST_marker>`: when the primary turn
+    /// starts a `wait` call after its real request read exactly the current
+    /// revision of the one own entry with that marker, forget it once through
+    /// the panel's preview and `commitForget`. Every guard must hold, and holds
+    /// again in a later main-actor turn before the commit (the engine is never
+    /// cancelled from inside its own event delivery). The one-shot is used up
+    /// before the commit; a failed commit is not retried. Logged as booleans
+    /// in the run's own log, no content.
+    func diagnosticForgetDuringRun(_ job: ChatJob, tool: String) {
+        guard tool == "wait", !diagnosticForgetConsumed, let marker = DeviceSettings.forgetDuringRunMarker else { return }
+        let stamp = engine.runLogStamp()
+        let first = diagnosticForgetCheck(job, marker: marker)
+        engine.log("diagnostic_forget", first.fields.merging(["phase": "event"]) { a, _ in a }, origin: stamp.origin())
+        guard let target = first.target, first.preview != nil else { return }
+        Task { @MainActor [weak self, weak job] in
+            guard let self, let job, !self.diagnosticForgetConsumed else { return }
+            let again = self.diagnosticForgetCheck(job, marker: marker)
+            let same = again.target == target
+            guard same, let preview = again.preview else {
+                self.engine.log("diagnostic_forget", again.fields.merging(["phase": "deferred", "sameEntry": same]) { a, _ in a },
+                                origin: stamp.origin())
+                return
+            }
+            self.diagnosticForgetConsumed = true
+            let committed = self.commitForget(preview)
+            self.engine.log("diagnostic_forget",
+                            again.fields.merging(["phase": "commit", "sameEntry": true, "committed": committed]) { a, _ in a },
+                            origin: stamp.origin())
+        }
+    }
+
     // MARK: Clear the conversation, keep memory
 
     /// Why "清空对话，保留记忆" cannot run now, or nil. Covers this device's

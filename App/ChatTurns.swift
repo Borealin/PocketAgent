@@ -548,6 +548,8 @@ extension ChatController {
                 // assistant message; no local result message exists.
                 owner.barrier.commit(epoch: job.epoch, [:], results: [key])
             }
+        case .toolStarted(let invocation):
+            diagnosticForgetDuringRun(job, tool: invocation.call.name)
         case .runFinished:
             job.terminal = true; job.ready = false
         default: break
