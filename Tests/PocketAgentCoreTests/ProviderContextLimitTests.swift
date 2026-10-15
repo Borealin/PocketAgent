@@ -208,4 +208,106 @@ struct ProviderContextLimitTests {
         }
         #expect(LimitProtocol.requests.withLock { $0 } == 1)
     }
+
+    // MARK: Bare error objects (AgentKit e1c81c9)
+
+    private static let partial = #"data: {"choices":[{"index":0,"delta":{"content":"部分"}}]}"# + "\n\n"
+    private static let bareObject = partial
+        + #"data: {"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 9100 tokens.","code":"context_length_exceeded"},\#(echoed)}"# + "\n\n"
+
+    /// A Chat Completions gateway reports the overflow after the stream has
+    /// started as a frame whose root `error` is an object, with no event name
+    /// or type. Through the pinned client and the main-model gate it stops the
+    /// run with the advice, after one request, without the provider's text.
+    @Test func aBareErrorObjectAfterTheStreamStartedStopsTheMainRunWithTheAdvice() async throws {
+        let base = client(.chatCompletions, .init(contentType: "text/event-stream", body: Self.bareObject))
+        let barrier = TranscriptCommitBarrier()
+        let prompt = AgentTranscriptMessage(role: .user, text: "看一下屏幕")
+        barrier.open(epoch: 1, seed: [prompt.id: try CommittedMessage(prompt)])
+        let model = CommitGatedModel(base: base, barrier: barrier, epoch: 1, promptID: prompt.id, synthetic: { [] },
+                                     prepare: { $0 })
+        let runtime = AgentRuntime(model: model, tools: [], approval: AllowEverything(), configuration: AgentLoopConfiguration())
+        var failure: String?
+        var terminal: AgentRunState?
+        for await event in await runtime.start(AgentRunRequest(conversationID: UUID(), promptID: prompt.id, prompt: prompt.text,
+                                                                permissionMode: .fullAccess, systemPrompt: "s", priorMessages: [])) {
+            if case .failed(let reason) = event { failure = reason }
+            if case .runFinished(let summary) = event { terminal = summary.state }
+        }
+        #expect(LimitProtocol.requests.withLock { $0 } == 1 && terminal == .failed)
+        let expected = ProviderContextLimit(path: .main, kind: .contextWindow, status: nil, code: "context_length_exceeded",
+                                            reportedLimit: 8192)
+        let text = try #require(failure)
+        #expect(text == expected.errorDescription)
+        #expect(!text.contains("PKATEST_SECRET_SENTINEL") && !text.contains("pkatest.invalid") && !text.contains("However"))
+        // Neither the gate nor the client retries it.
+        var raw: (any Error)?
+        do { for try await _ in base.stream(AgentModelRequest(systemPrompt: "s", messages: [], tools: [])) {} } catch { raw = error }
+        let thrown = try #require(raw)
+        let mapped = try #require(ProviderContextLimit.classify(thrown, path: .main))
+        #expect(!model.shouldRetry(after: mapped) && !base.shouldRetry(after: thrown))
+    }
+
+    /// The same frame on the bounded maintenance path stops the summary.
+    @Test func aBareErrorObjectStopsASummaryRequest() async throws {
+        let base = client(.chatCompletions, .init(contentType: "text/event-stream", body: Self.bareObject))
+        let producer: StreamingSummary.Producer = { request, onEvent in
+            do { try await base.consume(request, limits: .maintenance, onEvent: onEvent) }
+            catch { throw ProviderContextLimit.classify(error, path: .summary) ?? error }
+        }
+        let request = SummaryRequest.make(messages: [AgentTranscriptMessage(role: .user, text: "第一轮")], previous: nil)
+        do {
+            _ = try await StreamingSummary.run(request, producer: producer, deadline: MaintenanceDeadline(turnRemaining: 600))
+            Issue.record("expected a rejection")
+        } catch {
+            let limit = try #require(error as? ProviderContextLimit)
+            #expect(limit.path == .summary && limit.reportedLimit == 8192 && limit.code == "context_length_exceeded")
+            #expect(SummaryMaintenance.stopsTurn(error))
+        }
+        #expect(LimitProtocol.requests.withLock { $0 } == 1)
+    }
+
+    /// A bare string error keeps its reported limit; the text stays out of
+    /// the advice.
+    @Test func aBareStringErrorKeepsItsLimitButNotItsText() async throws {
+        let base = client(.chatCompletions, .init(contentType: "text/event-stream", body:
+            #"data: {"error":"prompt is too long: 30000 tokens > 16000 maximum"}"# + "\n\n"))
+        var failure: (any Error)?
+        do { for try await _ in base.stream(AgentModelRequest(systemPrompt: "s", messages: [], tools: [])) {} } catch { failure = error }
+        #expect(failure.map { String(reflecting: type(of: $0)) } == StreamFailureBridge.typeName)
+        let mapped = try #require(failure.flatMap { ProviderContextLimit.classify($0, path: .main) })
+        #expect(mapped.kind == .contextWindow && mapped.reportedLimit == 16_000 && mapped.code == nil)
+        let text = try #require(mapped.errorDescription)
+        #expect(text.contains("16000") && !text.contains("prompt is too long"))
+    }
+
+    /// Nothing is inferred from an ending: a stream cut off without an error
+    /// frame fails the bounded path (a terminal is required) without becoming
+    /// a limit, and the main gate leaves its retry to the client; a bare error
+    /// that is not an overflow, and a null error beside normal content (which
+    /// completes), are not context limits either.
+    @Test func noLimitIsInferredWithoutAnOverflowError() async throws {
+        let cut = client(.chatCompletions, .init(contentType: "text/event-stream", body: Self.partial))
+        var ended: (any Error)?
+        do { try await cut.consume(AgentModelRequest(systemPrompt: "s", messages: [], tools: []), limits: .maintenance) { _ in } }
+        catch { ended = error }
+        let error = try #require(ended)
+        #expect(ProviderContextLimit.classify(error, path: .summary) == nil && ProviderContextLimit.classify(error, path: .main) == nil)
+        let gate = CommitGatedModel(base: cut, barrier: TranscriptCommitBarrier(), epoch: 1, promptID: UUID(), synthetic: { [] },
+                                    prepare: { $0 })
+        #expect(gate.shouldRetry(after: error) == cut.shouldRetry(after: error))
+        let other = client(.chatCompletions, .init(contentType: "text/event-stream", body: Self.partial
+            + #"data: {"error":{"message":"The server had an error while processing your request.","code":"server_error"}}"# + "\n\n"))
+        var failure: (any Error)?
+        do { for try await _ in other.stream(AgentModelRequest(systemPrompt: "s", messages: [], tools: [])) {} } catch { failure = error }
+        #expect(failure != nil && failure.flatMap { ProviderContextLimit.classify($0, path: .main) } == nil)
+        let normal = client(.chatCompletions, .init(contentType: "text/event-stream", body:
+            #"data: {"choices":[{"index":0,"delta":{"content":"好"}}],"error":null}"# + "\n\n"
+            + #"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"))
+        var text = ""
+        for try await event in normal.stream(AgentModelRequest(systemPrompt: "s", messages: [], tools: [])) {
+            if case .textDelta(let delta) = event { text += delta }
+        }
+        #expect(text == "好")
+    }
 }

@@ -139,8 +139,9 @@ nonisolated struct ProviderContextLimit: LocalizedError, Equatable {
 }
 
 /// Reads AgentKit's in-stream provider failure (`response.failed`, an SSE
-/// `error` event or a body `error` field), whose type is internal to the SDK.
-/// Depends on its private shape at the pinned revision 22fc575 (Package.swift):
+/// `error` event, a bare root `error` frame or a body `error` field), whose
+/// type is internal to the SDK.
+/// Depends on its private shape at the pinned revision e1c81c9 (Package.swift):
 /// `AgentKit.AgentProviderStreamFailure { code: String?; message: String }`,
 /// with the message as `localizedDescription`. Any other type or shape is nil,
 /// so a changed SDK falls back to the generic failure text.
