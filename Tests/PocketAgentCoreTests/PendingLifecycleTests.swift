@@ -239,4 +239,17 @@ struct AssistantSyncTests {
         try diverged.choosePrimary(primary)
         #expect(diverged.assistant.primaryNotice == nil)
     }
+
+    /// Device finding: a running primary turn stopped by a forget showed the
+    /// phone run's generic failure. The forget's own reason wins; the other
+    /// outcomes keep their wording.
+    @Test func aRevokedStartedTurnGivesTheForgetReason() {
+        let revoked = StartedTurnOutcome.detail(successful: false, cancelled: false, revoked: true,
+                                                failure: "手机助手未完成本轮", cleanupWarning: "")
+        #expect(revoked.contains(ContextSourceRevoked().errorDescription!) && !revoked.contains("手机助手未完成本轮"))
+        #expect(StartedTurnOutcome.detail(successful: false, cancelled: false, revoked: false, failure: "超时", cleanupWarning: "")
+            == "本轮未完成，请发送新消息继续；已执行的动作不会重放。 原因：超时")
+        #expect(StartedTurnOutcome.detail(successful: false, cancelled: true, revoked: false, failure: "x", cleanupWarning: "清理") == "已取消。 清理")
+        #expect(StartedTurnOutcome.detail(successful: true, cancelled: false, revoked: false, failure: nil, cleanupWarning: "") == "")
+    }
 }

@@ -47,6 +47,23 @@ nonisolated enum NotStartedRoute: Equatable, Sendable {
     }
 }
 
+/// The detail of a turn that ended after its startup permit. A turn an
+/// explicit forget revoked gives that reason, not whatever its interrupted
+/// run reported (the phone run only knows it did not finish).
+nonisolated enum StartedTurnOutcome {
+    static func detail(successful: Bool, cancelled: Bool, revoked: Bool, failure: String?, cleanupWarning: String) -> String {
+        var parts: [String] = []
+        if !successful {
+            if cancelled { parts.append("已取消。") } else {
+                parts.append("本轮未完成，请发送新消息继续；已执行的动作不会重放。")
+                if let reason = revoked ? ContextSourceRevoked().errorDescription : failure { parts.append("原因：\(reason)") }
+            }
+        }
+        if !cleanupWarning.isEmpty { parts.append(cleanupWarning) }
+        return parts.joined(separator: " ")
+    }
+}
+
 /// The primary root an explicit forget may stop: only the primary turn the
 /// engine is executing, while it prepares context (before its permit, when
 /// maintenance already reads history) or runs. A queued primary request has
