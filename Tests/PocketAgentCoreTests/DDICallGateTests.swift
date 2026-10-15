@@ -18,6 +18,24 @@ struct DDICallGateTests {
         #expect(DDICallBudget.seconds(remaining: 600, cap: 90) == 35)
     }
 
+    @Test func imagePreparationNeverOutlivesItsBudgetOrTheTurn() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let far = now.addingTimeInterval(600), near = now.addingTimeInterval(40)
+        // The check: 15 s, cut by the turn's end; none once the turn has ended.
+        #expect(DDIImagePreparation.checkExpiry(now: now, turnEnd: far) == now.addingTimeInterval(15))
+        #expect(DDIImagePreparation.checkExpiry(now: now, turnEnd: now.addingTimeInterval(3)) == now.addingTimeInterval(3))
+        #expect(DDIImagePreparation.checkExpiry(now: now, turnEnd: now) == nil)
+        // Downloads and the mount share 180 s, cut by the turn's end.
+        #expect(DDIImagePreparation.preparationEnd(now: now, turnEnd: far) == now.addingTimeInterval(180))
+        let end = DDIImagePreparation.preparationEnd(now: now, turnEnd: near)
+        #expect(end == near)
+        // The mount: at most 120 s and what is left; not started with < 5 s left.
+        #expect(DDIImagePreparation.mountExpiry(now: now, preparationEnd: now.addingTimeInterval(180)) == now.addingTimeInterval(120))
+        #expect(DDIImagePreparation.mountExpiry(now: now, preparationEnd: end) == near)
+        #expect(DDIImagePreparation.mountExpiry(now: now, preparationEnd: now.addingTimeInterval(4.9)) == nil)
+        #expect(DDIImagePreparation.milliseconds(now.addingTimeInterval(0.25)) == 1_800_000_000_250)
+    }
+
     @Test func theExpiryIsFixedOnTheWallClockBeforeTheHandoff() {
         let now = Date(timeIntervalSince1970: 1_800_000_000.25)
         #expect(DDICallBudget.expiry(now: now, seconds: 35) == 1_800_000_035_250)

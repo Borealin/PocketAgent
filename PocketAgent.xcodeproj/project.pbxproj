@@ -92,6 +92,7 @@
 		F887E531FDE10E1EFD4C5B72 /* HistoryStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF3646323BE7793B3B8697E9 /* HistoryStorage.swift */; };
 		FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F24A784103BF8F2532963F /* ChatHistory.swift */; };
 		FCD0F1007FC746B9806DAB48 /* AssistantTurnSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1064B279B527E66B105C75F2 /* AssistantTurnSupport.swift */; };
+		FF2CBA0C3F8FD46A96559D29 /* DDIImagePreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBA2D0FF0E59721A43424E53 /* DDIImagePreparation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -175,6 +176,7 @@
 		E77E9C6F8013CA9CE24E63E2 /* ReadCommit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadCommit.swift; sourceTree = "<group>"; };
 		E7EA1370AD3A250D19122214 /* ChatMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMemory.swift; sourceTree = "<group>"; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EBA2D0FF0E59721A43424E53 /* DDIImagePreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIImagePreparation.swift; sourceTree = "<group>"; };
 		EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEndpoints.swift; sourceTree = "<group>"; };
 		EF28AF9BD2B082D2E7885C37 /* ProviderLimitProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLimitProbe.swift; sourceTree = "<group>"; };
 		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
@@ -246,6 +248,7 @@
 				DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */,
 				71BBBC1966721F24A0B7C74B /* ContextBudget.swift */,
 				A187CEE22A5291401CCFC137 /* DDICallBudget.swift */,
+				EBA2D0FF0E59721A43424E53 /* DDIImagePreparation.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */,
 				AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */,
@@ -460,6 +463,7 @@
 				EAC477D9DF67D43E10E429AA /* ContextBudget.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
 				7D936E9FB0D5FDFF2CAB52F9 /* DDICallBudget.swift in Sources */,
+				FF2CBA0C3F8FD46A96559D29 /* DDIImagePreparation.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
