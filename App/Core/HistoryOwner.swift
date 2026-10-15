@@ -125,6 +125,16 @@ final class HistoryOwner {
         onChange?()
     }
 
+    /// Takes the launched file as the writer's published baseline only while
+    /// storage is ready, nothing has been written, and this owner still holds
+    /// exactly the hydration's strict decoding (an in-memory edit since launch
+    /// leaves the next write whole).
+    @discardableResult
+    func adopt(_ hydration: HistoryHydration) -> Bool {
+        guard case .store(let store) = sink, health.isReady, file == hydration.file else { return false }
+        return store.adopt(hydration)
+    }
+
     /// In-memory edit written by the next record/transaction/flush. Only for
     /// local draft text, which a later write includes.
     func replaceInMemory(_ edit: (inout HistoryFile) -> Void) {

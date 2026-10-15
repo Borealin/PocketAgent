@@ -52,7 +52,7 @@ struct HistoryLayoutTests {
         let cases = ["{\"k\":\"S\",\"a\":1}", "{\"a\":1,\"k\":\"S\"}", "{\"a\":1,\"k\":\"S\",\"b\":[2]}"]
         for shell in cases {
             let fields = try #require(HistoryLayoutEncoder.fields(Data(shell.utf8), key: "k", sentinel: "S"))
-            let rebuilt = "{" + String(decoding: fields.dropLast(), as: UTF8.self) + "}"
+            let rebuilt = "{" + String(decoding: fields, as: UTF8.self) + "}"
             #expect(try jsonValue(Data(rebuilt.utf8)).allKeys.count == (shell.contains("\"b\"") ? 2 : 1))
         }
         // Not unique, or no other field: the caller fails instead of guessing.
@@ -69,7 +69,7 @@ struct HistoryLayoutTests {
         let encoder = HistoryLayoutEncoder()
         var plan = try encoder.plan(file, baseline: nil)
         var bytes = [UInt8](plan.layout.image())
-        var patched = 0, rebuilt = 0
+        var patched = 0, rebuilt = 0, resized = 0
         for step in 0..<300 {
             if step % 10 == 0 { await Task.yield() }
             let session = Int.random(in: 0..<file.sessions.count, using: &generator)
@@ -91,8 +91,10 @@ struct HistoryLayoutTests {
                 file.sessions[session].draft = String(repeating: "长草稿", count: Int.random(in: 0..<900, using: &generator))
             case 8:
                 file.deletedSessions.append(Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: Double(step))))
-            case 9:
+            case 9 where step % 2 == 0:
                 file.sessions.append(ChatSession(selection: nil, title: "新任务 \(step)"))
+            case 9:
+                file.sessions.insert(ChatSession(selection: nil, title: "前插任务 \(step)"), at: 0)
             case 10 where file.sessions.count > 2 && file.sessions[session].id != file.assistant.primarySessionID:
                 file.sessions.remove(at: session)
             case 11 where file.sessions.count > 2:
@@ -103,7 +105,11 @@ struct HistoryLayoutTests {
             let next = try encoder.plan(file, baseline: plan.layout)
             let image = [UInt8](next.layout.image())
             if let chunks = next.chunks {
-                #expect(next.layout.size == plan.layout.size)
+                // As the writer does: set the clone's size, then overwrite.
+                let size = next.layout.size
+                if size != bytes.count { resized += 1 }
+                if bytes.count > size { bytes.removeLast(bytes.count - size) }
+                if bytes.count < size { bytes += [UInt8](repeating: 0, count: size - bytes.count) }
                 for chunk in chunks { bytes.replaceSubrange(chunk.offset..<(chunk.offset + chunk.bytes.count), with: chunk.bytes) }
                 #expect(bytes == image, "step \(step)")
                 patched += 1
@@ -114,7 +120,9 @@ struct HistoryLayoutTests {
             #expect(try HistoryCodec.decode(Data(bytes)) == file, "step \(step)")
             plan = next
         }
-        #expect(patched > 150 && rebuilt > 5)
+        // Most edits patch; session-list changes after the first session and
+        // overflow of a later session patch from the moved session to the end.
+        #expect(patched > 200 && resized > 30 && rebuilt > 0)
     }
 
     /// Review finding: capacity came from a floor of the whole history
@@ -151,10 +159,10 @@ struct HistoryLayoutTests {
         #expect(task.contentCapacity == taskAlone.contentCapacity && task.contentCapacity - task.contentLength == 16 << 10)
         // Bounded: spaces stay within an eighth of the content, half the
         // headers and the per-region constants.
-        let data = layout.prefix.count + layout.sessions.reduce(0) { $0 + $1.header.count + $1.contentLength }
-        let bound = layout.prefix.count / 8 + (64 << 10)
-            + layout.sessions.reduce(0) { $0 + $1.contentLength / 8 + (16 << 10) + $1.header.count / 2 + (1 << 10) }
-        let structure = 1 + HistoryLayout.sessionsKey.count + 2 + layout.sessions.count * (2 + HistoryLayout.messagesKey.count + 1)
+        let data = layout.tail.count + layout.sessions.reduce(0) { $0 + $1.header.count + $1.contentLength }
+        let bound = layout.sessions.reduce(0) { $0 + $1.contentLength / 8 + (16 << 10) + $1.header.count / 2 + (1 << 10) }
+        let structure = HistoryLayout.fileHead.count + 3 + layout.sessions.count * (HistoryLayout.sessionHead.count + 2)
+            + layout.sessions.count - 1
         #expect(layout.size - data - structure <= bound)
         // The same JSON value as the codec, and it decodes to the file.
         let image = layout.image()
@@ -279,7 +287,7 @@ struct PatchingHistoryWriterTests {
         #expect(try writer.lastMode == .wholeAfterIdentityChange && written(writer, fixture, equal: file))
     }
 
-    private enum Fault { case noSpace, partialThenNoSpace, shortWrites, interrupted, fsync, fsyncInterrupted, rename, cloneNoSpace }
+    private enum Fault { case noSpace, partialThenNoSpace, shortWrites, interrupted, fsync, fsyncInterrupted, rename, cloneNoSpace, truncateNoSpace }
 
     private func calls(_ fault: Fault) -> HistoryPatchCalls {
         var calls = HistoryPatchCalls.system
@@ -314,6 +322,8 @@ struct PatchingHistoryWriterTests {
             calls.rename = { _, _, _ in errno = EIO; return -1 }
         case .cloneNoSpace:
             calls.clone = { _, _, _ in errno = ENOSPC; return -1 }
+        case .truncateNoSpace:
+            calls.truncate = { _, _ in errno = ENOSPC; return -1 }
         }
         return calls
     }
@@ -444,6 +454,158 @@ struct PatchingHistoryWriterTests {
         try grow(&file, "设置后确认")
         try writer.write(file)
         #expect(try writer.lastMode == .patch && written(writer, fixture, equal: file))
+    }
+
+    /// The other file fields come last without capacity, so their change
+    /// resizes the file; a later session outgrowing its capacity moves only
+    /// what follows it. Both patch, and the bytes are exact.
+    @Test func resizingPatchesForTheTailAndALaterSessionsOverflow() async throws {
+        let fixture = Fixture()
+        var file = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 300) }
+        file.sessions.append(ChatSession(selection: nil, title: "后面的任务"))
+        let writer = PatchingHistoryWriter(storage: fixture.storage)
+        try writer.write(file)
+        let before = try fixture.onDisk().count
+        file.deletedSessions.append(Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+        try writer.write(file)
+        #expect(try writer.lastMode == .patch && fixture.onDisk().count > before && written(writer, fixture, equal: file))
+        let task = file.sessions.count - 1
+        let primaryStart = try #require(writer.published?.layout.sessions[0].start)
+        file.sessions[task].messages.append(AgentTranscriptMessage(role: .user, text: String(repeating: "溢", count: 20_000)))
+        try writer.write(file)
+        let layout = try #require(writer.published?.layout)
+        #expect(try writer.lastMode == .patch && written(writer, fixture, equal: file))
+        #expect(layout.sessions[0].start == primaryStart && writer.lastChangedBytes < layout.size / 2)
+    }
+
+    /// A size-changing patch that fails at the truncate, or on the first
+    /// write after it, leaves the file, the baseline and the directory as they were.
+    @Test func aFailedResizeLeavesTheFileAndBaselineUntouched() async throws {
+        for fault in [Fault.truncateNoSpace, .noSpace, .partialThenNoSpace] {
+            let fixture = Fixture()
+            var file = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 120) }
+            let writer = PatchingHistoryWriter(storage: fixture.storage)
+            try writer.write(file)
+            let before = try fixture.onDisk()
+            let baseline = try #require(writer.published?.identity)
+            writer.calls = calls(fault)
+            file.deletedSessions.append(Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+            #expect(throws: HistoryPatchError.self) { try writer.write(file) }
+            #expect(try fixture.onDisk() == before && writer.published?.identity == baseline && fixture.leftovers.isEmpty, "\(fault)")
+            writer.calls = .system
+            try writer.write(file)
+            #expect(try writer.lastMode == .patch && written(writer, fixture, equal: file), "\(fault)")
+        }
+    }
+
+    /// The acceptance fault injection fails one write before anything is
+    /// written; the file and baseline stay, and the next write patches.
+    @Test func anInjectedFailureWritesNothing() async throws {
+        let fixture = Fixture()
+        var file = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 120) }
+        let writer = PatchingHistoryWriter(storage: fixture.storage)
+        try writer.write(file)
+        let before = try fixture.onDisk(), baseline = try #require(writer.published?.identity)
+        writer.failNextWrite = CocoaError(.fileWriteOutOfSpace)
+        try grow(&file, "注入失败")
+        #expect(throws: CocoaError.self) { try writer.write(file) }
+        #expect(try fixture.onDisk() == before && writer.published?.identity == baseline && fixture.leftovers.isEmpty)
+        try writer.write(file)
+        #expect(try writer.lastMode == .patch && written(writer, fixture, equal: file))
+    }
+
+    @Test func everyConfiguredNumberOfPatchesTheFileIsWrittenWhole() async throws {
+        let fixture = Fixture()
+        var file = try await MainActor.run { try LongHistoryBenchmark.synthetic(messages: 120) }
+        let writer = PatchingHistoryWriter(storage: fixture.storage, wholeWriteEvery: 3)
+        try writer.write(file)
+        var modes: [PatchingHistoryWriter.Mode?] = []
+        for index in 0..<5 {
+            try grow(&file, "周期 \(index)")
+            try writer.write(file)
+            modes.append(writer.lastMode)
+        }
+        #expect(modes == [.patch, .patch, .patch, .whole, .patch])
+        #expect(try written(writer, fixture, equal: file))
+    }
+
+    /// Launch: the file read through one descriptor and strictly decoded is
+    /// proven to be this writer's image of that decoding, so the first write
+    /// patches it, with exact bytes.
+    @MainActor @Test func aLaunchedLayoutFileIsAdoptedAndPatched() async throws {
+        let fixture = Fixture()
+        let file = try LongHistoryBenchmark.synthetic(messages: 300)
+        try PatchingHistoryWriter(storage: fixture.storage).write(file)
+        let (loaded, source) = try fixture.storage.loadForAdoption()
+        guard case .loaded(let launched) = loaded else { Issue.record("not loaded"); return }
+        #expect(launched == file)
+        let launchedSource = try #require(source)
+        let hydration = try #require(HistoryHydration.make(launchedSource))
+        let writer = PatchingHistoryWriter(storage: fixture.storage)
+        let owner = HistoryOwner(file: launched, store: writer)
+        #expect(owner.adopt(hydration))
+        #expect(!owner.adopt(hydration))
+        let primary = owner.file.assistant.primarySessionID
+        let root = try #require(owner.file.sessions[0].messages.last.flatMap { owner.file.assistant.scopeIndex.root(of: $0.id) })
+        #expect(owner.record { try $0.appendEvent(AgentTranscriptMessage(role: .assistant, text: "启动后第一条"), to: primary, root: root) })
+        #expect(try writer.lastMode == .patch && written(writer, fixture, equal: owner.file))
+    }
+
+    /// Not adopted: a file in another layout, the same JSON value with other
+    /// whitespace, an owner edited in memory since launch, or a writer that
+    /// already published. A file changed after adoption is written whole.
+    @MainActor @Test func adoptionFailsClosed() async throws {
+        let fixture = Fixture()
+        var file = try LongHistoryBenchmark.synthetic(messages: 120)
+        try fixture.storage.write(try HistoryCodec.encode(file))
+        let codecSource = try #require(try fixture.storage.loadForAdoption().source)
+        #expect(HistoryHydration.make(codecSource) == nil)
+        try PatchingHistoryWriter(storage: fixture.storage).write(file)
+        let image = try fixture.onDisk()
+        let spaced = try #require(image.range(of: Data(#"{"messages":[{"#.utf8)))
+        var other = image
+        other.replaceSubrange(spaced, with: Data(#"{"messages":[ {"#.utf8))
+        try other.write(to: fixture.storage.url)
+        let (otherLoaded, otherSource) = try fixture.storage.loadForAdoption()
+        guard case .loaded(let otherFile) = otherLoaded else { Issue.record("not loaded"); return }
+        let spacedSource = try #require(otherSource)
+        #expect(otherFile == file && HistoryHydration.make(spacedSource) == nil)
+        // Same length, same JSON value, every boundary in place: two keys of
+        // one message swapped. Only the byte comparison can refuse it.
+        let pair = try #require(image.range(of: Data(#""isCompaction":false,"isError":false"#.utf8)))
+        var swapped = image
+        swapped.replaceSubrange(pair, with: Data(#""isError":false,"isCompaction":false"#.utf8))
+        try swapped.write(to: fixture.storage.url)
+        let (swappedLoaded, swappedSource) = try fixture.storage.loadForAdoption()
+        guard case .loaded(let swappedFile) = swappedLoaded else { Issue.record("not loaded"); return }
+        let reordered = try #require(swappedSource)
+        #expect(swapped.count == image.count && swappedFile == file && HistoryHydration.make(reordered) == nil)
+        try image.write(to: fixture.storage.url)
+        let source = try #require(try fixture.storage.loadForAdoption().source)
+        let hydration = try #require(HistoryHydration.make(source))
+        let edited = HistoryOwner(file: source.file, store: PatchingHistoryWriter(storage: fixture.storage))
+        edited.replaceInMemory { $0.sessions[0].draft = "启动后在内存里改了草稿" }
+        #expect(!edited.adopt(hydration))
+        // A committed change of the other file fields only (memory) is a write before adoption.
+        let remembered = HistoryOwner(file: source.file, store: PatchingHistoryWriter(storage: fixture.storage))
+        try remembered.transact { _ = try $0.applyMemoryEdit(.add(target: .memory, scope: .global, content: "启动后保存的记忆",
+                                                                  origin: .panel, sourceRootPromptIDs: [], sourceMessageIDs: [])) }
+        #expect(!remembered.adopt(hydration))
+        let dirty = HistoryOwner(file: source.file, health: .saveDirty("磁盘已满"), store: PatchingHistoryWriter(storage: fixture.storage))
+        #expect(!dirty.adopt(hydration))
+        try image.write(to: fixture.storage.url)
+        let published = PatchingHistoryWriter(storage: fixture.storage)
+        try published.write(source.file)
+        #expect(!HistoryOwner(file: source.file, store: published).adopt(hydration))
+        let freshSource = try #require(try fixture.storage.loadForAdoption().source)
+        let fresh = try #require(HistoryHydration.make(freshSource))
+        let writer = PatchingHistoryWriter(storage: fixture.storage)
+        let owner = HistoryOwner(file: fresh.file, store: writer)
+        #expect(owner.adopt(fresh))
+        try Data("{}".utf8).write(to: fixture.storage.url, options: .atomic)
+        try grow(&file, "采用后文件被替换")
+        try writer.write(file)
+        #expect(try writer.lastMode == .wholeAfterIdentityChange && written(writer, fixture, equal: file))
     }
 
     /// The owner's gates are the same with the patching writer: a failed

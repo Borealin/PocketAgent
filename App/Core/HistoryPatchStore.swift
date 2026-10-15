@@ -29,6 +29,7 @@ nonisolated struct HistoryPatchCalls: @unchecked Sendable {
     var pwrite: (_ fd: Int32, _ bytes: UnsafeRawPointer, _ count: Int, _ offset: off_t) -> Int = { Darwin.pwrite($0, $1, $2, $3) }
     var fsync: (_ fd: Int32) -> Int32 = { Darwin.fsync($0) }
     var rename: (_ directory: Int32, _ from: String, _ to: String) -> Int32 = { renameat($0, $1, $0, $2) }
+    var truncate: (_ fd: Int32, _ size: off_t) -> Int32 = { ftruncate($0, $1) }
     var protection: (_ fd: Int32) -> Int32 = { fcntl($0, F_GETPROTECTIONCLASS) }
     var setProtection: (_ fd: Int32, _ value: Int32) -> Int32 = { fcntl($0, F_SETPROTECTIONCLASS, $1) }
     /// On iOS a clone whose protection class cannot be confirmed as class C
@@ -69,11 +70,31 @@ extension HistoryStorage {
         return stat(url.path, &info) == 0 ? HistoryFileIdentity(info) : nil
     }
 
-    /// Clones the published file, overwrites `chunks` in the clone, fsyncs
-    /// it and renames it over the file. Before the rename every failure
-    /// removes the clone and leaves the file untouched; the rename is the
-    /// commit. Returns the new identity, nil when it cannot be read after the
-    /// rename.
+    /// Loads like `load()`, reading the bytes through one descriptor; when
+    /// the file's identity is the same before and after the read, also
+    /// returns those bytes with their strict decoding (the loaded file
+    /// itself), for adopting the file as published (`HistoryHydration`).
+    func loadForAdoption() throws -> (loaded: Loaded, source: HistoryLoadSource?) {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW)
+        guard fd >= 0 else { return (try load(), nil) }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var before = stat(), after = stat()
+        let data: Data
+        do {
+            guard fstat(fd, &before) == 0, let read = try handle.readToEnd() else { return (try load(), nil) }
+            data = read
+        } catch { throw HistoryError.unreadable(error.localizedDescription) }
+        let file = try HistoryCodec.decode(data)
+        guard fstat(fd, &after) == 0, HistoryFileIdentity(before) == HistoryFileIdentity(after),
+              data.count == Int(after.st_size) else { return (.loaded(file), nil) }
+        return (.loaded(file), HistoryLoadSource(data: data, identity: HistoryFileIdentity(after), file: file))
+    }
+
+    /// Clones the published file, sets the clone to `size`, overwrites
+    /// `chunks` in it, fsyncs it and renames it over the file. Before the
+    /// rename every failure removes the clone and leaves the file untouched;
+    /// the rename is the commit. Returns the new identity, nil when it cannot
+    /// be read after the rename.
     func writePatch(_ chunks: [HistoryLayoutEncoder.Chunk], size: Int, expected: HistoryFileIdentity,
                     calls: HistoryPatchCalls = .system) throws -> HistoryFileIdentity? {
         func failure(_ step: String) -> HistoryPatchError { .failed(step, errno) }
@@ -87,7 +108,7 @@ extension HistoryStorage {
         defer { close(source) }
         var info = stat()
         guard fstat(source, &info) == 0 else { throw failure("fstat") }
-        guard HistoryFileIdentity(info) == expected, Int(info.st_size) == size else { throw HistoryPatchError.identityChanged }
+        guard HistoryFileIdentity(info) == expected else { throw HistoryPatchError.identityChanged }
         let temporary = ".\(name).patch-\(UUID().uuidString)"
         guard calls.clone(source, directory, temporary) == 0 else {
             if errno == ENOTSUP || errno == EXDEV { throw HistoryPatchError.cloningUnsupported }
@@ -110,6 +131,11 @@ extension HistoryStorage {
         } else if current != Self.protectionClass {
             guard calls.setProtection(target, Self.protectionClass) == 0, calls.protection(target) == Self.protectionClass else {
                 throw HistoryPatchError.protectionUnconfirmed
+            }
+        }
+        if size != Int(cloned.st_size) {
+            while calls.truncate(target, off_t(size)) != 0 {
+                guard errno == EINTR else { throw failure("truncate") }
             }
         }
         for chunk in chunks {
@@ -153,6 +179,9 @@ nonisolated final class PatchingHistoryWriter {
     private(set) var published: (layout: HistoryLayout, identity: HistoryFileIdentity?)?
     private var patches = 0
     private var cloning = true
+    /// Acceptance fault injection only (a launch argument): the next write
+    /// throws this before anything is written.
+    var failNextWrite: (any Error)?
     /// Diagnostics of the last successful write.
     private(set) var lastMode: Mode?
     private(set) var lastPlanSeconds = 0.0
@@ -162,8 +191,11 @@ nonisolated final class PatchingHistoryWriter {
     /// The one writer of `storage`. A clone left by a process that ended
     /// between cloning and renaming would keep the old file's blocks alive;
     /// with no write in flight yet, it is removed here.
-    init(storage: HistoryStorage, calls: HistoryPatchCalls = .system) {
-        self.storage = storage; self.calls = calls
+    /// `Self.patchesPerWholeWrite` except in tests and the benchmark.
+    let wholeWriteEvery: Int
+
+    init(storage: HistoryStorage, calls: HistoryPatchCalls = .system, wholeWriteEvery: Int = PatchingHistoryWriter.patchesPerWholeWrite) {
+        self.storage = storage; self.calls = calls; self.wholeWriteEvery = wholeWriteEvery
         let directory = storage.url.deletingLastPathComponent()
         let prefix = ".\(storage.url.lastPathComponent).patch-"
         for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasPrefix(prefix) {
@@ -172,11 +204,12 @@ nonisolated final class PatchingHistoryWriter {
     }
 
     func write(_ file: HistoryFile) throws {
+        if let failure = failNextWrite { failNextWrite = nil; throw failure }
         let started = ProcessInfo.processInfo.systemUptime
         let plan = try encoder.plan(file, baseline: published?.layout)
         let planned = ProcessInfo.processInfo.systemUptime
         var mode = Mode.whole
-        if let chunks = plan.chunks, let identity = published?.identity, cloning, patches < Self.patchesPerWholeWrite {
+        if let chunks = plan.chunks, let identity = published?.identity, cloning, patches < wholeWriteEvery {
             do {
                 let next = try storage.writePatch(chunks, size: plan.layout.size, expected: identity, calls: calls)
                 record(plan.layout, next, mode: .patch, changed: chunks.reduce(0) { $0 + $1.bytes.count },
@@ -198,6 +231,17 @@ nonisolated final class PatchingHistoryWriter {
         patches = 0
     }
 
+    /// Takes a launched file as the published one when nothing has been
+    /// written yet (see `HistoryHydration`). The next write still checks the
+    /// file's identity first.
+    @discardableResult
+    func adopt(_ hydration: HistoryHydration) -> Bool {
+        guard published == nil else { return false }
+        published = (hydration.layout, hydration.identity)
+        encoder.install(hydration.rows)
+        return true
+    }
+
     /// The file has been replaced; only now does the baseline move.
     private func record(_ layout: HistoryLayout, _ identity: HistoryFileIdentity?, mode: Mode, changed: Int,
                         started: Double, planned: Double) {
@@ -207,4 +251,32 @@ nonisolated final class PatchingHistoryWriter {
         lastPlanSeconds = planned - started
         lastWriteSeconds = ProcessInfo.processInfo.systemUptime - planned
     }
+}
+
+/// A launched history file proven to be exactly this writer's layout image
+/// of its own strict decoding, read under one identity: the first write after
+/// launch can then patch it instead of encoding and writing every message.
+nonisolated struct HistoryHydration: Sendable {
+    var layout: HistoryLayout
+    var identity: HistoryFileIdentity
+    var rows: HistoryFileEncoder.RowSeed
+    /// The strict decoding of the same bytes; adopted only while the owner
+    /// still holds exactly this state.
+    var file: HistoryFile
+
+    /// Nil unless the source's bytes are this layout's image of their own
+    /// strict decoding, byte for byte (`HistoryLayout.adopting`).
+    static func make(_ source: HistoryLoadSource) -> HistoryHydration? {
+        guard let layout = try? HistoryLayout.adopting(source.data, file: source.file, encoder: HistoryLayoutEncoder()),
+              let rows = try? HistoryFileEncoder.RowSeed.encoding(source.file.assistant.scopeIndex) else { return nil }
+        return HistoryHydration(layout: layout, identity: source.identity, rows: rows, file: source.file)
+    }
+}
+
+/// Bytes read through one descriptor under one identity, with their strict
+/// decoding (`HistoryStorage.loadForAdoption`).
+nonisolated struct HistoryLoadSource: Sendable {
+    var data: Data
+    var identity: HistoryFileIdentity
+    var file: HistoryFile
 }

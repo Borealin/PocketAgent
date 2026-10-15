@@ -112,21 +112,51 @@ nonisolated final class HistoryFileEncoder {
         try sortedEncoder.encode(SessionShell(session: session, sentinel: sentinel))
     }
 
-    /// One message's JSON (uncached).
-    func encodeMessage(_ message: AgentTranscriptMessage) throws -> Data { try encoder.encode(message) }
+    /// Scope-index rows encoded ahead of a write (off the main actor while a
+    /// launched file is checked); installed rows are still compared with the
+    /// index on use.
+    struct RowSeed: Sendable {
+        struct Member: Sendable { var root: UUID; var data: Data }
+        struct Root: Sendable { var root: ScopedRoot; var key: String; var data: Data }
+        var members: [UUID: Member] = [:]
+        var roots: [UUID: Root] = [:]
+
+        static func encoding(_ index: ScopeIndex) throws -> RowSeed {
+            let members = Array(index.messageRoots)
+            let roots = Array(index.roots)
+            let memberData = try ParallelEncoding.encode(members.map { MessageRootRow(messageID: $0.key, rootPromptID: $0.value) })
+            let rootData = try ParallelEncoding.encode(roots.map { ScopedRootRow(rootPromptID: $0.key, root: $0.value) })
+            var seed = RowSeed()
+            seed.members.reserveCapacity(members.count)
+            for (row, data) in zip(members, memberData) { seed.members[row.key] = Member(root: row.value, data: data) }
+            seed.roots.reserveCapacity(roots.count)
+            for (row, data) in zip(roots, rootData) { seed.roots[row.key] = Root(root: row.value, key: row.key.uuidString, data: data) }
+            return seed
+        }
+    }
+
+    func install(_ seed: RowSeed) {
+        for (id, member) in seed.members { memberRows[id] = (member.root, member.data) }
+        for (id, root) in seed.roots { rootRows[id] = (root.root, root.key, root.data) }
+    }
 
     /// Membership rows in the index's own order (order carries no meaning).
+    /// Rows missing from the cache are encoded together (in parallel when many).
     private func memberElements(_ index: ScopeIndex) throws -> [Data] {
         var parts: [Data] = []
         parts.reserveCapacity(index.messageRoots.count)
+        var misses: [(position: Int, row: MessageRootRow)] = []
         for (message, root) in index.messageRoots {
             if let cached = memberRows[message], cached.root == root {
                 parts.append(cached.data)
             } else {
-                let data = try encoder.encode(MessageRootRow(messageID: message, rootPromptID: root))
-                memberRows[message] = (root, data)
-                parts.append(data)
+                misses.append((parts.count, MessageRootRow(messageID: message, rootPromptID: root)))
+                parts.append(Data())
             }
+        }
+        for (miss, data) in zip(misses, try ParallelEncoding.encode(misses.map(\.row))) {
+            memberRows[miss.row.messageID] = (miss.row.rootPromptID, data)
+            parts[miss.position] = data
         }
         if memberRows.count > index.messageRoots.count { memberRows = memberRows.filter { index.messageRoots[$0.key] != nil } }
         return parts
@@ -136,15 +166,18 @@ nonisolated final class HistoryFileEncoder {
     private func rootElements(_ index: ScopeIndex) throws -> [Data] {
         var rows: [(key: String, data: Data)] = []
         rows.reserveCapacity(index.roots.count)
+        var misses: [(position: Int, row: ScopedRootRow)] = []
         for (id, root) in index.roots {
             if let cached = rootRows[id], cached.root == root {
                 rows.append((cached.key, cached.data))
             } else {
-                let key = id.uuidString
-                let data = try encoder.encode(ScopedRootRow(rootPromptID: id, root: root))
-                rootRows[id] = (root, key, data)
-                rows.append((key, data))
+                misses.append((rows.count, ScopedRootRow(rootPromptID: id, root: root)))
+                rows.append((id.uuidString, Data()))
             }
+        }
+        for (miss, data) in zip(misses, try ParallelEncoding.encode(misses.map(\.row))) {
+            rootRows[miss.row.rootPromptID] = (miss.row.root, rows[miss.position].key, data)
+            rows[miss.position].data = data
         }
         if rootRows.count > index.roots.count { rootRows = rootRows.filter { index.roots[$0.key] != nil } }
         return rows.sorted { $0.key < $1.key }.map(\.data)
