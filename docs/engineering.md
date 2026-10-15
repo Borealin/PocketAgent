@@ -537,12 +537,10 @@ load-blocked, real history unchanged). Memory search no longer counts single
 characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
 evaluation table). Remaining boundaries (oversized single segments,
 model-change recall) are listed in the plan.
-Transcript paging renders 400 messages per page. Open, not fixed: on the
-12 mini a script helper `wait` whose screen read after waiting never returned
-(a sheet and the keyboard were over the app) kept its turn cancelling for over
-ten minutes; neither Stop nor the 600 s deadline ended it, because the native
-DDI call has no host-side timeout. A relaunch recovered it (interrupted, nothing
-replayed); why the native read did not return is not established.
+Transcript paging renders 400 messages per page. A script turn on the 12 mini
+once stayed cancelling for over ten minutes until a relaunch (interrupted,
+nothing replayed); its stalled stage and the bounds added since are under
+"Bounded phone calls and preparation" in the DDI section.
 
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
@@ -1084,6 +1082,61 @@ check despite the earlier stop result reporting zero guest processes. The guard
 requested an App restart; the kernel/count failure cause is unestablished. This
 is separate from DDI keyboard input and must not be described as successful
 script-runtime reuse. No script safeguard is bypassed.
+
+### Bounded phone calls and preparation (2026-10-15)
+
+Confirmed stall stage. The 12 mini's own metadata run log of the stalled script
+turn (843f252 build) shows the turn start, one tool call, local network
+authorization and `rp_tunnel_connected`, then no event for 9 m 53 s with the app
+active, then `deadline_exceeded` at 600 s and nothing after: no tool, script,
+terminal or finish event. Every other run logs `ddi_ready` right after the
+tunnel. The only work between those log points is the developer disk image
+check (`hasDDI` → `cryptexd_installed_ddi` → cryptexd connect and
+`copy_installed`), which had no timeout, so the log places the stall in the
+wait for that check; why cryptexd or the tunnel did not answer, and where in the
+native call it waited, are unknown. The script helper's phone request was
+inside that uncancellable call, so the script stop path waited on it
+(`serving.value`) and neither Stop nor the deadline could finish the tool. The
+earlier description (a screen read after `wait`) was not supported by the log;
+the 4 s/35 s DDI call limits existed in that source but never applied to this
+stage.
+
+Preparation now bounds every native step by a wall-clock expiry fixed in Swift
+before the worker thread starts and cut by the turn's end; native code measures
+the window inside the runtime future (handoff delay deducted, passed expiry
+refused before connecting). Image check 15 s (`pocket_ddi_installed`; a failed
+or timed-out check is an error, never "not installed"); a missing image's
+downloads and mount share 180 s (`DDIImagePreparation`), downloads race a
+cancellable URLSession task group against the turn's stop check and are
+committed only while the preparation stands, the mount gets at most 120 s
+(`pocket_ddi_mount`; a timeout leaves the outcome unknown, nothing retries, the
+next action checks the real state); the app inventory read after `openDDI`
+is bounded at 15 s (`pocket_installed_apps`, same InstallationProxy records and
+free as before). Stop, the deadline, a revoked script lease and storage gates
+are rechecked between steps. The bounds hold while the native code polls
+cooperatively; synchronous work (loading image assets) is not preempted.
+
+DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
+screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
+at most 35 s, checked natively before every stage and physical effect.
+Confirmed defect fixed with it: CoreDevice replies are not matched to requests,
+so a request dropped by a deadline left its reply to answer the next request on
+that client. Each request/reply client is marked before an exchange and replaced
+after a completed handshake before its next use; a desynchronised client never
+confirms a release, and held input is never moved to a new connection. Reads,
+setup and reconnects end on Stop; effects, input releases, AX close and the
+final `return` are time-only, so cleanup runs after Stop. An unconfirmed input
+release is a typed outcome that latches the app instance against all further
+input until relaunch (observation stays available); nothing claims the phone
+released it. The serial action queue lets a cancelled waiter leave without
+acting. Opt-in metadata diagnostics (`-PocketAgentDiagnosticLogs`) record native
+stage and heartbeat progress, call entry/exit, the queue, the script stop path,
+preparation and finish steps; local fault-injection launch arguments stall one
+stage once per session, lower the call cap, or drop the confirmation of an
+already-sent touch release. Proof so far: native host tests over the real
+primitives with fake services (not a real unanswered cryptexd, not the whole
+cleanup-to-latch chain), Core tests for the budgets and the queue, and builds;
+device acceptance is pending.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
