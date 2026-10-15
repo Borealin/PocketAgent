@@ -72,6 +72,9 @@ final class ChatController: ObservableObject {
     let workspaces: WorkspaceStore
     let owner: HistoryOwner
     let storage: HistoryStorage
+    /// The production writer (nil in the read-only viewer); held only for
+    /// the local acceptance fault injection.
+    private var historyWriter: PatchingHistoryWriter?
     /// Called once when the last active job finishes (deferred sync rounds).
     var onIdle: (() -> Void)?
     var phoneSessionID: UUID?
@@ -115,10 +118,13 @@ final class ChatController: ObservableObject {
         self.storage = storage
         // One writer for the process: it alone knows the file it last published.
         let store = PatchingHistoryWriter(storage: storage)
+        historyWriter = store
         var recovery: HistoryFile?
+        var launchSource: HistoryLoadSource?
         let created: HistoryOwner
         do {
-            switch try storage.load() {
+            let (loadedState, source) = try storage.loadForAdoption()
+            switch loadedState {
             case .absent:
                 // One atomic initialization of the empty primary line.
                 let initial = HistoryFile.initial(selection: providers.defaultSelection)
@@ -130,7 +136,7 @@ final class ChatController: ObservableObject {
                 var recovered = file
                 recovered.recoverAfterLaunch()
                 let loaded = HistoryOwner(file: file, store: store)
-                if recovered == file { created = loaded } else {
+                if recovered == file { created = loaded; launchSource = source } else {
                     // Interrupted/needsResume states are published only once saved.
                     do { try loaded.transact { $0 = recovered }; created = loaded } catch {
                         recovery = recovered
@@ -144,8 +150,33 @@ final class ChatController: ObservableObject {
         }
         owner = created
         unsavedRecovery = recovery
+        if let launchSource {
+            // Off the main actor: prove the launched file is this writer's
+            // image of what was loaded, so the first write can patch it.
+            Task { @MainActor in
+                let hydration = await Task.detached(priority: .utility) { HistoryHydration.make(launchSource) }.value
+                if let hydration { created.adopt(hydration) }
+            }
+        }
         owner.onChange = { [weak self] in self?.revision &+= 1 }
         owner.onStorageFailure = { [weak self] error in self?.storageFailed(error) }
+        if DeviceSettings.dirtyAfterFirstScriptCall {
+            // Local acceptance only: one failing write of an unchanged run event,
+            // through the real owner (dirty, every gate fails, jobs stop).
+            NotificationCenter.default.addObserver(forName: DeviceSettings.diagnosticDirty, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let job = self.runningJob else { return }
+                    self.historyWriter?.failNextWrite = CocoaError(.fileWriteOutOfSpace)
+                    self.owner.record { try $0.editSession(job.sessionID, touch: false) { _ in } }
+                }
+            }
+        }
+        if DeviceSettings.stopAtFirstSummaryText {
+            // Local acceptance only: the Stop button's own path for the primary line.
+            NotificationCenter.default.addObserver(forName: DeviceSettings.diagnosticStop, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { guard let self else { return }; self.cancel(self.owner.file.assistant.primarySessionID) }
+            }
+        }
         workspaces.inUse = { [weak self] id in self?.workspaceInUse(id) ?? false }
         providers.onDefaultSelection = { [weak self] in self?.adoptDefaultSelection() }
         if owner.health.isReady { cleanupAttachments() }

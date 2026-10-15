@@ -60,6 +60,7 @@
 		A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7A20D6613095C37851886A /* ExecutionStatus.swift */; };
 		A3914DBE1D01973C1E038314 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D61AC91A09838169F172CE15 /* BackgroundTasks.framework */; };
 		A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */; };
+		A8D642607E15F33D0BC95BFC /* ScriptGateProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1929B5B153106268A9936660 /* ScriptGateProbe.swift */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
 		CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4597769ADE790DBCF5243A /* TextInputRequest.swift */; };
@@ -95,6 +96,7 @@
 		0A45359ABA3EE41F69474549 /* ChatComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComposer.swift; sourceTree = "<group>"; };
 		1064B279B527E66B105C75F2 /* AssistantTurnSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantTurnSupport.swift; sourceTree = "<group>"; };
 		130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteImageLoader.swift; sourceTree = "<group>"; };
+		1929B5B153106268A9936660 /* ScriptGateProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptGateProbe.swift; sourceTree = "<group>"; };
 		19938EABD2390F0D02B28600 /* ChatPolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPolicies.swift; sourceTree = "<group>"; };
 		1B2149D605EB4681C28AA432 /* AgentContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextBuilder.swift; sourceTree = "<group>"; };
 		1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApps.swift; sourceTree = "<group>"; };
@@ -317,6 +319,7 @@
 				2A30E3059701B9B77BA06A7D /* PhoneControl.swift */,
 				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
 				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
+				1929B5B153106268A9936660 /* ScriptGateProbe.swift */,
 				55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */,
 				6CE88C9FB1A659621C93A20A /* SettingsView.swift */,
 				8E47ECD3F27912974B6E14F3 /* ViewportBenchmark.swift */,
@@ -482,6 +485,7 @@
 				D0119B0BA30E6D0F2C871279 /* Rules.swift in Sources */,
 				274C4014FE6DD80880807D23 /* RunnerBundleID.swift in Sources */,
 				57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */,
+				A8D642607E15F33D0BC95BFC /* ScriptGateProbe.swift in Sources */,
 				0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */,
 				BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */,
 				73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */,

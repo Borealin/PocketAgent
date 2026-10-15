@@ -917,10 +917,15 @@ final class TurnTools {
         catch { return HostToolResult.make(callID: call.id, content: "失败：\(error.localizedDescription)", isError: true) }
         let lease = ScriptLease()
         let phone = phone, report = onScriptEvent, reportStage = onScriptStage
+        let dirtyOnce = DeviceSettings.dirtyAfterFirstScriptCall ? ScriptLease() : nil   // local acceptance only
         let outcome = await ScriptRuntime.shared.run(request, workspace: workspace, lease: lease) { phoneCall in
             await MainActor.run { report(.started(phoneCall)) }
             let result = await phone.executeScript(phoneCall, lease: lease)
             await MainActor.run { report(.finished(phoneCall, content: result.content, isError: result.isError)) }
+            if let dirtyOnce, dirtyOnce.isActive {
+                dirtyOnce.revoke()
+                await MainActor.run { NotificationCenter.default.post(name: DeviceSettings.diagnosticDirty, object: nil) }
+            }
             return result
         } stage: { stage in Task { @MainActor in reportStage(stage) } }
         phone.model.log("script_finished", ["exitCode": outcome.exitCode ?? -1, "signal": outcome.exit.signal ?? 0,
