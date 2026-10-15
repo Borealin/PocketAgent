@@ -15,7 +15,8 @@ import Foundation
 enum ScriptGateProbe {
     struct HandshakeMissing: LocalizedError {
         let call: Int
-        var errorDescription: String? { "脚本第 \(call + 1) 次调用后的握手在 300 秒内未出现；不注入、不判定" }
+        let outcome: String
+        var errorDescription: String? { "脚本第 \(call + 1) 次调用后的握手在 300 秒内未出现；不注入、不判定（\(outcome)）" }
     }
 
     private final class State: @unchecked Sendable {
@@ -72,9 +73,11 @@ enum ScriptGateProbe {
     /// Runs the script; `between(n)` runs after call n while the script waits.
     private static func run(calls count: Int, owner: HistoryOwner, state: State, lease: ScriptLease,
                             between: @escaping @MainActor (Int) throws -> [String: Any]) async throws -> [String: Any] {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pa-script-gate-\(UUID().uuidString)/project")
+        // Scripts mount only a direct child of the app's Projects directory;
+        // this one is not in the project list and is removed afterwards.
+        let root = WorkspaceStore.projectsDirectory.appendingPathComponent(".pa-script-gate-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: root) }
         let workspace = WorkspaceSnapshot(id: UUID(), name: "probe", root: root)
         let request = try ScriptRequest(["language": .string("python"), "code": .string(script(calls: count)), "timeout": .number(400)],
                                         remaining: 600)
@@ -100,8 +103,9 @@ enum ScriptGateProbe {
             }
             guard FileManager.default.fileExists(atPath: done.path), state.calls.count == n + 1 else {
                 lease.revoke()
-                _ = await running.value
-                throw HandshakeMissing(call: n)
+                let outcome = await running.value
+                throw HandshakeMissing(call: n, outcome: "bridge calls \(state.calls.count), exit \(outcome.exitCode ?? -1), "
+                    + "cancelled \(outcome.cancelled), failure \(outcome.failure ?? "none")")
             }
             var step = try between(n)
             step["afterCall"] = n
