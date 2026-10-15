@@ -37,6 +37,9 @@ nonisolated struct CommitGatedModel: AgentModelStreaming {
     let synthetic: @Sendable () -> Set<UUID>
     let prepare: @Sendable (AgentModelRequest) async throws -> AgentModelRequest
     var commitTimeout: Duration = .seconds(30)
+    /// Metadata of each provider request (opt-in run log): once when it is
+    /// handed to the provider, once when it ends. Never content.
+    var observe: (@Sendable (ModelStreamTrace) -> Void)?
 
     func stream(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, any Error> {
         AsyncThrowingStream { continuation in
@@ -46,9 +49,16 @@ nonisolated struct CommitGatedModel: AgentModelStreaming {
                                                                          synthetic: synthetic())
                     try await barrier.wait(epoch: epoch, .messages(required), timeout: commitTimeout)
                     let prepared = try await prepare(request)
+                    var trace = ModelStreamTrace(path: .main)
+                    observe?(trace)
                     do {
-                        for try await event in base.stream(prepared) { continuation.yield(event) }
+                        for try await event in base.stream(prepared) {
+                            trace.saw(event)
+                            continuation.yield(event)
+                        }
+                        trace.finished(); observe?(trace)
                     } catch {
+                        trace.failed(error, cancelled: Task.isCancelled); observe?(trace)
                         throw ProviderContextLimit.classify(error, path: .main) ?? error
                     }
                     continuation.finish()

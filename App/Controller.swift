@@ -568,8 +568,30 @@ final class Model: ObservableObject {
         // Uptime stops while the system sleeps; the raw monotonic clock does not.
         record["upMs"] = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_000_000
         record["rawMs"] = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1_000_000
-        record["appState"] = UIApplication.shared.applicationState.rawValue
-        guard let logURL, let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
+        append(record, to: logURL, stateKey: "appState")
+    }
+    /// This run's log identity, for diagnostics delivered later from other
+    /// tasks (script stop path, model streams).
+    func runLogStamp() -> RunLogStamp { runStamp ?? RunLogStamp(runID: runID, url: logURL) }
+    /// Created with each run's ID and log file (`beginAgent`).
+    var runStamp: RunLogStamp?
+    /// A diagnostic recorded at `origin` (its run, time, clocks and sequence),
+    /// written to that run's own log whenever it is delivered.
+    func log(_ event: String, _ fields: [String: Any], origin: RunLogStamp.Origin) {
+        guard DeviceSettings.diagnosticsEnabled else { return }
+        var record = fields
+        record["event"] = event
+        record["runID"] = origin.runID
+        record["seq"] = origin.sequence
+        record["time"] = ISO8601DateFormatter().string(from: origin.time)
+        record["upMs"] = origin.upMs
+        record["rawMs"] = origin.rawMs
+        append(record, to: origin.url, stateKey: "appStateAtWrite")
+    }
+    private func append(_ fields: [String: Any], to url: URL?, stateKey: String) {
+        var record = fields
+        record[stateKey] = UIApplication.shared.applicationState.rawValue
+        guard let logURL = url, let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]) }
         if let handle = try? FileHandle(forWritingTo: logURL) {

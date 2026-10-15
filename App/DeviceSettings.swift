@@ -101,6 +101,10 @@ enum DeviceSettings {
     static var injectDDIStall: String? {
         argument(after: "-PocketAgentInjectDDIStall").flatMap { ["ax_read", "geometry", "screenshot"].contains($0) ? $0 : nil }
     }
+    /// Fault injection: the next native call of this operation (for example
+    /// `tap`) is refused before dispatch, as when too little of the turn is
+    /// left; once per phone control.
+    static var refuseNextDDIDispatch: String? { argument(after: "-PocketAgentRefuseNextDDIDispatch") }
     /// Fault injection: the first touch release of a native session is sent,
     /// then its confirmation is treated as lost, so the real unconfirmed-release
     /// path runs. No input is left held.

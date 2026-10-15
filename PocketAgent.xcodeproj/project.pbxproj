@@ -54,6 +54,7 @@
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
 		89ECD0E2CE9A7E5C8422A5C2 /* ClearPrimary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */; };
 		8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A30E3059701B9B77BA06A7D /* PhoneControl.swift */; };
+		912F67CF842F58B926EDF9F6 /* ModelStreamTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 410A91C32A04B283EE32A8C8 /* ModelStreamTrace.swift */; };
 		929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65594612732E3288F588504 /* WDARequestDiagnostics.swift */; };
 		954F84FD21FFD7D4A19C3375 /* ChatMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EA1370AD3A250D19122214 /* ChatMemory.swift */; };
 		995617D04781DEA5D74A43BB /* MemoryIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B223C0E5700F2D9CA4EF175E /* MemoryIntent.swift */; };
@@ -121,6 +122,7 @@
 		3C7A20D6613095C37851886A /* ExecutionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionStatus.swift; sourceTree = "<group>"; };
 		3E05053CBE20D50CBF450D09 /* ProviderContextLimit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderContextLimit.swift; sourceTree = "<group>"; };
 		3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryEdits.swift; sourceTree = "<group>"; };
+		410A91C32A04B283EE32A8C8 /* ModelStreamTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStreamTrace.swift; sourceTree = "<group>"; };
 		43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableSync.swift; sourceTree = "<group>"; };
 		49BF9B5D946340940F5C4C82 /* RustLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RustLicenses; path = App/Resources/RustLicenses; sourceTree = SOURCE_ROOT; };
 		4C8E31F3800DEA40CB209E44 /* RunnerBundleID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerBundleID.swift; sourceTree = "<group>"; };
@@ -268,6 +270,7 @@
 				CC78893A183661157A2CB031 /* Markdown.swift */,
 				B223C0E5700F2D9CA4EF175E /* MemoryIntent.swift */,
 				B5507EA1F8D4F7602AAC5689 /* MemoryLedger.swift */,
+				410A91C32A04B283EE32A8C8 /* ModelStreamTrace.swift */,
 				B6EC72EE2D00391C3C55564C /* NativeTools.swift */,
 				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
 				ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */,
@@ -486,6 +489,7 @@
 				674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */,
 				995617D04781DEA5D74A43BB /* MemoryIntent.swift in Sources */,
 				D7451BC0E1117C33E4C6FF9B /* MemoryLedger.swift in Sources */,
+				912F67CF842F58B926EDF9F6 /* ModelStreamTrace.swift in Sources */,
 				F5CC3A5BC01A6B80973AD363 /* NativeTools.swift in Sources */,
 				44FA45C0F268A534D2AA8B07 /* PairingImport.swift in Sources */,
 				828CF5DA8A7C898956B83BEC /* PendingEdits.swift in Sources */,
