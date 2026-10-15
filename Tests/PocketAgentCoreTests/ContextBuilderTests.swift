@@ -38,7 +38,8 @@ struct ContextBuilderTests {
                                                sequence: (predecessor?.record.sequence ?? 0) + 1, summary: summary,
                                                summarizedTokens: 1, keptTokens: 0, displayAnchor: Date(timeIntervalSince1970: 1))
             return StoredCompaction(id: record.id, record: record, sessionID: primary, scope: .general,
-                sourceRootPromptIDs: segments.map(\.root), sourceMessageIDs: messages.map(\.id), predecessorID: predecessor?.id,
+                sourceRootPromptIDs: AssistantContext.roots(of: messages, index: file.assistant.scopeIndex),
+                sourceMessageIDs: messages.map(\.id), predecessorID: predecessor?.id,
                 predecessorDigest: predecessor?.recordDigest, inputDigest: input,
                 recordDigest: try AssistantContext.recordDigest(inputDigest: input, record: record, sourceIDs: messages.map(\.id),
                                                                 parentRecordDigest: predecessor?.recordDigest),
@@ -170,8 +171,8 @@ struct ContextBuilderTests {
         // An unrelated new turn keeps the summary valid (no global epoch reset).
         _ = try fixture.turn("无关")
         #expect(AssistantContext.validSummary(fixture.file, sessionID: fixture.primary, scope: .general,
-            eligible: AssistantContext.eligibleSegments(fixture.file, sessionID: fixture.primary, before: UUID(), scope: .general)
-                .flatMap(\.messages))?.0.id == second.id)
+            segments: AssistantContext.eligibleSegments(fixture.file, sessionID: fixture.primary, before: UUID(), scope: .general))?
+            .0.id == second.id)
     }
 
     @Test func summaryResponsesMustBeCompleteBoundedText() throws {
@@ -213,10 +214,10 @@ struct ContextBuilderTests {
         let messages = fixture.file.primary!.messages
         var index = fixture.file.assistant.scopeIndex
         try index.mask(root: forgotten, by: UUID())
-        let filtered = try AssistantRequestProjection.filterForgotten(messages, index: index, currentRoot: UUID(), invalidSummaries: [])
+        let filtered = try AssistantRequestProjection.filterForgotten(messages, index: index, currentRoot: UUID(), dropped: [])
         #expect(Set(filtered.compactMap { index.root(of: $0.id) }) == [kept])
         #expect(throws: ContextSourceRevoked.self) {
-            try AssistantRequestProjection.filterForgotten(messages, index: index, currentRoot: forgotten, invalidSummaries: [])
+            try AssistantRequestProjection.filterForgotten(messages, index: index, currentRoot: forgotten, dropped: [])
         }
     }
 
@@ -329,9 +330,10 @@ struct SummaryDispatchGuardTests {
         #expect(owner.file.assistant.compactions[1].predecessorID == owner.file.assistant.compactions[0].id)
     }
 
-    /// Counterexample: the planner reserves a fixed amount for a carried
-    /// summary, but a stored 60 KB Chinese summary makes the real fold request
-    /// larger than the soft target or a known window's ceiling. Nothing is sent.
+    /// Counterexample: a stored 60 KB Chinese summary makes any fold request
+    /// larger than the soft target or a known window's ceiling. The planner
+    /// reports it instead of planning; a plan made anyway (here by hand) is
+    /// still refused at dispatch. Nothing is sent.
     @Test func aLargeChinesePreviousSummaryIsRefusedBeforeAnyProducerCall() async throws {
         var fixture = Fixture()
         _ = try fixture.turn("第一轮")
@@ -344,8 +346,13 @@ struct SummaryDispatchGuardTests {
                                           summary: "## Goal\n" + String(repeating: "摘", count: 20_000))
         #expect(large.record.summary.utf8.count <= SummaryResponse.maximumBytes)
         try fixture.file.commitSummary(large)
-        let plan = try #require(AssistantContext.build(fixture.input(prompt: prompt.id)).plan)
-        #expect(plan.predecessor?.id == large.id && plan.folds.map { $0.map(\.root) } == [[segments[1].root]])
+        let built = AssistantContext.build(fixture.input(prompt: prompt.id))
+        #expect(built.plan == nil && built.summaryID == large.id)
+        guard case .previousSummaryTooLarge(let estimate, let limit)? = built.refusal else {
+            Issue.record("expected the planner to refuse the previous summary"); return
+        }
+        #expect(estimate >= limit && limit == ContextBudgetPolicy.unknown.target)
+        let plan = SummaryPlan(sessionID: fixture.primary, scope: .general, predecessor: large, folds: [[segments[1]]])
         let known = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "m", contextWindow: 32_768))
         for budget in [ContextBudgetPolicy.unknown, known] {
             let owner = HistoryOwner(file: fixture.file, writer: { _ in })

@@ -47,7 +47,10 @@ enum SummaryMaintenance {
             try checkBudget(request, turn: turn)
             // What this dispatch reads is durable before it is sent, so a forget
             // preview sees the turn as a reader of these roots.
-            let reads = fold.map(\.root) + (predecessor.map { AssistantContext.coverageRoots($0, in: file) } ?? [])
+            // Each root once, in order, even when the fold holds several runs of it.
+            let foldRoots = AssistantContext.roots(of: messages, index: file.assistant.scopeIndex)
+            let carried = predecessor.map { AssistantContext.coverageRoots($0, in: file) } ?? []
+            let reads = foldRoots + carried.filter { !foldRoots.contains($0) }
             do { try owner.transact { try $0.registerReads(root: turn.promptID, memory: [], roots: reads, messages: []) } }
             catch { throw StorageCommitError.saveFailed(error.localizedDescription) }
             let input = try AssistantContext.inputDigest(messages: messages, attachments: file.session(turn.sessionID)?.attachments ?? [:],
@@ -62,7 +65,7 @@ enum SummaryMaintenance {
                                                summarizedTokens: messages.reduce(0) { $0 + ContextEstimator.messageTokens($1) },
                                                keptTokens: 0, displayAnchor: last.createdAt)
             let candidate = StoredCompaction(
-                id: record.id, record: record, sessionID: turn.sessionID, scope: turn.scope, sourceRootPromptIDs: fold.map(\.root),
+                id: record.id, record: record, sessionID: turn.sessionID, scope: turn.scope, sourceRootPromptIDs: foldRoots,
                 sourceMessageIDs: ids, predecessorID: predecessor?.id, predecessorDigest: predecessor?.recordDigest,
                 inputDigest: input,
                 recordDigest: try AssistantContext.recordDigest(inputDigest: input, record: record, sourceIDs: ids,
@@ -114,18 +117,25 @@ enum SummaryMaintenance {
         }
     }
 
-    /// The fold's segments are still exactly current eligible history of the
-    /// turn's scope, and the summary it extends is still the valid tip.
+    /// The summary the fold extends is still the valid tip, and the fold is
+    /// exactly the current eligible messages right after the tip's coverage
+    /// (same messages and content, each piece within its own root), ending at
+    /// a safe cut.
     nonisolated static func checkEligible(_ file: HistoryFile, fold: [ContextSegment], predecessor: StoredCompaction?,
                                           turn: Turn) throws {
         let segments = AssistantContext.eligibleSegments(file, sessionID: turn.sessionID, before: turn.promptID, scope: turn.scope)
-        let current = Dictionary(segments.map { ($0.root, $0) }, uniquingKeysWith: { a, _ in a })
-        guard fold.allSatisfy({ current[$0.root] == $0 }) else {
+        let tip = AssistantContext.validTip(file, sessionID: turn.sessionID, scope: turn.scope, segments: segments)
+        guard tip?.tip.id == predecessor?.id else { throw SummaryPreparationError(detail: "摘要链已变化，本轮不再整理") }
+        let eligible = segments.flatMap(\.messages)
+        let start = tip?.covered ?? 0
+        let messages = fold.flatMap(\.messages)
+        let index = file.assistant.scopeIndex
+        guard !messages.isEmpty, start + messages.count <= eligible.count,
+              Array(eligible[start..<start + messages.count]) == messages,
+              fold.allSatisfy({ piece in piece.messages.allSatisfy { index.root(of: $0.id) == piece.root } }),
+              AssistantContext.safeCuts(segments).contains(start + messages.count) else {
             throw SummaryPreparationError(detail: "待整理的历史已变化，本轮不再整理")
         }
-        let tip = AssistantContext.validSummary(file, sessionID: turn.sessionID, scope: turn.scope,
-                                                eligible: segments.flatMap(\.messages))?.0.id
-        guard tip == predecessor?.id else { throw SummaryPreparationError(detail: "摘要链已变化，本轮不再整理") }
     }
 
     /// The complete request (system prompt, previous summary, serialized

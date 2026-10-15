@@ -117,7 +117,7 @@ struct ReadCommitTests {
             let tool = AgentTranscriptMessage(role: .tool, text: "\(result)", toolCallID: "c1", toolName: "memory_search")
             #expect(throws: ContextSourceRevoked.self) {
                 try AssistantRequestProjection.filterForgotten([tool], index: file.assistant.scopeIndex, currentRoot: h.current,
-                                                               invalidSummaries: [])
+                                                               dropped: [])
             }
         }
     }
@@ -291,7 +291,7 @@ struct ReadCommitRuntimeTests {
                 try await MainActor.run {
                     var prepared = request
                     prepared.messages = try AssistantRequestProjection.filterForgotten(
-                        request.messages, index: owner.file.assistant.scopeIndex, currentRoot: current, invalidSummaries: [])
+                        request.messages, index: owner.file.assistant.scopeIndex, currentRoot: current, dropped: [])
                     return prepared
                 }
             }, commitTimeout: .seconds(5))

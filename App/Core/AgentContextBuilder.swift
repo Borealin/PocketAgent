@@ -2,8 +2,10 @@ import AgentKit
 import CryptoKit
 import Foundation
 
-/// A complete root segment of real history: the prompt, its steering and
-/// every assistant/tool message of that run, never split inside a call group.
+/// A run of one root's real messages in eligible order: a whole root segment
+/// (the prompt, its steering and every assistant/tool message of that run),
+/// or, under partial summary coverage, its exact part between two safe cuts.
+/// Messages are never split and a call group never is.
 nonisolated struct ContextSegment: Equatable, Sendable {
     let root: UUID
     let messages: [AgentTranscriptMessage]
@@ -19,13 +21,20 @@ nonisolated struct PreparedContext: Sendable {
     /// Roots whose raw messages are included.
     var rawRoots: [UUID]
     /// Roots covered by the included summary (expanded for read registration).
+    /// A partly covered root is in both lists.
     var summaryRoots: [UUID]
     /// The included summary, if any.
     var summaryID: UUID?
     /// Exact referenced historical messages read without a known root.
     var historicalMessages: [UUID]
+    /// Every raw message (repairs included) of roots the included summary
+    /// also covers. If a forget invalidates the summary, these go with it: a
+    /// fragment never reaches the model without the start of its root.
+    var partialSuffix: Set<UUID> = []
     /// Present when maintenance should summarize before the first request.
     var plan: SummaryPlan?
+    /// Why maintenance cannot fold anything this turn, when it should.
+    var refusal: MaintenanceRefusal?
     var estimatedTokens: Int
 }
 
@@ -33,10 +42,46 @@ nonisolated struct SummaryPlan: Sendable {
     var sessionID: UUID
     var scope: WorkScope
     var predecessor: StoredCompaction?
-    /// Up to three folds, each a run of complete eligible segments.
+    /// Up to three folds, each a contiguous run of eligible messages ending
+    /// at a safe cut, as pieces of their root segments (one piece per root run).
     var folds: [[ContextSegment]]
     /// Depth of `predecessor`'s chain (1 for a root or a checkpoint).
     var predecessorDepth = 0
+    /// Why packing stopped before the older history was used up, if it was
+    /// blocked; reported after the folds.
+    var blocked: MaintenanceRefusal?
+    /// Messages of the recent tail kept raw (the end of the eligible history).
+    var recentMessages = 0
+}
+
+/// Why context maintenance cannot fold the next older messages. Nothing is
+/// truncated or skipped: they stay raw. Limits are host packing budgets in
+/// the turn's calibrated estimate, not a provider's context limit.
+nonisolated enum MaintenanceRefusal: Equatable, Sendable {
+    /// One indivisible group (a message, or a call with its results) is larger
+    /// than the host's single fold window.
+    case oversizedGroup(firstMessageID: UUID, estimate: Int, limit: Int)
+    /// The next group fits the fold window but not what the actual previous
+    /// summary leaves of the complete request budget.
+    case previousSummaryLeavesNoRoom(estimate: Int, room: Int)
+    /// The previous summary and the fixed request alone reach the budget.
+    case previousSummaryTooLarge(estimate: Int, limit: Int)
+    /// The first fold's actual request estimate exceeded the budget although
+    /// its additive bound did not (not expected; nothing is sent).
+    case hostEstimate(estimate: Int, limit: Int)
+
+    var note: String {
+        switch self {
+        case .oversizedGroup(_, let estimate, let limit):
+            "上下文整理受阻：一组消息约 \(estimate) token，超过本机单次整理窗口 \(limit)；未截断、未跳过，该组及其后内容保持原文。"
+        case .previousSummaryLeavesNoRoom(let estimate, let room):
+            "上下文整理受阻：上一段摘要较长，剩余整理容量约 \(room) token，不足以容纳下一组较早消息（约 \(estimate) token）；未截断、未跳过，其后内容保持原文。"
+        case .previousSummaryTooLarge(let estimate, let limit):
+            "上下文整理受阻：上一段摘要连同整理指令已约 \(estimate) token，达到整理上限 \(limit)；较早内容保持原文。"
+        case .hostEstimate(let estimate, let limit):
+            "上下文整理未进行：整理请求估计约 \(estimate) token，超过上限 \(limit)；未发送。"
+        }
+    }
 }
 
 /// A valid summary chain tip over the eligible messages.
@@ -49,7 +94,9 @@ nonisolated struct SummaryTip: Sendable {
 }
 
 nonisolated enum AssistantContext {
-    static let builderVersion = 1
+    /// 2: summaries may end at a safe cut inside a root. Records of other
+    /// versions are ignored (kept in the file, rebuilt from raw history).
+    static let builderVersion = 2
     static let summaryPromptVersion = 1
     static let toolResultLimit = AgentCompaction.defaultToolResultLimit
     static let maxChainDepth = 128
@@ -122,6 +169,64 @@ nonisolated enum AssistantContext {
         return (output, synthetic)
     }
 
+    /// Positions 0 < i < count inside one segment where a cut keeps repair
+    /// equal: `repaired(m[..<i]).messages + repaired(m[i...]).messages ==
+    /// repaired(m).messages`, synthetic IDs included. A cut never lands on a
+    /// tool result, so a call keeps its contiguous results. A result that
+    /// `repaired` keeps only because its call is elsewhere in the segment
+    /// (detached: outside the run right after its call) would become an orphan
+    /// on the other side, so a segment holding one has no internal cuts.
+    /// Reused call IDs, duplicate or foreign results inside a group, unanswered
+    /// calls and true orphans repair the same on both sides.
+    static func internalCuts(_ messages: [AgentTranscriptMessage]) -> [Int] {
+        let calls = Set(messages.flatMap { $0.toolCalls.map(\.id) })
+        var cuts: [Int] = []
+        var index = 0
+        while index < messages.count {
+            let message = messages[index]
+            if message.role == .tool {
+                if let id = message.toolCallID, calls.contains(id) { return [] }
+                index += 1
+                continue
+            }
+            if index > 0 { cuts.append(index) }
+            index += 1
+            guard message.role == .assistant, !message.toolCalls.isEmpty else { continue }
+            while index < messages.count, messages[index].role == .tool { index += 1 }
+        }
+        return cuts
+    }
+
+    /// Eligible positions where a summary may end and raw history continue:
+    /// 0, every segment end and every internal cut.
+    static func safeCuts(_ segments: [ContextSegment]) -> Set<Int> {
+        var cuts: Set<Int> = [0]
+        var position = 0
+        for segment in segments {
+            for cut in internalCuts(segment.messages) { cuts.insert(position + cut) }
+            position += segment.messages.count
+            cuts.insert(position)
+        }
+        return cuts
+    }
+
+    /// The eligible messages after `covered` (a safe cut) as pieces of their
+    /// segments: a partly covered segment keeps its exact suffix, every later
+    /// message appears once and in order.
+    static func uncovered(_ segments: [ContextSegment], after covered: Int) -> [ContextSegment] {
+        var pieces: [ContextSegment] = []
+        var position = 0
+        for segment in segments {
+            let end = position + segment.messages.count
+            if end > covered {
+                let from = max(0, covered - position)
+                pieces.append(from == 0 ? segment : ContextSegment(root: segment.root, messages: Array(segment.messages[from...])))
+            }
+            position = end
+        }
+        return pieces
+    }
+
     static func stableID(_ seed: String) -> UUID {
         let bytes = Array(SHA256.hash(data: Data(seed.utf8)).prefix(16))
         return bytes.withUnsafeBytes { UUID(uuid: $0.loadUnaligned(as: uuid_t.self)) }
@@ -159,15 +264,17 @@ nonisolated enum AssistantContext {
     /// The exact text a summarizer is shown for these messages: repaired,
     /// modelText-projected and serialized with the fixed tool-result limit.
     static func serialized(_ messages: [AgentTranscriptMessage]) -> String {
-        let projected = repaired(messages).messages.map { message -> AgentTranscriptMessage in
-            var copy = message
-            copy.text = message.modelText ?? message.text
-            copy.modelText = nil
-            copy.images = []
-            copy.contextSnapshot = nil
-            return copy
-        }
-        return AgentCompaction.serialized(projected, toolResultLimit: toolResultLimit)
+        AgentCompaction.serialized(repaired(messages).messages.map(projected), toolResultLimit: toolResultLimit)
+    }
+
+    /// One message as the summarizer sees it (text projection, no images or snapshot).
+    static func projected(_ message: AgentTranscriptMessage) -> AgentTranscriptMessage {
+        var copy = message
+        copy.text = message.modelText ?? message.text
+        copy.modelText = nil
+        copy.images = []
+        copy.contextSnapshot = nil
+        return copy
     }
 
     static func inputDigest(messages: [AgentTranscriptMessage], attachments: [String: [ChatAttachment]], scope: WorkScope,
@@ -237,8 +344,9 @@ nonisolated enum AssistantContext {
 
     /// The checkpoint of `tip`, which must be the current valid tip.
     static func checkpoint(of tip: StoredCompaction, in file: HistoryFile, forgetEpoch: UInt64) throws -> StoredCompaction {
-        let eligible = eligibleSegments(file, sessionID: tip.sessionID, before: UUID(), scope: tip.scope).flatMap(\.messages)
-        guard let current = validTip(file, sessionID: tip.sessionID, scope: tip.scope, eligible: eligible),
+        let segments = eligibleSegments(file, sessionID: tip.sessionID, before: UUID(), scope: tip.scope)
+        let eligible = segments.flatMap(\.messages)
+        guard let current = validTip(file, sessionID: tip.sessionID, scope: tip.scope, segments: segments),
               current.tip.id == tip.id, tip.builderVersion == builderVersion else {
             throw SummaryPreparationError(detail: "摘要链已变化，本轮不再整理")
         }
@@ -263,13 +371,13 @@ nonisolated enum AssistantContext {
     // MARK: Valid chain
 
     /// The longest stored summary chain that exactly covers a prefix of the
-    /// eligible real messages: every record's source IDs continue the parent
-    /// without gap or overlap, the anchor is the last covered message, and
-    /// both digests recompute from the current projection. Returns the tip
-    /// and the number of covered messages.
+    /// eligible real messages ending at a safe cut: every record's source IDs
+    /// continue the parent without gap or overlap, the anchor is the last
+    /// covered message, and both digests recompute from the current
+    /// projection. Returns the tip and the number of covered messages.
     static func validSummary(_ file: HistoryFile, sessionID: UUID, scope: WorkScope,
-                             eligible: [AgentTranscriptMessage]) -> (StoredCompaction, Int)? {
-        validTip(file, sessionID: sessionID, scope: scope, eligible: eligible).map { ($0.tip, $0.covered) }
+                             segments: [ContextSegment]) -> (StoredCompaction, Int)? {
+        validTip(file, sessionID: sessionID, scope: scope, segments: segments).map { ($0.tip, $0.covered) }
     }
 
     /// Records whose parent links run into a cycle (each walked once,
@@ -299,12 +407,15 @@ nonisolated enum AssistantContext {
     /// children; a record deeper than `maxChainDepth`, under an invalid or
     /// missing parent, or on a cycle is never valid. Every record lists
     /// exactly the roots of the messages it covers (its forget edges), once
-    /// each. Of equal coverage the shallower tip wins (a checkpoint over its
-    /// basis), then the earlier record.
+    /// each, and ends at a safe cut of the current segments (root records,
+    /// children and checkpoints alike). Of equal coverage the shallower tip
+    /// wins (a checkpoint over its basis), then the earlier record.
     static func validTip(_ file: HistoryFile, sessionID: UUID, scope: WorkScope,
-                         eligible: [AgentTranscriptMessage]) -> SummaryTip? {
+                         segments: [ContextSegment]) -> SummaryTip? {
         let candidates = file.assistant.compactions.filter { $0.sessionID == sessionID && $0.scope == scope }
         guard !candidates.isEmpty, let session = file.session(sessionID) else { return nil }
+        let eligible = segments.flatMap(\.messages)
+        let cuts = safeCuts(segments)
         let byID = Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let cyclic = cyclicRecords(byID)
         let index = file.assistant.scopeIndex
@@ -364,7 +475,7 @@ nonisolated enum AssistantContext {
                 parentDigest = nil
                 tip = SummaryTip(tip: record, covered: ids.count, depth: 1)
             }
-            guard let input, input == record.inputDigest,
+            guard cuts.contains(tip.covered), let input, input == record.inputDigest,
                   let output = try? recordDigest(inputDigest: input, record: record.record, sourceIDs: ids,
                                                  parentRecordDigest: parentDigest),
                   output == record.recordDigest else { return nil }
@@ -431,32 +542,32 @@ nonisolated enum AssistantContext {
     /// Pure: no await, no history mutation.
     static func build(_ input: Input) -> PreparedContext {
         let segments = eligibleSegments(input.file, sessionID: input.sessionID, before: input.promptID, scope: input.scope)
-        let eligible = segments.flatMap(\.messages)
         var synthetic: Set<UUID> = []
         var messages: [AgentTranscriptMessage] = []
         var covered = 0
         var summary: StoredCompaction?
         var depth = 0
         var summaryRoots: [UUID] = []
-        if let valid = validTip(input.file, sessionID: input.sessionID, scope: input.scope, eligible: eligible) {
+        if let valid = validTip(input.file, sessionID: input.sessionID, scope: input.scope, segments: segments) {
             summary = valid.tip; covered = valid.covered; depth = valid.depth
             summaryRoots = coverageRoots(valid.tip, in: input.file)
             let message = summaryMessage(valid.tip)
             messages.append(message); synthetic.insert(message.id)
         }
-        // Raw segments after the summary anchor (segments are never split:
-        // a summary always ends on a segment boundary).
-        var position = 0
-        var remaining: [ContextSegment] = []
-        for segment in segments {
-            if position >= covered { remaining.append(segment) }
-            position += segment.messages.count
-        }
+        // Raw history continues exactly where the summary ends (a safe cut,
+        // possibly inside a root): every later message once, in order.
+        let remaining = uncovered(segments, after: covered)
+        // Roots the summary also covers (inside a cut, or an earlier run of an
+        // interleaved root) depend on it for their start.
+        let partialRoots = Set(summaryRoots).intersection(remaining.map(\.root))
         var rawRoots: [UUID] = []
+        var seenRoots: Set<UUID> = []
+        var partialSuffix: Set<UUID> = []
         for segment in remaining {
             let fixed = repaired(segment.messages)
             messages += fixed.messages; synthetic.formUnion(fixed.synthetic)
-            rawRoots.append(segment.root)
+            if seenRoots.insert(segment.root).inserted { rawRoots.append(segment.root) }
+            if partialRoots.contains(segment.root) { partialSuffix.formUnion(fixed.messages.map(\.id)) }
         }
         // Explicit user-selected references, quoted as data, never as new instructions.
         var historical: [UUID] = []
@@ -469,50 +580,173 @@ nonisolated enum AssistantContext {
         let estimate = input.estimator.estimate(systemPrompt: input.systemPrompt, tools: input.tools,
                                                 messages: messages + input.prompt)
         var plan: SummaryPlan?
+        var refusal: MaintenanceRefusal?
         if estimate > input.budget.summaryTrigger {
-            plan = summaryPlan(remaining, predecessor: summary, input: input)
+            (plan, refusal) = summaryPlan(remaining, predecessor: summary, input: input)
             plan?.predecessorDepth = depth
         }
         return PreparedContext(messages: messages, syntheticIDs: synthetic, rawRoots: rawRoots, summaryRoots: summaryRoots,
-                               summaryID: summary?.id, historicalMessages: historical, plan: plan, estimatedTokens: estimate)
+                               summaryID: summary?.id, historicalMessages: historical, partialSuffix: partialSuffix,
+                               plan: plan, refusal: refusal, estimatedTokens: estimate)
     }
 
-    /// Keep the most recent complete segments within 35% of the target and
-    /// summarize the older remainder (folded with the previous summary), in at
-    /// most three folds that each fit the summarizer's own input budget. A
-    /// longer remainder starts with its oldest three folds; later turns
-    /// continue from the new tip.
-    static func summaryPlan(_ remaining: [ContextSegment], predecessor: StoredCompaction?, input: Input) -> SummaryPlan? {
-        var kept = 0
-        var cut = remaining.count
-        for index in remaining.indices.reversed() {
-            let tokens = remaining[index].messages.reduce(0) { $0 + ContextEstimator.messageTokens($1) }
-            if cut < remaining.count, kept + tokens > input.budget.recentTarget { break }
-            kept += tokens; cut = index
-        }
-        let older = Array(remaining[..<cut])
-        guard !older.isEmpty else { return nil }
-        // Each fold's serialized input stays within 60% of the target.
-        let foldBudget = input.budget.target * 60 / 100
-        var folds: [[ContextSegment]] = []
-        var current: [ContextSegment] = []
-        var size = predecessor.map { ContextEstimator.textTokens($0.record.summary) } ?? 0
-        for segment in older {
-            let tokens = ContextEstimator.textTokens(serialized(segment.messages))
-            // One safe group larger than a summarizer input is never split:
-            // the chain stops before it.
-            if tokens > foldBudget { break }
-            if !current.isEmpty, size + tokens > foldBudget {
-                // A folded summary carries forward; its real size is checked
-                // with the complete request before each dispatch (SummaryMaintenance).
-                folds.append(current); current = []; size = 4_000
-                if folds.count == maxFolds { break }
+    /// Tokens a summary is assumed to carry into the next fold of the same
+    /// turn; that fold's real request is checked before its dispatch.
+    static let carriedSummaryTokens = 4_000
+
+    /// An indivisible run between two safe cuts, inside one piece.
+    private struct Unit {
+        let piece: Int
+        let range: Range<Int>
+        /// Raw message tokens, for the recent tail.
+        let messageTokens: Int
+        /// Raw serialized tokens, plus the results a repair across several
+        /// roots could keep that this root's own repair drops.
+        let foldTokens: Int
+    }
+
+    /// Plans maintenance over the uncovered pieces, in the turn's calibrated
+    /// estimate. The recent tail stays raw: whole pieces within 35% of the
+    /// target, or, when the newest piece alone exceeds it, its longest suffix
+    /// of whole units (at least one). The older remainder is folded oldest
+    /// first, in at most three folds: whole pieces where they fit, a larger
+    /// piece in windows of whole units (the first may top up the current fold).
+    /// A fold's payload stays within the 60% window policy. The first fold's
+    /// complete request (fixed prompt, the actual previous summary, separators
+    /// and rounding) stays within the target. A later fold opens with what fits
+    /// the window and takes more only while a carried summary estimate leaves
+    /// room; its real request is checked before its dispatch with the summary
+    /// actually returned, so its progress is not guaranteed. Each unit is
+    /// serialized once. An indivisible unit that cannot fit stops packing
+    /// before it, with a typed refusal; nothing is split or skipped.
+    static func summaryPlan(_ pieces: [ContextSegment], predecessor: StoredCompaction?,
+                            input: Input) -> (plan: SummaryPlan?, refusal: MaintenanceRefusal?) {
+        let estimator = input.estimator
+        func cal(_ raw: Int) -> Int { estimator.calibrated(raw) }
+        var units: [Unit] = []
+        var pieceStart: [Int] = []
+        var pieceEnd: [Int] = []
+        var pieceTokens: [Int] = []
+        for (index, piece) in pieces.enumerated() {
+            pieceStart.append(units.count)
+            let calls = Set(piece.messages.flatMap { $0.toolCalls.map(\.id) })
+            var lower = 0
+            var tokens = 0
+            for upper in internalCuts(piece.messages) + [piece.messages.count] {
+                let slice = Array(piece.messages[lower..<upper])
+                let foreign = slice.filter { $0.role == .tool && $0.toolCallID.map { !calls.contains($0) } == true }
+                let slack = foreign.isEmpty ? 0 : ContextEstimator.textTokens(
+                    AgentCompaction.serialized(foreign.map(projected), toolResultLimit: toolResultLimit)) + foreign.count
+                let unit = Unit(piece: index, range: lower..<upper,
+                                messageTokens: slice.reduce(0) { $0 + ContextEstimator.messageTokens($1) },
+                                foldTokens: ContextEstimator.textTokens(serialized(slice)) + slack)
+                units.append(unit); tokens += unit.messageTokens
+                lower = upper
             }
-            current.append(segment); size += tokens
+            pieceEnd.append(units.count); pieceTokens.append(tokens)
         }
-        if !current.isEmpty, folds.count < maxFolds { folds.append(current) }
-        guard !folds.isEmpty else { return nil }
-        return SummaryPlan(sessionID: input.sessionID, scope: input.scope, predecessor: predecessor, folds: folds)
+        guard let last = pieces.indices.last else { return (nil, nil) }
+        // Recent tail: `cut` is the first unit kept raw.
+        let recent = input.budget.recentTarget
+        var cut = units.count
+        var kept = 0
+        if cal(pieceTokens[last]) <= recent {
+            for piece in stride(from: last, through: 0, by: -1) {
+                if piece != last, cal(kept + pieceTokens[piece]) > recent { break }
+                kept += pieceTokens[piece]; cut = pieceStart[piece]
+            }
+        } else {
+            for index in stride(from: units.count - 1, through: pieceStart[last], by: -1) {
+                if index != units.count - 1, cal(kept + units[index].messageTokens) > recent { break }
+                kept += units[index].messageTokens; cut = index
+            }
+        }
+        let target = input.budget.target
+        let policy = target * 60 / 100
+        guard cut > 0 else {
+            // Everything left is the recent tail. When that is one indivisible
+            // group no fold window could ever take, say so (it stays raw).
+            guard units.count == 1, cal(units[0].foldTokens) > policy else { return (nil, nil) }
+            return (nil, .oversizedGroup(firstMessageID: pieces[0].messages[units[0].range.lowerBound].id,
+                                         estimate: cal(units[0].foldTokens), limit: policy))
+        }
+        // Separators and the wrappers' rounding (`AgentCompaction.serialized`
+        // joins lines with one newline; text estimates are subadditive).
+        let rounding = 4
+        let firstBase = estimator.rawEstimate(SummaryRequest.make(messages: [], previous: predecessor?.record.summary))
+        let laterBase = estimator.rawEstimate(SummaryRequest.make(messages: [], previous: "")) + carriedSummaryTokens
+        if cal(firstBase + rounding) >= target {
+            return (nil, .previousSummaryTooLarge(estimate: cal(firstBase), limit: target))
+        }
+        var folds: [[ContextSegment]] = []
+        var windows: [(piece: Int, range: Range<Int>)] = []
+        var payload = 0
+        var base = firstBase
+        var blocked: MaintenanceRefusal?
+        /// The first fold always meets both limits; a later fold's opening
+        /// part only the window (its previous summary does not exist yet).
+        func fits(_ payload: Int) -> Bool {
+            if windows.isEmpty, !folds.isEmpty { return cal(payload) <= policy }
+            return cal(payload) <= policy && cal(base + payload + rounding) <= target
+        }
+        func add(_ piece: Int, _ range: Range<Int>, tokens: Int) {
+            payload += (windows.isEmpty ? 0 : 1) + tokens
+            if let previous = windows.last, previous.piece == piece, previous.range.upperBound == range.lowerBound {
+                windows[windows.count - 1].range = previous.range.lowerBound..<range.upperBound
+            } else {
+                windows.append((piece, range))
+            }
+        }
+        func close() {
+            folds.append(windows.map { ContextSegment(root: pieces[$0.piece].root, messages: Array(pieces[$0.piece].messages[$0.range])) })
+            windows = []; payload = 0; base = laterBase
+        }
+        var index = 0
+        packing: while index < cut, folds.count < maxFolds {
+            let piece = units[index].piece
+            let end = min(pieceEnd[piece], cut)
+            let whole = units[index..<end].reduce(0) { $0 + $1.foldTokens } + (end - index - 1)
+            let range = units[index].range.lowerBound..<units[end - 1].range.upperBound
+            if fits(payload + (windows.isEmpty ? 0 : 1) + whole) {
+                add(piece, range, tokens: whole); index = end; continue
+            }
+            // A piece that a fresh (later) fold would take starts one.
+            if !windows.isEmpty, cal(whole) <= policy {
+                close()
+                continue
+            }
+            // Larger than a fold: windows of whole units.
+            while index < end {
+                let unit = units[index]
+                if fits(payload + (windows.isEmpty ? 0 : 1) + unit.foldTokens) {
+                    add(piece, unit.range, tokens: unit.foldTokens); index += 1; continue
+                }
+                if !windows.isEmpty {
+                    close()
+                    if folds.count == maxFolds { break packing }
+                    continue
+                }
+                // Not even a fresh fold takes this unit: larger than the
+                // window, or (first fold) than what the actual previous
+                // summary leaves of the request.
+                let estimate = cal(unit.foldTokens)
+                blocked = estimate > policy
+                    ? .oversizedGroup(firstMessageID: pieces[piece].messages[unit.range.lowerBound].id,
+                                      estimate: estimate, limit: policy)
+                    : .previousSummaryLeavesNoRoom(estimate: estimate, room: max(0, target - cal(base + rounding)))
+                break packing
+            }
+        }
+        if !windows.isEmpty, folds.count < maxFolds { close() }
+        guard let first = folds.first else { return (nil, blocked) }
+        // The additive bound is conservative; the first fold's actual request
+        // is still estimated once.
+        let actual = estimator.estimate(SummaryRequest.make(messages: first.flatMap(\.messages),
+                                                            previous: predecessor?.record.summary))
+        guard actual <= target else { return (nil, .hostEstimate(estimate: actual, limit: target)) }
+        let recentMessages = units[cut...].reduce(0) { $0 + $1.range.count }
+        return (SummaryPlan(sessionID: input.sessionID, scope: input.scope, predecessor: predecessor, folds: folds,
+                            blocked: blocked, recentMessages: recentMessages), nil)
     }
 
     /// A referenced window quoted as data with its source and status. The
@@ -596,24 +830,26 @@ nonisolated extension HistoryFile {
     mutating func commitSummary(_ candidate: StoredCompaction) throws {
         let segments = AssistantContext.eligibleSegments(self, sessionID: candidate.sessionID, before: UUID(),
                                                          scope: candidate.scope)
-        let eligible = segments.flatMap(\.messages)
         let before = AssistantContext.validSummary(self, sessionID: candidate.sessionID, scope: candidate.scope,
-                                                   eligible: eligible)
+                                                   segments: segments)
         guard before?.0.id == candidate.predecessorID else {
             throw SummaryPreparationError(detail: "历史已变化，整理结果已丢弃")
+        }
+        // A summary ends at a safe cut, the rule validTip applies to every
+        // record (a checkpoint covers from the start, a summary continues its
+        // predecessor).
+        let end = candidate.builderVersion == AssistantContext.checkpointBuilderVersion
+            ? candidate.sourceMessageIDs.count : (before?.1 ?? 0) + candidate.sourceMessageIDs.count
+        guard AssistantContext.safeCuts(segments).contains(end) else {
+            throw SummaryPreparationError(detail: "整理结果切在不安全的位置，已丢弃")
         }
         var trial = self
         trial.assistant.compactions.append(candidate)
         guard let after = AssistantContext.validSummary(trial, sessionID: candidate.sessionID, scope: candidate.scope,
-                                                        eligible: eligible),
+                                                        segments: segments),
               after.0.id == candidate.id else {
             throw SummaryPreparationError(detail: "整理结果与当前历史不一致，已丢弃")
         }
-        // A summary ends on a segment boundary.
-        var position = 0
-        var boundaries: Set<Int> = [0]
-        for segment in segments { position += segment.messages.count; boundaries.insert(position) }
-        guard boundaries.contains(after.1) else { throw SummaryPreparationError(detail: "整理结果切在任务段中间，已丢弃") }
         assistant.compactions.append(candidate)
     }
 }

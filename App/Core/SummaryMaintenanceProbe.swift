@@ -114,6 +114,49 @@ enum SummaryMaintenanceProbe {
                                    estimator: ContextEstimator(), summaryModel: "probe"))
     }
 
+    /// One huge root of many small call groups as the only older history,
+    /// the current prompt, and a host budget of 4000 tokens (case 6).
+    private static func hugeRootFixture() throws -> (fixture: Fixture, prompt: AgentTranscriptMessage) {
+        var file = HistoryFile.initial(selection: nil)
+        let primary = file.assistant.primarySessionID
+        let root = AgentTranscriptMessage(role: .user, text: "PKATEST_SUMMARY 大任务")
+        try file.acceptRoot(root, attachments: [], in: primary, scope: .general)
+        try file.commitDispatchPermit(root: root.id, sessionID: primary, scope: .general)
+        for n in 0..<30 {
+            let call = AgentToolCall(id: "w\(n)", name: "wait", arguments: .object([:]))
+            try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "第\(n)步", toolCalls: [call]), to: primary, root: root.id)
+            try file.appendEvent(AgentTranscriptMessage(role: .tool, text: String(repeating: "屏", count: 200), toolCallID: call.id,
+                                                        toolName: call.name), to: primary, root: root.id)
+        }
+        try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "完成"), to: primary, root: root.id)
+        let prompt = AgentTranscriptMessage(role: .user, text: "PKATEST_SUMMARY 当前")
+        try file.acceptRoot(prompt, attachments: [], in: primary, scope: .general)
+        let segments = AssistantContext.eligibleSegments(file, sessionID: primary, before: prompt.id, scope: .general)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-summary-probe-\(UUID().uuidString)")
+        let storage = HistoryStorage(url: directory.appendingPathComponent("history.json"))
+        let writer = PatchingHistoryWriter(storage: storage)
+        try writer.write(file)
+        let budget = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "probe", inputCeiling: 4_000))
+        return (Fixture(directory: directory, storage: storage, owner: HistoryOwner(file: file, store: writer), prompt: prompt.id,
+                        segments: segments, plan: SummaryPlan(sessionID: primary, scope: .general, predecessor: nil, folds: []),
+                        turn: .init(sessionID: primary, promptID: prompt.id, scope: .general, budget: budget,
+                                    estimator: ContextEstimator(), summaryModel: "probe")), prompt)
+    }
+
+    /// Source IDs of the valid chain over `file`, oldest first.
+    private static func chainSources(_ file: HistoryFile, _ turn: SummaryMaintenance.Turn) -> [UUID] {
+        let segments = AssistantContext.eligibleSegments(file, sessionID: turn.sessionID, before: turn.promptID, scope: turn.scope)
+        guard let tip = AssistantContext.validTip(file, sessionID: turn.sessionID, scope: turn.scope, segments: segments) else { return [] }
+        let byID = Dictionary(file.assistant.compactions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var ids: [UUID] = []
+        var record: StoredCompaction? = tip.tip
+        while let current = record {
+            ids = current.sourceMessageIDs + ids
+            record = current.builderVersion == AssistantContext.checkpointBuilderVersion ? nil : current.predecessorID.flatMap { byID[$0] }
+        }
+        return ids
+    }
+
     private static func client() -> AgentProviderClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [Provider.self]
@@ -184,11 +227,11 @@ enum SummaryMaintenanceProbe {
             var reloadValid = false, reloadEqual = false
             if case .loaded(let reloaded)? = try? success.storage.load() {
                 reloadEqual = reloaded.assistant.compactions == compactions
-                let eligible = AssistantContext.eligibleSegments(reloaded, sessionID: success.turn.sessionID, before: success.prompt,
-                                                                 scope: .general).flatMap(\.messages)
+                let segments = AssistantContext.eligibleSegments(reloaded, sessionID: success.turn.sessionID, before: success.prompt,
+                                                                 scope: .general)
                 if let (tip, covered) = AssistantContext.validSummary(reloaded, sessionID: success.turn.sessionID, scope: .general,
-                                                                      eligible: eligible) {
-                    reloadValid = tip.id == compactions.last?.id && covered == eligible.count
+                                                                      segments: segments) {
+                    reloadValid = tip.id == compactions.last?.id && covered == segments.flatMap(\.messages).count
                 }
             }
             let registered = calls.registered.withLock { $0 }
@@ -306,6 +349,57 @@ enum SummaryMaintenanceProbe {
                                                   "compactions": changed.owner.file.assistant.compactions.count],
                   changeStreaming && editCommitted && rejected && !staleStops && editOnDisk && changedLoopExited
                       && changed.owner.file.assistant.compactions.isEmpty && Provider.state.withLock { $0.requests } == 1)
+
+            // E: one huge root, the only older history, is folded in bounded
+            // steps over two maintenance turns: coverage grows, ends inside the
+            // root at a safe cut, and the raw remainder continues exactly there.
+            let (huge, hugePrompt) = try hugeRootFixture()
+            defer { try? FileManager.default.removeItem(at: huge.directory) }
+            Provider.state.withLock { $0 = .init(mode: .summary) }
+            let hugeClient = client()
+            let plain: StreamingSummary.Producer = { request, onEvent in
+                try await hugeClient.consume(request, limits: .maintenance, onEvent: onEvent)
+            }
+            func hugeInput() -> AssistantContext.Input {
+                .init(file: huge.owner.file, sessionID: huge.turn.sessionID, promptID: huge.prompt, scope: .general, references: [],
+                      budget: huge.turn.budget, estimator: ContextEstimator(), systemPrompt: "s", tools: [], prompt: [hugePrompt])
+            }
+            var coverage: [Int] = [], foldsPerTurn: [Int] = []
+            var ranOK = true, safe = true, inside = true
+            for _ in 0..<2 {
+                guard let plan = AssistantContext.build(hugeInput()).plan else { ranOK = false; break }
+                foldsPerTurn.append(plan.folds.count)
+                do {
+                    try await SummaryMaintenance.run(plan, turn: huge.turn, owner: huge.owner, producer: plain,
+                                                     deadline: MaintenanceDeadline(turnRemaining: 600))
+                } catch { ranOK = false; break }
+                let segments = AssistantContext.eligibleSegments(huge.owner.file, sessionID: huge.turn.sessionID, before: huge.prompt,
+                                                                 scope: .general)
+                guard let tip = AssistantContext.validTip(huge.owner.file, sessionID: huge.turn.sessionID, scope: .general,
+                                                          segments: segments) else { ranOK = false; break }
+                coverage.append(tip.covered)
+                safe = safe && AssistantContext.safeCuts(segments).contains(tip.covered)
+                inside = inside && tip.covered < segments[0].messages.count
+            }
+            let grows = coverage.count == 2 && coverage[0] < coverage[1]
+            let prepared = AssistantContext.build(hugeInput())
+            let eligible = AssistantContext.eligibleSegments(huge.owner.file, sessionID: huge.turn.sessionID, before: huge.prompt,
+                                                             scope: .general).flatMap(\.messages).map(\.id)
+            let raw = prepared.messages.map(\.id).filter { !prepared.syntheticIDs.contains($0) }
+            let partition = chainSources(huge.owner.file, huge.turn) + raw == eligible
+            var hugeReload = false
+            if case .loaded(let reloaded)? = try? huge.storage.load() {
+                hugeReload = reloaded.assistant.compactions == huge.owner.file.assistant.compactions
+                    && chainSources(reloaded, huge.turn) == chainSources(huge.owner.file, huge.turn)
+            }
+            let hugeRequests = Provider.state.withLock { $0.requests }
+            check("partialRootProgress", ["turns": coverage.count, "foldsPerTurn": foldsPerTurn, "coverageGrows": grows,
+                                          "endsAtSafeCut": safe, "endsInsideTheRoot": inside, "exactPartition": partition,
+                                          "rawRemainderDependsOnSummary": !prepared.partialSuffix.isEmpty,
+                                          "reloadEqual": hugeReload, "providerRequests": hugeRequests],
+                  ranOK && grows && safe && inside && partition && hugeReload && !prepared.partialSuffix.isEmpty
+                      && foldsPerTurn.allSatisfy { (1...AssistantContext.maxFolds).contains($0) }
+                      && hugeRequests == foldsPerTurn.reduce(0, +))
         } catch {
             cases["setupError"] = String(describing: type(of: error))
             all = false
@@ -316,6 +410,7 @@ enum SummaryMaintenanceProbe {
                     "cancelWhileStreaming": "the run task is cancelled; the URLProtocol's stopLoading arrival and its loop exit are recorded",
                     "forgetWhileStreaming": "low-level revocation (scope mask + forget epoch through the owner), not the memory panel's forget flow",
                     "sourceChangedWhileStreaming": "a fold source's text edited through the owner while it streams; the rejection is the real commitSummary compare-and-swap (a preparation error: the turn continues without a new summary)",
+                    "partialRootProgress": "an isolated synthetic root of 30 call groups under a host 4000-token budget, planned by the real builder over two maintenance turns with injected summaries; not a provider's acceptance of a raw suffix starting inside a root",
                 ],
                 "cases": cases, "allPassed": all]
     }

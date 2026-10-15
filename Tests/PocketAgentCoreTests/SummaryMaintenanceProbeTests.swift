@@ -10,7 +10,7 @@ struct SummaryMaintenanceProbeTests {
         let report = await SummaryMaintenanceProbe.report()
         let cases = try #require(report["cases"] as? [String: [String: Any]])
         #expect(Set(cases.keys) == ["success", "providerLimit", "cancelWhileStreaming", "forgetWhileStreaming",
-                                    "sourceChangedWhileStreaming"])
+                                    "sourceChangedWhileStreaming", "partialRootProgress"])
         for (name, values) in cases { #expect(values["passed"] as? Bool == true, "\(name): \(values)") }
         #expect(report["allPassed"] as? Bool == true)
         #expect(cases["success"]?["providerRequests"] as? Int == 2)

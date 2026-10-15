@@ -67,8 +67,7 @@ struct SummaryChainDepthTests {
 
     private func tip(_ file: HistoryFile, _ chain: Chain) -> SummaryTip? {
         AssistantContext.validTip(file, sessionID: chain.fixture.primary, scope: .general,
-            eligible: AssistantContext.eligibleSegments(file, sessionID: chain.fixture.primary, before: UUID(), scope: .general)
-                .flatMap(\.messages))
+            segments: AssistantContext.eligibleSegments(file, sessionID: chain.fixture.primary, before: UUID(), scope: .general))
     }
 
     private func covered(_ chain: Chain, _ segments: Int) -> Int {
@@ -144,6 +143,36 @@ struct SummaryChainDepthTests {
         #expect(next.summaryID == valid.tip.id && Set(next.summaryRoots) == Set(built.segments.prefix(start + folds).map(\.root)))
     }
 
+    /// The same limit when the tip ends inside a root (records 1…n−1 whole,
+    /// record n over only the next root's prompt): at 127 the next fold
+    /// continues that root; at 128 a checkpoint first re-roots the partial
+    /// coverage exactly; at 129 the partial record is past the limit, so the
+    /// 128th whole record is the tip and is checkpointed.
+    @MainActor
+    @Test(arguments: [(127, false, 127), (128, true, 128), (129, true, 128)])
+    func aPartialTipAtTheLimitKeepsItsCoverageThroughTheCheckpoint(records: Int, checkpoints: Bool, tipDepth: Int) async throws {
+        var built = try await chain(depth: records - 1)
+        let open = built.segments[records - 1]
+        built.records.append(try built.fixture.candidate(covering: [ContextSegment(root: open.root, messages: [open.messages[0]])],
+                                                         predecessor: built.records.last))
+        built.fixture.file.assistant.compactions = built.records
+        let segments = AssistantContext.eligibleSegments(built.fixture.file, sessionID: built.fixture.primary, before: built.prompt,
+                                                         scope: .general)
+        let current = try #require(tip(built.fixture.file, built))
+        #expect(current.depth == tipDepth)
+        #expect(current.covered == (records == tipDepth ? covered(built, records - 1) + 1 : covered(built, tipDepth)))
+        let next = try #require(AssistantContext.uncovered(segments, after: current.covered).first)
+        let owner = HistoryOwner(file: built.fixture.file, writer: { _ in })
+        try await run(try plan(built, file: owner.file, folds: [[next]]), built, owner: owner, calls: FoldCalls())
+        let added = owner.file.assistant.compactions.dropFirst(records)
+        #expect(added.count == 1 + (checkpoints ? 1 : 0))
+        let valid = try #require(tip(owner.file, built))
+        #expect(valid.covered == current.covered + next.messages.count && valid.depth == (checkpoints ? 2 : tipDepth + 1))
+        guard checkpoints, let checkpoint = added.first else { return }
+        #expect(checkpoint.builderVersion == AssistantContext.checkpointBuilderVersion)
+        #expect(checkpoint.sourceMessageIDs == segments.flatMap(\.messages).prefix(current.covered).map(\.id))
+    }
+
     /// The probe's scenario as a regression: after the checkpoint, the next
     /// turn extends the new short chain instead of re-planning on the 128 tip.
     @MainActor
@@ -173,20 +202,30 @@ struct SummaryChainDepthTests {
         }
     }
 
-    /// A segment larger than one summarizer input is never split: the plan
-    /// folds what comes before it; with nothing before it there is no plan
-    /// (a recorded boundary: raw context and the request ceiling still apply).
-    @Test func anOversizedSegmentStopsThePlanBeforeIt() throws {
+    /// An indivisible group larger than one fold window is never split or
+    /// skipped: the plan folds everything before it (the start of its own
+    /// root included, a safe cut) and reports the block; the group and all
+    /// after it stay raw.
+    @Test func anOversizedGroupStopsThePlanBeforeIt() throws {
         let normal = String(repeating: "长", count: 150), huge = String(repeating: "巨", count: 400)
         let budget = try ContextBudgetPolicy.resolve(ContextBudgetOverride(providerID: UUID(), modelID: "m", inputCeiling: 1_000))
-        for (replies, folded) in [([normal, huge, normal, normal, normal], 1), ([huge, normal, normal], 0)] {
+        for (replies, hugeAt) in [([normal, huge, normal, normal, normal], 1), ([huge, normal, normal], 0)] {
             var fixture = Fixture()
             let roots = try replies.enumerated().map { try fixture.turn("PKATEST_GAPS_第\($0.offset)轮", reply: $0.element) }
             let prompt = AgentTranscriptMessage(role: .user, text: "当前")
             try fixture.file.acceptRoot(prompt, attachments: [], in: fixture.primary, scope: .general)
             let built = AssistantContext.build(fixture.input(prompt: prompt.id, budget: budget))
             #expect(built.estimatedTokens > budget.summaryTrigger)
-            #expect(built.plan?.folds.flatMap { $0.map(\.root) } == (folded == 0 ? nil : Array(roots.prefix(folded))))
+            let plan = try #require(built.plan)
+            let folded = plan.folds.flatMap { $0 }
+            #expect(folded.map(\.root) == Array(roots.prefix(hugeAt + 1)))
+            // Only the huge root's prompt is folded; its reply blocks.
+            let hugeRoot = try #require(fixture.file.primary?.messages.filter { fixture.file.assistant.scopeIndex.root(of: $0.id) == roots[hugeAt] })
+            #expect(folded.last?.messages == [hugeRoot[0]])
+            guard case .oversizedGroup(let first, let estimate, let limit)? = plan.blocked else {
+                Issue.record("expected an oversized-group block"); continue
+            }
+            #expect(first == hugeRoot[1].id && estimate > limit && limit == budget.target * 60 / 100)
         }
     }
 
