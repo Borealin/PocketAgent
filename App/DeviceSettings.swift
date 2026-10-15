@@ -77,12 +77,15 @@ enum DeviceSettings {
     /// the script still runs.
     static var dirtyAfterFirstScriptCall: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentDirtyAfterFirstScriptCall") }
     static let diagnosticDirty = Notification.Name("PocketAgent.diagnosticDirty")
+    /// Provider error shapes through the pinned client on the device (`ProviderLimitProbe`).
+    static var providerLimitProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentProviderLimitProbe") }
     /// The script helper gate on the device (`ScriptGateProbe`).
     static var scriptGateProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentScriptGateProbe") }
 
     @MainActor
     static func runLongHistoryBenchmarkIfRequested() async {
         if scriptGateProbe { await ScriptGateProbe.runAndReport(); return }
+        if providerLimitProbe { await ProviderLimitProbe.runAndReport(); return }
         guard longHistoryBenchmark else { return }
         // Let launch finish first; the run yields between samples.
         try? await Task.sleep(for: .seconds(3))
