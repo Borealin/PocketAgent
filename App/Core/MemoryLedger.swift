@@ -209,8 +209,11 @@ nonisolated extension HistoryFile {
             if let root = index.root(of: message) { seedsRoots.insert(root) } else { maskedMessages.insert(message) }
         }
         let closure = Self.dependencyClosure(seeds: seedsRoots, messages: maskedMessages, index: index)
-        let summaries = assistant.compactions.filter { !closure.isDisjoint(with: $0.sourceRootPromptIDs)
-            || !maskedMessages.isDisjoint(with: $0.sourceMessageIDs) }.count
+        // Records of another builder version are already unused: only current
+        // summaries and checkpoints newly become invalid (all are removed on commit).
+        let current: Set<Int> = [AssistantContext.builderVersion, AssistantContext.checkpointBuilderVersion]
+        let summaries = assistant.compactions.filter { current.contains($0.builderVersion)
+            && (!closure.isDisjoint(with: $0.sourceRootPromptIDs) || !maskedMessages.isDisjoint(with: $0.sourceMessageIDs)) }.count
         return ForgetPreview(entries: reads, shown: shown, ledgerRevision: assistant.memory.revision,
                              dependencyRevision: index.dependencyRevision, affectedRoots: closure,
                              maskedMessages: maskedMessages, stopsActiveRoot: activeRoot.map(closure.contains) ?? false,

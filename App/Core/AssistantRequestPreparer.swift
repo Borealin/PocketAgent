@@ -22,8 +22,14 @@ final class AssistantRequestPreparer {
     var summaryRoots: [UUID] = []
     var summaryMessageID: UUID?
     var historicalMessages: [UUID] = []
+    /// Raw messages of roots the summary also covers (`PreparedContext.partialSuffix`).
+    var partialSuffix: Set<UUID> = []
     /// Receives the estimate of every complete request, before the ceiling check.
     var onEstimate: (@MainActor (Int) -> Void)?
+    /// Called once, with the number of raw messages dropped with it, when a
+    /// forget first invalidates the included summary.
+    var onExclusion: (@MainActor (Int) -> Void)?
+    private var exclusionReported = false
     private(set) var lastRawEstimate: Int?
 
     init(owner: HistoryOwner, sessionID: UUID, promptID: UUID, scope: WorkScope, budget: ContextBudgetPolicy,
@@ -35,11 +41,22 @@ final class AssistantRequestPreparer {
     func prepare(_ request: AgentModelRequest) throws -> AgentModelRequest {
         let file = owner.file
         let index = file.assistant.scopeIndex
-        var invalid: Set<UUID> = []
-        if let summaryMessageID, summaryRoots.contains(where: index.isMasked(root:)) { invalid.insert(summaryMessageID) }
+        // A forget of a covered root invalidates the summary, and with it every
+        // raw fragment that continues a root it covered: the model never gets
+        // a root's later part without its start. History itself is unchanged.
+        var dropped: Set<UUID> = []
+        let summaryDropped = summaryMessageID != nil && summaryRoots.contains(where: index.isMasked(root:))
+        if summaryDropped, let summaryMessageID {
+            dropped.insert(summaryMessageID)
+            dropped.formUnion(partialSuffix)
+            if !exclusionReported {
+                exclusionReported = true
+                onExclusion?(partialSuffix.count)
+            }
+        }
         var prepared = request
         prepared.messages = try AssistantRequestProjection.filterForgotten(request.messages, index: index, currentRoot: promptID,
-                                                                           invalidSummaries: invalid)
+                                                                           dropped: dropped)
         prepared.messages = AssistantRequestProjection.projectOldScreens(prepared.messages)
         let real = Set(file.session(sessionID)?.messages.map(\.id) ?? [])
         let query = AssistantRequestProjection.memoryQuery(prepared.messages, real: real)
@@ -55,7 +72,7 @@ final class AssistantRequestPreparer {
         // What this dispatch reads is durable before it is sent.
         let present = Set(prepared.messages.map(\.id))
         let roots = rawRoots.filter { root in present.contains(root) || prepared.messages.contains { index.root(of: $0.id) == root } }
-            + (invalid.isEmpty && summaryMessageID.map(present.contains) == true ? summaryRoots : [])
+            + (!summaryDropped && summaryMessageID.map(present.contains) == true ? summaryRoots : [])
         do {
             try owner.transact { try $0.registerReads(root: promptID, memory: block.reads, roots: roots, messages: historicalMessages) }
         } catch { throw StorageCommitError.saveFailed(error.localizedDescription) }

@@ -115,6 +115,14 @@ extension Model {
                         status.value.requestEstimate = estimate
                         onStatus?(status.value)
                     }
+                    assistant.onExclusion = { [weak self] count in
+                        // Said, never reported as summary coverage; metadata only in the log.
+                        let origin = streamStamp.origin()
+                        self?.log("context_exclusion", ["summary": true, "partialMessages": count], origin: origin)
+                        guard !status.value.phase.isTerminal else { return }
+                        status.value.contextNote = "因遗忘，本轮已排除失效的较早对话摘要及依赖它的后续片段。"
+                        onStatus?(status.value)
+                    }
                     status.value.phase = .preparingContext
                     publish("context_preparation"); onStatus?(status.value)
                     prior = try await assistant.prepareContext(

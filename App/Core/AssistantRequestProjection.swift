@@ -84,15 +84,16 @@ nonisolated enum AssistantRequestProjection {
     static let keptScreens = 2
 
     /// Drops whole segments whose root (or an exact message) was masked by an
-    /// explicit forget since the run started, and summaries whose sources are
-    /// masked. The run's own root being masked stops the run.
+    /// explicit forget since the run started, and `dropped` (a summary whose
+    /// sources are masked, with the raw fragments that depend on it). The
+    /// run's own root being masked stops the run.
     static func filterForgotten(_ messages: [AgentTranscriptMessage], index: ScopeIndex, currentRoot: UUID,
-                                invalidSummaries: Set<UUID>) throws -> [AgentTranscriptMessage] {
+                                dropped: Set<UUID>) throws -> [AgentTranscriptMessage] {
         if index.isMasked(root: currentRoot) { throw ContextSourceRevoked() }
         var maskedCalls: Set<String> = []
         var output: [AgentTranscriptMessage] = []
         for message in messages {
-            if invalidSummaries.contains(message.id) { continue }
+            if dropped.contains(message.id) { continue }
             let rootMasked = index.root(of: message.id).map(index.isMasked(root:)) ?? false
             if rootMasked || index.isMasked(message: message.id) {
                 maskedCalls.formUnion(message.toolCalls.map(\.id))

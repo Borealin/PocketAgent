@@ -37,6 +37,11 @@ final class AssistantTurnSupport {
         get { requests.onEstimate }
         set { requests.onEstimate = newValue }
     }
+    /// A forget invalidated the included summary (with this many dependent raw messages).
+    var onExclusion: (@MainActor (Int) -> Void)? {
+        get { requests.onExclusion }
+        set { requests.onExclusion = newValue }
+    }
     private var calibrationKey: EstimatorCalibration.Key {
         .init(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
     }
@@ -60,10 +65,14 @@ final class AssistantTurnSupport {
                         provider: AgentProviderClient, deadline: TurnDeadline,
                         onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws -> [AgentTranscriptMessage] {
         var prepared = build(prompt: prompt, systemPrompt: systemPrompt, tools: tools)
+        // An indivisible group or previous summary that cannot be folded is
+        // reported, never silently skipped (the messages stay raw).
+        maintenanceNote = prepared.refusal?.note
         if let plan = prepared.plan {
             do {
                 try await summarize(plan, provider: provider, deadline: deadline, onWork: onWork)
                 prepared = build(prompt: prompt, systemPrompt: systemPrompt, tools: tools)
+                maintenanceNote = plan.blocked?.note
             } catch where SummaryMaintenance.stopsTurn(error) {
                 // Stop, system expiry, the turn deadline, storage or an explicit
                 // forget of a source: stop the turn, no main request.
@@ -81,6 +90,7 @@ final class AssistantTurnSupport {
             owner.file.assistant.compactions.first { $0.id == id }?.record.summaryMessageID
         }
         requests.historicalMessages = prepared.historicalMessages
+        requests.partialSuffix = prepared.partialSuffix
         let session = owner.file.session(sessionID)
         return AttachmentHydration.context(prepared.messages, attachments: session?.attachments ?? [:],
                                            supportsImages: config.supportsImages, load: attachmentFiles.data)
