@@ -75,6 +75,7 @@
 		DADB53980B84E19579683DD8 /* RemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A676BC4DF8190C9258642 /* RemoteImageLoader.swift */; };
 		DB6AE59CC9F8F453297D647A /* AgentKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E3CCB903EB2A196726DC963 /* AgentKit */; };
 		DD53B775CF4E9A51C757BE79 /* TurnLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 544AB90450A6D3349F8F2BB9 /* TurnLifecycle.swift */; };
+		E33D060EED1141B09F28C2AF /* ProviderLimitProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF28AF9BD2B082D2E7885C37 /* ProviderLimitProbe.swift */; };
 		EAC477D9DF67D43E10E429AA /* ContextBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BBBC1966721F24A0B7C74B /* ContextBudget.swift */; };
 		EE2DB1A7602817A794DF95CA /* PocketMemoryAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */; };
 		EF1DAF11941C6DC195308AC0 /* InstalledApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7D74C411CE2A54324FEB07 /* InstalledApps.swift */; };
@@ -171,6 +172,7 @@
 		E7EA1370AD3A250D19122214 /* ChatMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMemory.swift; sourceTree = "<group>"; };
 		E901918E882C6D22A1FA4148 /* PocketAgent.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PocketAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEndpoints.swift; sourceTree = "<group>"; };
+		EF28AF9BD2B082D2E7885C37 /* ProviderLimitProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLimitProbe.swift; sourceTree = "<group>"; };
 		F1E22A7313D1B6E0B1078CF1 /* ChatSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessions.swift; sourceTree = "<group>"; };
 		F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptBridge.swift; sourceTree = "<group>"; };
 		FF3646323BE7793B3B8697E9 /* HistoryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStorage.swift; sourceTree = "<group>"; };
@@ -317,6 +319,7 @@
 				977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */,
 				BB3737F3331A379180D76D7C /* PhoneConnectionStatus.swift */,
 				2A30E3059701B9B77BA06A7D /* PhoneControl.swift */,
+				EF28AF9BD2B082D2E7885C37 /* ProviderLimitProbe.swift */,
 				DAAF33FE982E09F9E44343CC /* ProviderStore.swift */,
 				1F9EC154A7B819D774BFB985 /* ProviderViews.swift */,
 				1929B5B153106268A9936660 /* ScriptGateProbe.swift */,
@@ -478,6 +481,7 @@
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
 				4F9D8C958D65133B7871FFA9 /* ProviderContextLimit.swift in Sources */,
 				A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */,
+				E33D060EED1141B09F28C2AF /* ProviderLimitProbe.swift in Sources */,
 				88060D11F3DEAFF7D548F951 /* ProviderStore.swift in Sources */,
 				D28989E23040463B42D8494C /* ProviderViews.swift in Sources */,
 				D88232186F607B086CA09D84 /* ReadCommit.swift in Sources */,
