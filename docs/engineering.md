@@ -521,7 +521,7 @@ shown, no fold read was registered, no summary was written and the main guard
 then refused. At 1000–3000 that earlier planner emitted no fold (every test
 segment exceeded the fold budget), so only the main guard applied; the current
 planner folds safe units before an oversized group and reports the block (Core
-only, not yet on the device). A forget during maintenance
+only). A forget during maintenance
 was exercised only with fault injection: the launch argument
 `-PocketAgentHoldMaintenanceDispatch` makes each fold wait 20 s (cancellable)
 after its read registration and before its request; a forget confirmed in that
@@ -551,7 +551,16 @@ isolated owner through the production writer to a temporary file, the real
 the df53187 build: two committed folds reloading to a valid tip, a typed summary
 limit, a Stop and a revocation while a fold streams, and a source edit refused by
 the commit's compare-and-swap (injected responses; not a real provider). The
-E build adds a sixth case (one huge root folded over two turns). Device long
+E build (276b3df) adds a sixth case, which passed on the device with the other
+five (fresh process and nonce): one synthetic 30-group root under a host
+4000-token budget folded over two turns (three folds each), coverage ending at a
+safe cut inside the root, an exact source partition and an equal reload. A real
+summary then main request on the 12 mini covered a root's prompt only and sent
+raw history starting at that root's plain assistant reply, which carries a
+provider item: the summary committed (builder version 2, sources exactly the
+prompt) and the main request completed (planning recomputed on the pulled
+history, committed coverage and completion metadata; not a packet capture).
+Device long
 history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
 the production writer, three runs): a patched event at 50k messages records in
 p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
@@ -587,7 +596,7 @@ evaluation table); it stays lexical: a general Traditional/Simplified script
 conversion was not adopted (no measurable gain on the all-Simplified table,
 many-to-one ambiguity, search cost and device availability risk), and the table
 runs as a regression. Remaining boundaries (oversized single groups,
-model-change recall, partial coverage on the device) are listed in the plan.
+model-change recall) are listed in the plan.
 Transcript paging renders 400 messages per page. A script turn on the 12 mini
 once stayed cancelling for over ten minutes until a relaunch (interrupted,
 nothing replayed); its stalled stage and the bounds added since are under
@@ -643,13 +652,20 @@ Confirmed problems found during implementation review and fixed:
   permitted turn that had read the entry ran `wait` (reported refusals: a child
   element of another process with the keyboard up, and the press target not
   being the frame-centre hit element; a screenshot showed the system task banner
-  over the toolbar; the exact cause is not located), so the new text is still
-  unverified there. The launch-only `-PocketAgentForgetDuringRun <PKATEST_marker>`
-  drives the real path: when the turn starts a `wait` call after its real request
-  read exactly the current revision of the one own entry with that marker, and
-  the panel's own preview says the running turn stops, a later main-actor turn
-  rechecks the same guards and calls `commitForget` once (no retry; booleans in
-  the run's log).
+  over the toolbar; the exact cause is not located). The launch-only
+  `-PocketAgentForgetDuringRun <PKATEST_marker>` drives the real path instead:
+  when the turn starts a `wait` call after its real request read exactly the
+  current revision of the one own entry with that marker, and the panel's own
+  preview says the running turn stops, a later main-actor turn rechecks the same
+  guards and calls `commitForget` once (no retry; booleans in the run's log). On
+  the 276b3df build the model proposed eight `wait` calls; at the first one's
+  start all four guards held and the commit returned true; the entry was
+  tombstoned, the root masked, and the detail and UI showed the revoked-source
+  reason. Only that `wait` had started (cancelled); the other seven were refused
+  before dispatch, and no tool start, model request or DDI call followed the
+  commit (no phone connection or script process had been opened). A diagnostic
+  trigger of the real controller, not a manual panel action; it does not show
+  that the `wait` was already sleeping.
 - A Stop while a request's preparation (memory refresh, projections, phone
   observation) was suspended still handed the request to the provider once the
   preparation returned (host probe: one provider call after cancellation). The
