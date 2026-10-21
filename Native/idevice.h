@@ -9940,7 +9940,11 @@ bool pocket_ddi_progress(const struct PocketDDICancellation *cancel, struct Pock
  * string; output is released with idevice_string_free. No request/result logs.
  * Every operation except the finalization ops `stop_observing` and `return`
  * requires `expires_at_ms` (wall-clock Unix ms, fixed by the app before the
- * handoff); a missing or passed expiry dispatches nothing.
+ * handoff); a missing or passed expiry dispatches nothing and is an error.
+ * Once admitted, the output is a JSON object with `ok`, `action_issued`
+ * (whether this request started a physical effect) and `replay_allowed`
+ * false; a failure adds `code`, `message` and `requires_new_turn` (input
+ * stays disabled for this session) instead of returning an error.
  */
 struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
                                         const char *request,
