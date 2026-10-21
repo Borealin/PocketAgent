@@ -93,6 +93,8 @@ final class DeviceConnection {
     var handshake: OpaquePointer?
     var ddi: OpaquePointer?
     var ddiCancellation: OpaquePointer?
+    /// The installed-app catalog of this connection was read for DDI tools.
+    var catalogLoaded = false
     private var server: OpaquePointer?
     private var process: OpaquePointer?
     private var runnerPID: UInt64?
@@ -149,6 +151,7 @@ final class DeviceConnection {
         guard let output else { throw failure("DDI 返回为空。") }
         defer { idevice_string_free(output) }
         guard let result = try JSONSerialization.jsonObject(with: Data(String(cString: output).utf8)) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
+        // A failure after native admission is a result with its effect metadata.
         if let failure = try DDIOperationFailure.decode(result) { throw failure }
         return result
     }
@@ -731,22 +734,24 @@ final class Model: ObservableObject {
         guard !pendingAgentCancellation else { throw CancellationError() }
         if stopRequested() { throw PhonePreparationStopped() }
         let device = try await preparePhoneTransport(turnEnd: turnEnd, stopRequested: stopRequested)
-        guard device.ddi == nil else { return }
-        if stopRequested() { throw PhonePreparationStopped() }
-        // Do not publish native readiness before the shared app catalog exists.
-        // A failed catalog read leaves no DDI session that can skip this stage.
-        guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
-        let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
-        installedApps = try await ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
-        try Task.checkCancellation()
-        guard !pendingAgentCancellation else { throw CancellationError() }
-        if stopRequested() { throw PhonePreparationStopped() }
-        try await runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
-            try await self.ffi { try device.openDDI() }
-        }
-        try Task.checkCancellation()
-        guard !pendingAgentCancellation else { throw CancellationError() }
-        if stopRequested() { throw PhonePreparationStopped() }
+        // Ready only with both the catalog and the session; a session left by
+        // a preparation whose catalog read failed is not ready.
+        let readiness = DDIServiceReadiness(catalogLoaded: device.catalogLoaded, sessionOpen: device.ddi != nil)
+        guard !readiness.ready else { return }
+        try await DDIServiceReadiness.prepare(readiness, checkpoint: {
+            try Task.checkCancellation()
+            guard !self.pendingAgentCancellation else { throw CancellationError() }
+            if stopRequested() { throw PhonePreparationStopped() }
+        }, readCatalog: {
+            guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+            let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
+            self.installedApps = try await self.ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
+            device.catalogLoaded = true
+        }, openSession: {
+            try await self.runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
+                try await self.ffi { try device.openDDI() }
+            }
+        })
         log("ddi_services_ready")
     }
     func prepareWDA(turnEnd: Date, stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws -> String {

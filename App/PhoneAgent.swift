@@ -123,6 +123,14 @@ extension Model {
                         status.value.contextNote = "因遗忘，本轮已排除失效的较早对话摘要及依赖它的后续片段。"
                         onStatus?(status.value)
                     }
+                    assistant.onQuoteExclusion = { [weak self] count in
+                        // A count only: never the quoted text or its IDs.
+                        let origin = streamStamp.origin()
+                        self?.log("context_exclusion", ["quotes": count], origin: origin)
+                        guard !status.value.phase.isTerminal else { return }
+                        status.value.contextNote = "引用的历史已被遗忘、删除或改变，本轮已不再发送该引用。"
+                        onStatus?(status.value)
+                    }
                     status.value.phase = .preparingContext
                     publish("context_preparation"); onStatus?(status.value)
                     prior = try await assistant.prepareContext(
@@ -453,8 +461,15 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
+        let previous = callEffects.preparation, reports = control.nativeEffects
         callEffects.preparationSent()
-        try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
+        do {
+            try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
+        } catch {
+            // Unreported only when its native call proved nothing was sent.
+            callEffects.settlePreparation(after: error, restoring: previous, native: control.nativeEffects - reports)
+            throw error
+        }
         try proceed()
         try await Task.sleep(for: .milliseconds(300))
         try proceed()
@@ -605,14 +620,16 @@ final class PhoneExecutor {
             if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
             let before = callEffects.beginAction()
             let dispatched = control.dispatchedCalls
+            let reports = control.nativeEffects
             do { try await operation() } catch {
                 // A native refusal before any touch, a refusal before dispatch
                 // when nothing of this operation was handed to the device, or a
-                // DDI refusal reporting no started effect from the operation's
-                // only native call, is not an action; anything else may follow a
-                // sent effect. Preparation gestures already sent stay reported.
+                // DDI refusal when every native call of this operation reported
+                // no started effect, is not an action; anything else may follow
+                // a sent effect. Preparation gestures already sent stay reported.
                 callEffects.settle(after: error, restoring: before,
-                                   dispatchedDuringOperation: control.dispatchedCalls - dispatched)
+                                   dispatchedDuringOperation: control.dispatchedCalls - dispatched,
+                                   native: control.nativeEffects - reports)
                 throw error
             }
             try proceed()
@@ -753,8 +770,10 @@ final class PhoneExecutor {
                     break
                 }
                 if backend == .ddi {
-                    if text.isEmpty { try await control.prepareText(text) }
-                    else { try await effect { try await control.prepareText(text) } }
+                    // Only a nonempty clipboard write is an effect; empty text
+                    // prepares nothing on the device.
+                    if request.preparationWritesClipboard { try await effect { try await control.prepareText(text) } }
+                    else { try await control.prepareText(text) }
                     // Revalidate the target after clipboard preparation; no effect is replayed.
                     a = try await node(args, base: base, proceed: proceed)
                 }
@@ -863,8 +882,10 @@ final class PhoneExecutor {
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let failure = error as? DDIOperationFailure {
-                // Observation/node preparation can itself issue a system-surface
-                // gesture outside effect {}; retain its native effect metadata.
+                // Native metadata: a refusal before any effect leaves input usable
+                // (replan from a fresh screen); an uncertain effect or an
+                // unconfirmed release keeps input disabled for this session.
+                // Effects already sent in this call (preparation, earlier steps) stay reported.
                 let actionIssued = failure.actionWasIssued(after: issued)
                 var result: [String: Any] = ["ok": false, "code": failure.code,
                     "message": failure.message + (failure.requiresNewTurn
@@ -875,10 +896,13 @@ final class PhoneExecutor {
                     "replay_allowed": false]
                 if let textInput { result["input_method"] = textInput.method.rawValue; result["input_verified"] = false }
                 // Read-only recovery is allowed even when input is disabled.
-                do { result["screen"] = try await observe(proceed: proceed, prepareSurface: false) }
-                catch {
+                do {
+                    result["screen"] = try await observe(proceed: proceed, prepareSurface: false)
+                    try proceed()
+                    result["recovery"] = "fresh_observation"
+                } catch {
                     if error is ActionStopped || error is CancellationError || Task.isCancelled || model.pendingAgentCancellation {
-                        throw ActionStopped(issued: actionIssued, reason: "本轮已取消。")
+                        throw ActionStopped(issued: issued, reason: "本轮已取消。")
                     }
                     result["recovery"] = "observe_screen_required"
                 }

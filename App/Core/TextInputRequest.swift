@@ -46,8 +46,9 @@ nonisolated struct TextInputRequest: Sendable {
             guard let parsed = TextInputMethod(rawValue: rawMethod) else { throw Issue.invalidMethod }
             method = parsed
         } else if arguments["method"] == nil || arguments["method"] == .null {
-            // The pinned AgentKit validator accepts null optional fields as
-            // omission; null therefore selects the same default paste route.
+            // A strict provider schema makes the optional field required and
+            // nullable; the pinned AgentKit validator accepts null as omission
+            // and passes it through, so null selects the same default paste.
             method = .paste
         } else {
             throw Issue.invalidMethod
@@ -65,6 +66,10 @@ nonisolated struct TextInputRequest: Sendable {
         self.text = text
         self.clear = clear
     }
+
+    /// Whether preparing this input writes the device clipboard, an effect:
+    /// only nonempty paste text. Empty text prepares nothing on the device.
+    var preparationWritesClipboard: Bool { method == .paste && !text.isEmpty }
 
     func validateTarget(_ attributes: [String: String]) throws {
         guard method == .ax else { return }

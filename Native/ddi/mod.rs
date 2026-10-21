@@ -212,6 +212,9 @@ pub struct PocketDDISession {
     touch: Option<(u16, u16)>,
     home_down: bool,
     poisoned: bool,
+    /// Set right before this request's first physical effect (touch, button,
+    /// key or owned keyboard, launch, clipboard write, AX setter); reset per
+    /// request. A failure before it is a refusal that leaves input usable.
     effect_started: bool,
     /// Wall-clock expiry of the call in flight (Unix ms); `None` outside calls
     /// and for finalization.
@@ -227,14 +230,32 @@ pub struct PocketDDISession {
 fn error(message: impl Into<String>) -> IdeviceError {
     IdeviceError::InternalError(message.into())
 }
-fn request_failure(message: String, effect_started: bool, poisoned: &mut bool,
-                   release_failed: bool, read_only: bool) -> Json {
+fn error_message(e: &IdeviceError) -> String {
+    match e {
+        IdeviceError::InternalError(m) => m.clone(),
+        other => other.to_string(),
+    }
+}
+/// Operations that never send input; they stay available when input is disabled.
+const READ_ONLY_OPS: [&str; 5] = ["apps", "foreground", "snapshot", "clipboard_verify", "stop_observing"];
+/// A request that failed after admission, as a result with its effect
+/// metadata. Only a started effect or an unconfirmed release disables
+/// further input for the session; a refusal before any effect does not, so
+/// the turn can observe again and replan. Nothing is ever replayable.
+fn request_failure(message: String, effect_started: bool, poisoned: &mut bool, release_failed: bool,
+                   read_only: bool) -> Json {
     *poisoned |= effect_started || release_failed;
-    let code = if release_failed { "ddi_cleanup_unconfirmed" }
-        else if effect_started { "ddi_effect_unconfirmed" }
-        else if *poisoned { "ddi_session_poisoned" }
-        else if read_only { "ddi_observation_failed" }
-        else { "ddi_preflight_refused" };
+    let code = if release_failed {
+        "ddi_cleanup_unconfirmed"
+    } else if effect_started {
+        "ddi_effect_unconfirmed"
+    } else if read_only {
+        "ddi_observation_failed"
+    } else if *poisoned {
+        "ddi_session_poisoned"
+    } else {
+        "ddi_preflight_refused"
+    };
     json!({"ok":false,"code":code,"message":message,"action_issued":effect_started,
         "requires_new_turn":*poisoned,"replay_allowed":false})
 }
@@ -984,7 +1005,8 @@ impl PocketDDISession {
             self.proceed()?;
             let channel = self.keyboard_hid.insert(
                 Channel::new(UniversalHidServiceClient::new(client), self.hid_port, channel::KEYBOARD));
-            self.effect_started = true; // A failed constructor can have created an owned service.
+            // A failed constructor can still have created the owned keyboard.
+            self.effect_started = true;
             // Device-owned state with its own bounded rollback: not raced.
             self.keyboard = Some(channel.exchange(async |c| c.create_main_keyboard().await
                 .map_err(|e| error(e.to_string()))).await?);
@@ -1123,7 +1145,7 @@ impl PocketDDISession {
             return Ok(json!({}));
         }
         self.proceed()?;
-        if self.poisoned && !["apps", "foreground", "snapshot", "clipboard_verify"].contains(&op) {
+        if self.poisoned && !READ_ONLY_OPS.contains(&op) {
             return Err(error(
                 "DDI input is disabled after an uncertain effect; observe and send a new turn",
             ));
@@ -1199,13 +1221,13 @@ impl PocketDDISession {
                     return Err(error("AX replacement target is covered or changed"));
                 }
                 self.proceed()?;
-                // Reconnection is read preparation; the setter is the effect.
+                // Reconnecting is read preparation; the setter is the effect.
                 self.ax().await?;
                 self.effect_started = true;
                 self.ax.as_mut().ok_or_else(|| error("AX session missing"))?
                     .set_text(&token, text).await.map_err(error)?;
                 self.proceed()?;
-                Ok(json!({"action_issued":true,"replay_allowed":false,"route":"ax-set-value"}))
+                Ok(json!({"route":"ax-set-value"}))
             }
             "clipboard_set" | "clipboard_verify" => {
                 let expected = v["text"]
@@ -1705,9 +1727,10 @@ pub unsafe extern "C" fn pocket_ddi_call(
             .cleanup_input(session.cancel.cancelled())
             .await;
         session.drop_release = false;
+        let read_only = READ_ONLY_OPS.contains(&op);
         if let Err(e) = cleanup {
             let _ = session.close_ax().await;
-            return Ok(request_failure(e.to_string(), session.effect_started, &mut session.poisoned, true, false));
+            return Ok(request_failure(error_message(&e), session.effect_started, &mut session.poisoned, true, read_only));
         }
         match result {
             Ok(Ok(mut v)) => {
@@ -1720,8 +1743,7 @@ pub unsafe extern "C" fn pocket_ddi_call(
                 // Abort semantic AX correlation after any failed operation.
                 // Read-only recovery may reconnect; uncertain effects never replay.
                 let _ = session.close_ax().await;
-                let read_only = ["apps", "foreground", "snapshot", "clipboard_verify"].contains(&op);
-                Ok(request_failure(e.to_string(), session.effect_started, &mut session.poisoned, false, read_only))
+                Ok(request_failure(error_message(&e), session.effect_started, &mut session.poisoned, false, read_only))
             }
         }
     });
@@ -2128,6 +2150,70 @@ mod tests {
         for key in ["x", "y", "width", "height"] {
             assert_eq!(frame[key].as_f64().unwrap().to_bits(), decoded[key].as_f64().unwrap().to_bits());
         }
+    }
+    #[test]
+    fn a_refusal_before_any_effect_leaves_input_usable_but_an_uncertain_effect_does_not() {
+        let mut poisoned = false;
+        let refused = request_failure("AX replacement target frame changed".into(), false, &mut poisoned, false, false);
+        assert_eq!(refused["ok"], false);
+        assert_eq!(refused["code"], "ddi_preflight_refused");
+        assert_eq!(refused["action_issued"], false);
+        assert_eq!(refused["requires_new_turn"], false);
+        assert_eq!(refused["replay_allowed"], false);
+        assert!(!poisoned);
+        let read = request_failure("AX request type 6 refused: 8".into(), false, &mut poisoned, false, true);
+        assert_eq!((read["code"].as_str(), read["requires_new_turn"].as_bool()), (Some("ddi_observation_failed"), Some(false)));
+        let uncertain = request_failure("DDI service request timed out".into(), true, &mut poisoned, false, false);
+        assert_eq!(uncertain["code"], "ddi_effect_unconfirmed");
+        assert_eq!(uncertain["action_issued"], true);
+        assert_eq!(uncertain["requires_new_turn"], true);
+        assert!(poisoned);
+        // Later input is refused before any effect, and says why; reads stay available.
+        let blocked = request_failure("DDI input is disabled after an uncertain effect; observe and send a new turn".into(),
+                                      false, &mut poisoned, false, false);
+        assert_eq!(blocked["code"], "ddi_session_poisoned");
+        assert_eq!((blocked["action_issued"].as_bool(), blocked["requires_new_turn"].as_bool()), (Some(false), Some(true)));
+        let observed = request_failure("AX foreground or root changed".into(), false, &mut poisoned, false, true);
+        assert_eq!((observed["code"].as_str(), observed["requires_new_turn"].as_bool()),
+                   (Some("ddi_observation_failed"), Some(true)));
+    }
+    #[test]
+    fn an_unconfirmed_release_disables_input_even_after_a_read() {
+        let mut poisoned = false;
+        let failure = request_failure(INPUT_RELEASE_UNCONFIRMED.into(), false, &mut poisoned, true, true);
+        assert_eq!(failure["code"], "ddi_cleanup_unconfirmed");
+        assert_eq!((failure["action_issued"].as_bool(), failure["requires_new_turn"].as_bool()), (Some(false), Some(true)));
+        assert!(poisoned);
+        for op in ["apps", "foreground", "snapshot", "clipboard_verify", "stop_observing"] { assert!(READ_ONLY_OPS.contains(&op)); }
+        for op in ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace", "clipboard_set",
+                   "activate", "home", "return"] { assert!(!READ_ONLY_OPS.contains(&op)); }
+    }
+    /// The fresh AX field frame and the request's target frame are compared
+    /// exactly (no tolerance). A real fractional coordinate written by Swift's
+    /// JSONSerialization must parse to the same f64, bit for bit; serde_json's
+    /// default parser moved it by one ULP and refused an unchanged field.
+    #[test]
+    fn a_fractional_ax_target_frame_survives_the_request_json_exactly() {
+        let (x, y, width, height) = (23.317333333333334_f64, 94.66666666666667_f64, 328.36533333333335_f64, 36.666666666666664_f64);
+        let screen = Geometry { x: 0.0, y: 0.0, width: 375.0, height: 812.0 };
+        let attrs = archive::fields(&[("45", 15u64.into()), ("51", 1u64.into()), ("27", true.into()), ("32", true.into()),
+            ("21", archive::fields(&[("x", x.into()), ("y", y.into()), ("width", width.into()), ("height", height.into())]))]);
+        let fresh = ax_field_frame(&attrs, screen).unwrap();
+        let request: Json = serde_json::from_slice(
+            br#"{"op":"ax_replace","target_frame":{"x":23.317333333333334,"y":94.66666666666667,"width":328.36533333333335,"height":36.666666666666664}}"#,
+        ).unwrap();
+        let target = json_geometry(&request["target_frame"], "AX replacement target frame missing or invalid").unwrap();
+        assert_eq!(target.x.to_bits(), x.to_bits());
+        for (a, b) in [(target.x, fresh.x), (target.y, fresh.y), (target.width, fresh.width), (target.height, fresh.height)] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        assert!(fresh == target);
+        // The strict comparison itself is unchanged: one ULP still refuses.
+        let moved = Geometry { x: f64::from_bits(x.to_bits() + 1), ..target };
+        assert!(fresh != moved);
+        // Results written back keep the same bits.
+        let echoed: Json = serde_json::from_str(&serde_json::to_string(&fresh.json()).unwrap()).unwrap();
+        assert_eq!(json_geometry(&echoed, "frame").unwrap().x.to_bits(), x.to_bits());
     }
     #[test]
     fn task_surface_gesture_stays_in_the_status_band() {

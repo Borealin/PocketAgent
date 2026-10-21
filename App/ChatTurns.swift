@@ -227,14 +227,17 @@ extension ChatController {
     /// Activates the pending request when the primary line is free and the
     /// previous turn finished normally; otherwise it stays queued/held.
     func advancePendingIfReady() {
-        guard storageReady, let pending = assistant.pendingNext, pending.state == .queued,
-              case .detached = pending.prompt, jobs[pending.sessionID] == nil, settlingSteers == 0,
-              assistant.primaryNotice == nil else { return }
-        guard foreground else { return }
-        guard let frozen = pendingFrozen, stopEpoch == pendingStopEpoch else {
-            transact { try $0.holdPending(pendingFrozen == nil ? "需要重新确认模型与项目后继续" : "已停止；确认后再继续") }
-            return
+        let decision = PendingActivation.decide(
+            pending: assistant.pendingNext, storageReady: storageReady,
+            lineBusy: assistant.pendingNext.map { jobs[$0.sessionID] != nil } ?? false, settlingSteers: settlingSteers,
+            primaryNotice: assistant.primaryNotice, foreground: foreground, frozenAvailable: pendingFrozen != nil,
+            stopEpochAtAccept: pendingStopEpoch, stopEpochNow: stopEpoch)
+        switch decision {
+        case .wait: return
+        case .hold(let reason): transact { try $0.holdPending(reason) }; return
+        case .activate: break
         }
+        guard let pending = assistant.pendingNext, let frozen = pendingFrozen else { return }
         if let workspace = frozen.workspace, workspaces.snapshot(workspace.id)?.root != workspace.root {
             transact { try $0.holdPending("请求冻结的项目已不存在，未开始。") }
             return
@@ -459,21 +462,23 @@ extension ChatController {
             notStarted(job, reason ?? "本轮未开始。", cancelled: job.cancelled, stage: .preparing, warning: cleanupWarning)
         } else {
             let state: ChatState = successful ? .completed : (job.cancelled ? .interrupted : .failed)
+            if job.primary { settlePendingAfterPrimaryTurn(permitted: true, successful: successful) }
             finish(job, state: state, detail: StartedTurnOutcome.detail(successful: successful, cancelled: job.cancelled,
                                                                         revoked: job.revoked, failure: status.failure,
                                                                         cleanupWarning: cleanupWarning))
-            if job.primary { settlePendingAfterPrimaryTurn(successful: successful, stopEpochAtFinish: stopEpoch) }
         }
     }
 
-    /// A primary turn ended: the pending request may advance only after a
-    /// completed turn in the foreground with no Stop since it was accepted.
-    private func settlePendingAfterPrimaryTurn(successful: Bool, stopEpochAtFinish: UInt64) {
-        guard let pending = assistant.pendingNext, pending.state == .queued, case .detached = pending.prompt else { return }
-        switch PendingAdvancePolicy.afterPrimaryTurn(successful: successful, foreground: foreground,
-                                                      stopEpochAtAccept: pendingStopEpoch, stopEpochNow: stopEpochAtFinish) {
-        case .advance: break
-        case .hold(let reason): transact { try $0.holdPending(reason) }
+    /// A primary turn ended, at any stage: before `finish` gives the line back,
+    /// a detached pending request is held unless the turn started and
+    /// completed in the foreground with no Stop since it was accepted. Its
+    /// frozen configuration goes first, so a failed hold write never lets it
+    /// follow on its own.
+    private func settlePendingAfterPrimaryTurn(permitted: Bool, successful: Bool) {
+        let end = PrimaryTurnEnd(permitted: permitted, successful: successful, foreground: foreground,
+                                 stopEpochAtAccept: pendingStopEpoch, stopEpochNow: stopEpoch)
+        if let error = PrimaryTurnSettlement.settle(owner, after: end, frozen: &pendingFrozen) {
+            notice = error.localizedDescription
         }
     }
 
@@ -493,6 +498,9 @@ extension ChatController {
         var status = statuses[job.sessionID] ?? ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         if !status.phase.isTerminal { status.failure = message; status.finish(successful: false, cancelled: cancelled) }
         if jobs[job.sessionID] === job { statuses[job.sessionID] = status }
+        // A never-started primary turn (failed, expired or stopped) never lets
+        // another pending request follow on its own.
+        if job.primary, jobs[job.sessionID] === job { settlePendingAfterPrimaryTurn(permitted: false, successful: false) }
         switch NotStartedRoute.route(pendingOrigin: job.isPendingOrigin, cancelled: cancelled) {
         case .restoreDraft:
             let restored = restoreDraft(job)

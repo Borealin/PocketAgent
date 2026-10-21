@@ -38,3 +38,36 @@ nonisolated enum DDIImagePreparation {
         UInt64((date.timeIntervalSince1970 * 1000).rounded(.down))
     }
 }
+
+/// What a DDI connection still needs after its transport and image before a
+/// turn's tools may use it: the installed-app catalog, then the DDI session.
+/// The executor publishes its backend as ready only when preparation returns,
+/// so it returns only when both are done. The catalog comes first: a failed
+/// catalog read opens no session, and a later preparation in the same turn
+/// reads the catalog again instead of taking a leftover session as ready (a
+/// failed read is an error, never an empty catalog).
+nonisolated struct DDIServiceReadiness: Equatable, Sendable {
+    var catalogLoaded: Bool
+    var sessionOpen: Bool
+
+    enum Step: Equatable, Sendable { case readCatalog, openSession }
+
+    var remaining: [Step] { (catalogLoaded ? [] : [.readCatalog]) + (sessionOpen ? [] : [.openSession]) }
+    var ready: Bool { remaining.isEmpty }
+
+    /// Runs the remaining steps in order; `checkpoint` (Stop, deadline, lease,
+    /// storage) runs before each and after the last. A step that throws ends
+    /// the preparation with nothing after it.
+    @MainActor
+    static func prepare(_ current: Self, checkpoint: () throws -> Void, readCatalog: () async throws -> Void,
+                        openSession: () async throws -> Void) async throws {
+        for step in current.remaining {
+            try checkpoint()
+            switch step {
+            case .readCatalog: try await readCatalog()
+            case .openSession: try await openSession()
+            }
+        }
+        try checkpoint()
+    }
+}

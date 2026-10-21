@@ -1,8 +1,11 @@
 import Foundation
 
-/// Native request failure metadata survives FFI so a refused preflight is not
-/// confused with an uncertain input effect. It never authorizes a replay.
-nonisolated struct DDIOperationFailure: Error, LocalizedError, Sendable {
+/// A DDI request that failed after native admission, with the native
+/// metadata: whether this request started an effect (`actionIssued`) and
+/// whether input stays disabled for the session (`requiresNewTurn`: an
+/// uncertain effect, an unconfirmed release, or an earlier one). It never
+/// authorizes a replay.
+nonisolated struct DDIOperationFailure: Error, LocalizedError, Equatable, Sendable {
     let code: String
     let message: String
     let actionIssued: Bool
@@ -15,15 +18,22 @@ nonisolated struct DDIOperationFailure: Error, LocalizedError, Sendable {
         var errorDescription: String? { "DDI 请求结果缺少有效的动作状态；请重新观察，不要重放动作。" }
     }
 
+    /// nil for a successful result; a failure must carry every field.
     static func decode(_ object: [String: Any]) throws -> Self? {
-        guard let ok = object["ok"] as? Bool else { throw DecodeIssue.malformed }
+        guard let ok = flag(object["ok"]) else { throw DecodeIssue.malformed }
         guard !ok else { return nil }
         guard let code = object["code"] as? String, !code.isEmpty,
               let message = object["message"] as? String, !message.isEmpty,
-              let actionIssued = object["action_issued"] as? Bool,
-              let requiresNewTurn = object["requires_new_turn"] as? Bool,
-              object["replay_allowed"] as? Bool == false else { throw DecodeIssue.malformed }
+              let actionIssued = flag(object["action_issued"]),
+              let requiresNewTurn = flag(object["requires_new_turn"]),
+              flag(object["replay_allowed"]) == false else { throw DecodeIssue.malformed }
         return Self(code: code, message: message, actionIssued: actionIssued, requiresNewTurn: requiresNewTurn)
+    }
+
+    /// A JSON boolean only; a number is not a flag.
+    static func flag(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
     }
 
     /// Earlier primitives in a composite tool may already have changed the

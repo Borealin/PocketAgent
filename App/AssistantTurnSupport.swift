@@ -42,6 +42,11 @@ final class AssistantTurnSupport {
         get { requests.onExclusion }
         set { requests.onExclusion = newValue }
     }
+    /// A reference quote's window was masked, deleted or changed since the context was built.
+    var onQuoteExclusion: (@MainActor (Int) -> Void)? {
+        get { requests.onQuoteExclusion }
+        set { requests.onQuoteExclusion = newValue }
+    }
     private var calibrationKey: EstimatorCalibration.Key {
         .init(providerID: config.providerID, modelID: config.modelID, images: config.supportsImages)
     }
@@ -89,7 +94,7 @@ final class AssistantTurnSupport {
         requests.summaryMessageID = prepared.summaryID.flatMap { id in
             owner.file.assistant.compactions.first { $0.id == id }?.record.summaryMessageID
         }
-        requests.historicalMessages = prepared.historicalMessages
+        requests.quotes = prepared.quotes
         requests.partialSuffix = prepared.partialSuffix
         let session = owner.file.session(sessionID)
         return AttachmentHydration.context(prepared.messages, attachments: session?.attachments ?? [:],

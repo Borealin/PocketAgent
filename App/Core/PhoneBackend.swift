@@ -27,16 +27,56 @@ nonisolated struct PhoneCallEffects: Equatable, Sendable {
 
     /// An effect operation failed. Only a refusal proven to precede anything
     /// it could have sent restores the action flag: a native refusal before
-    /// any touch, or a typed refusal before dispatch when no native call of
-    /// this operation was dispatched at all (a composite operation whose
-    /// first call already acted stays reported), or a DDI failure reporting
-    /// no started effect when it was the operation's only native call. A
-    /// timeout, a cancellation or any other failure may follow a sent effect
-    /// and is kept. Preparation stays reported either way.
-    mutating func settle(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int) {
+    /// any touch, a typed refusal before dispatch when no native call of this
+    /// operation was dispatched at all, or a DDI refusal whose native calls in
+    /// this operation all reported that no effect had started (`native`, the
+    /// reports of this operation only). A composite operation whose earlier
+    /// call acted stays reported; a timeout, a cancellation or any failure
+    /// without such reports may follow a sent effect and is kept. Preparation
+    /// stays reported either way.
+    mutating func settle(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int,
+                         native: NativeEffectReports = NativeEffectReports()) {
         if case PhoneObservationIssue.targetCovered = error { action = previous; return }
-        if error is PhoneCallNotDispatched, dispatchedDuringOperation == 0 { action = previous }
-        if let failure = error as? DDIOperationFailure, !failure.actionIssued, dispatchedDuringOperation == 1 { action = previous }
+        if error is PhoneCallNotDispatched, dispatchedDuringOperation == 0 { action = previous; return }
+        if native.provenUnsent { action = previous }
+    }
+
+    /// The preparation gesture itself failed: it is unreported only when its
+    /// native call reported that nothing had started; an earlier sent
+    /// preparation stays reported.
+    mutating func settlePreparation(after error: any Error, restoring previous: Bool, native: NativeEffectReports) {
+        if native.provenUnsent { preparation = previous }
+    }
+}
+
+/// What DDI native calls reported about effects, counted per call (WDA reports
+/// nothing). `possible`: calls in which an effect started, or could not be
+/// ruled out (an error without metadata, a malformed result). `refused`:
+/// failed calls whose native metadata says no effect had started.
+nonisolated struct NativeEffectReports: Equatable, Sendable {
+    var possible = 0
+    var refused = 0
+
+    /// A refusal, and no call that could have acted.
+    var provenUnsent: Bool { refused > 0 && possible == 0 }
+
+    /// A native call that returned a result: a failure is decoded and
+    /// counted by its metadata (and returned to be thrown), a success that
+    /// reports an effect, or omits the flag, counts as possible. A result
+    /// whose metadata is malformed counts as possible and throws.
+    mutating func record(result object: [String: Any]) throws -> DDIOperationFailure? {
+        let failure: DDIOperationFailure?
+        do { failure = try DDIOperationFailure.decode(object) } catch { possible += 1; throw error }
+        if let failure { record(failure) }
+        else if DDIOperationFailure.flag(object["action_issued"]) != false { possible += 1 }
+        return failure
+    }
+    mutating func record(_ failure: DDIOperationFailure) {
+        if failure.actionIssued { possible += 1 } else { refused += 1 }
+    }
+
+    static func - (lhs: Self, rhs: Self) -> Self {
+        Self(possible: lhs.possible - rhs.possible, refused: lhs.refused - rhs.refused)
     }
 }
 
@@ -114,10 +154,11 @@ nonisolated enum DDINodeMapping {
     static func confirmsInput(_ node: [String: String], text: String) -> Bool {
         guard let value = node["value"] else { return false }
         let placeholder = node["placeholder"]
-        // An empty field can report its placeholder as AX value, e.g. after a
-        // refused paste; that value cannot confirm nonempty input.
+        // An empty field can report its placeholder as its value (for example
+        // after a paste that did not land): that cannot confirm nonempty text,
+        // even text equal to the placeholder.
         guard text.isEmpty else { return value == text && value != placeholder }
-        // Clear-only keeps its existing placeholder-or-empty confirmation.
-        return value == text || value == placeholder
+        // Clear-only keeps its empty-or-placeholder confirmation.
+        return value.isEmpty || value == placeholder
     }
 }

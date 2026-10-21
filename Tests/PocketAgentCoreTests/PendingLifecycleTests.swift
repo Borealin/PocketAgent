@@ -178,6 +178,169 @@ struct PendingLifecycleTests {
     }
 }
 
+/// Review finding R9: an ordinary primary send T1 ends before its startup
+/// permit (preparation failure, system expiry, startup failure) while a
+/// detached pending request P waits. The controller settles P in `notStarted`
+/// / `finished` with `PrimaryTurnSettlement.settle` before `finish`, and
+/// `advancePendingIfReady` (scheduled by `finish`, and on returning to the
+/// foreground) appends and enqueues P only on `PendingActivation.activate`.
+/// These are the functions the controller calls, on a real `HistoryOwner`
+/// whose writes can fail; the steps below are the controller's order.
+/// Without the settlement the gate alone would activate P.
+@MainActor
+struct PrimaryTurnSettlementTests {
+    /// The history file write; fails the next `failures` writes.
+    @MainActor final class Writer {
+        var failures = 0
+        private(set) var writes = 0
+        func write(_ data: Data) throws {
+            if failures > 0 { failures -= 1; throw CocoaError(.fileWriteOutOfSpace) }
+            writes += 1
+        }
+    }
+
+    @MainActor private struct Line {
+        let owner: HistoryOwner
+        let writer = Writer()
+        let t1 = AgentTranscriptMessage(role: .user, text: "先整理今天的日程")
+        let p = AgentTranscriptMessage(role: .user, text: "然后按日程订会议室")
+        /// The controller's in-memory frozen configuration of P (`pendingFrozen`).
+        var frozen: String? = "P 的冻结配置"
+        var file: HistoryFile { owner.file }
+        var pending: PendingNext? { owner.file.assistant.pendingNext }
+
+        init(permitted: Bool) throws {
+            var initial = HistoryFile.initial(selection: nil)
+            let primary = initial.assistant.primarySessionID
+            try initial.acceptRoot(t1, attachments: [], in: primary, scope: .general)
+            if permitted { try initial.commitDispatchPermit(root: t1.id, sessionID: primary, scope: .general) }
+            try initial.acceptPending(PendingNext(sessionID: primary, prompt: .detached(message: p, attachments: []),
+                                                  selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: nil,
+                                                  backend: .ddi, clipboardAllowed: true, acceptedOrdinal: 2, state: .queued,
+                                                  references: [], acceptedAt: Date()))
+            let writer = writer
+            owner = HistoryOwner(file: initial, writer: { try writer.write($0) })
+        }
+
+        /// `advancePendingIfReady`'s decision with the line free and no Stop
+        /// since P was accepted.
+        func activation(foreground: Bool = true, stopEpochNow: UInt64 = 0) -> PendingActivation {
+            PendingActivation.decide(pending: pending, storageReady: owner.health.isReady, lineBusy: false, settlingSteers: 0,
+                                     primaryNotice: file.assistant.primaryNotice, foreground: foreground,
+                                     frozenAvailable: frozen != nil, stopEpochAtAccept: 0, stopEpochNow: stopEpochNow)
+        }
+
+        /// `notStarted` / `finished` for T1: the settlement, T1's own route (an
+        /// ordinary send writes its draft back), then `finish`'s record of the
+        /// session state. Returns the hold write's error.
+        mutating func end(_ end: PrimaryTurnEnd, cancelled: Bool = false) -> (any Error)? {
+            let error = PrimaryTurnSettlement.settle(owner, after: end, frozen: &frozen)
+            let primary = file.assistant.primarySessionID, draft = t1.text
+            if !end.permitted {
+                #expect(NotStartedRoute.route(pendingOrigin: false, cancelled: cancelled) == .restoreDraft)
+                #expect((try? owner.transact { try $0.editSession(primary) { $0.draft = draft } }) != nil)
+            }
+            let state: ChatState = end.permitted && end.successful ? .completed : (cancelled ? .interrupted : .failed)
+            #expect(owner.record { try $0.editSession(primary) { $0.state = state } })
+            return error
+        }
+
+        /// `advancePendingIfReady` as `finish` schedules it: a hold decision is
+        /// written; only `.activate` appends P (and enqueues its job).
+        mutating func advance(foreground: Bool = true) -> Bool {
+            switch activation(foreground: foreground) {
+            case .wait: return false
+            case .hold(let reason): _ = try? owner.transact { try $0.holdPending(reason) }; return false
+            case .activate:
+                guard (try? owner.transact { _ = try $0.activatePending(scope: .general) }) != nil else { return false }
+                frozen = nil
+                return true
+            }
+        }
+
+        /// `resumePending`: an explicit continue requeues P with a newly frozen configuration.
+        mutating func resume() throws {
+            try owner.transact { try $0.requeuePending(selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: nil,
+                                                       backend: .ddi, clipboardAllowed: true, ordinal: 3) }
+            frozen = "P 重新冻结的配置"
+        }
+    }
+
+    /// Failure, system expiry (in the background, then back in the
+    /// foreground) and startup failure before the permit: P is held, never
+    /// appended to history, and no job (so no model or phone work) follows.
+    @Test func aTurnEndingBeforeItsPermitHoldsTheDetachedRequest() throws {
+        for foreground in [true, false] {
+            var line = try Line(permitted: false)
+            #expect(line.activation() == .activate) // the gate alone does not know T1 failed
+            #expect(line.end(PrimaryTurnEnd(permitted: false, successful: false, foreground: foreground,
+                                            stopEpochAtAccept: 0, stopEpochNow: 0)) == nil)
+            #expect(line.pending?.state == .held(reason: "上一轮未正常完成；确认后再继续。") && line.frozen == nil)
+            #expect(line.activation() == .wait && line.activation(foreground: false) == .wait && !line.advance())
+            #expect(line.file.primary?.messages.map(\.id) == [line.t1.id])
+            #expect(line.file.assistant.scopeIndex.scopedRoot(line.t1.id)?.dispatchAuthorized == false)
+            if case .detached = line.pending?.prompt {} else { Issue.record("P left the detached state") }
+            // Only an explicit continue queues it again.
+            try line.resume()
+            #expect(line.activation() == .activate)
+        }
+    }
+
+    /// Host review follow-up: the hold is a transaction, so a failed hold
+    /// write leaves storage ready and P queued, and the draft restore and the
+    /// `finish` record after it are written successfully. P still never
+    /// follows on its own: its frozen configuration went before the hold was
+    /// tried, so the advancement `finish` schedules holds it again (a second
+    /// failed hold leaves it queued, still not activated); only an explicit
+    /// continue lets it start.
+    @Test func aFailedHoldWriteNeverLetsTheRequestFollowOnItsOwn() throws {
+        for permitted in [false, true] {
+            var line = try Line(permitted: permitted)
+            line.writer.failures = 1
+            let error = line.end(PrimaryTurnEnd(permitted: permitted, successful: false, foreground: true,
+                                                stopEpochAtAccept: 0, stopEpochNow: 0))
+            #expect(error != nil, "\(permitted)")
+            // The hold was not written; every later write was.
+            #expect(line.owner.health == .ready && line.pending?.state == .queued, "\(permitted)")
+            #expect(line.writer.writes == (permitted ? 1 : 2) && line.file.primary?.state == .failed, "\(permitted)")
+            #expect(line.activation() == .hold("需要重新确认模型与项目后继续"), "\(permitted)")
+            line.writer.failures = 1
+            #expect(!line.advance() && line.pending?.state == .queued, "\(permitted)")
+            #expect(!line.advance() && line.pending?.state == .held(reason: "需要重新确认模型与项目后继续"), "\(permitted)")
+            #expect(line.file.primary?.messages.map(\.id) == [line.t1.id], "\(permitted)")
+            try line.resume()
+            #expect(line.advance() && line.file.primary?.messages.map(\.id) == [line.t1.id, line.p.id], "\(permitted)")
+        }
+    }
+
+    /// A user Stop keeps its own hold; a turn that failed after its permit
+    /// holds as before; a completed foreground turn still advances P.
+    @Test func stopFailureAfterPermitAndCompletionKeepTheirRoutes() throws {
+        var stopped = try Line(permitted: false)
+        #expect(stopped.end(PrimaryTurnEnd(permitted: false, successful: false, foreground: true, stopEpochAtAccept: 0,
+                                           stopEpochNow: 1), cancelled: true) == nil)
+        #expect(stopped.pending?.state == .held(reason: "已停止；确认后再继续。"))
+        #expect(stopped.activation(stopEpochNow: 1) == .wait)
+
+        var failed = try Line(permitted: true)
+        #expect(failed.end(PrimaryTurnEnd(permitted: true, successful: false, foreground: true, stopEpochAtAccept: 0,
+                                          stopEpochNow: 0)) == nil)
+        #expect(failed.pending?.state == .held(reason: "上一轮未正常完成；确认后再继续。") && failed.activation() == .wait)
+
+        var completed = try Line(permitted: true)
+        #expect(completed.end(PrimaryTurnEnd(permitted: true, successful: true, foreground: true, stopEpochAtAccept: 0,
+                                             stopEpochNow: 0)) == nil)
+        #expect(completed.pending?.state == .queued && completed.frozen != nil && completed.activation() == .activate)
+        #expect(completed.advance() && completed.file.primary?.messages.map(\.id) == [completed.t1.id, completed.p.id])
+
+        // A promoted request is the ended turn's own receipt: not settled here.
+        let promoted = try Line(permitted: true)
+        try promoted.owner.transact { _ = try $0.activatePending(scope: .general) }
+        #expect(promoted.file.pendingSettlement(after: PrimaryTurnEnd(permitted: false, successful: false, foreground: true,
+                                                                      stopEpochAtAccept: 0, stopEpochNow: 0)) == nil)
+    }
+}
+
 /// Sync applies only portable session data from the complete local file and
 /// turns primary deletion/divergence into explicit recovery notices.
 struct AssistantSyncTests {

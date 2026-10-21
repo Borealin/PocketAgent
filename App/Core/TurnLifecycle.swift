@@ -19,6 +19,77 @@ nonisolated enum PendingAdvancePolicy {
     }
 }
 
+/// The end of a primary-line turn as the controller settles it, before
+/// `finish` gives the line back (which lets a queued request advance).
+nonisolated struct PrimaryTurnEnd: Equatable, Sendable {
+    /// The startup permit was committed.
+    var permitted: Bool
+    /// The run completed (counts only after the permit).
+    var successful: Bool
+    var foreground: Bool
+    /// The Stop epoch when the pending request was accepted, and now.
+    var stopEpochAtAccept: UInt64
+    var stopEpochNow: UInt64
+}
+
+nonisolated extension HistoryFile {
+    /// What the end of a primary turn means for a detached queued pending
+    /// request; nil when there is none (a promoted request is the ended
+    /// turn's own receipt and follows `NotStartedRoute`). It stays queued
+    /// only after a turn that started and completed, in the foreground, with
+    /// no Stop since it was accepted. Every other end holds it, including a
+    /// failure, system expiry or preparation failure before the startup
+    /// permit; the caller writes the hold before `finish`.
+    func pendingSettlement(after end: PrimaryTurnEnd) -> PendingAdvanceDecision? {
+        guard let pending = assistant.pendingNext, pending.state == .queued, case .detached = pending.prompt else { return nil }
+        return PendingAdvancePolicy.afterPrimaryTurn(successful: end.permitted && end.successful, foreground: end.foreground,
+                                                      stopEpochAtAccept: end.stopEpochAtAccept, stopEpochNow: end.stopEpochNow)
+    }
+}
+
+/// The controller's settlement of the pending request when a primary turn
+/// ends (`ChatController.notStarted` / `finished`, before `finish`).
+@MainActor
+enum PrimaryTurnSettlement {
+    /// When the end holds the request, the in-memory frozen configuration,
+    /// the only authority for automatic activation, is dropped before the
+    /// hold is written. The hold is a transaction: a failed write leaves
+    /// storage ready and the request queued, and later writes (the draft
+    /// restore, `finish`'s record) may succeed. None of that lets it follow
+    /// on its own: without a frozen configuration `PendingActivation` holds
+    /// it again; only an explicit continue freezes a new one. Returns the
+    /// hold write's error for the caller's notice.
+    static func settle<Frozen>(_ owner: HistoryOwner, after end: PrimaryTurnEnd, frozen: inout Frozen?) -> (any Error)? {
+        guard case .hold(let reason)? = owner.file.pendingSettlement(after: end) else { return nil }
+        frozen = nil
+        do { try owner.transact { try $0.holdPending(reason) } } catch { return error }
+        return nil
+    }
+}
+
+/// Whether the single pending request is activated now
+/// (`ChatController.advancePendingIfReady`); only `.activate` appends it to
+/// history and enqueues a job.
+nonisolated enum PendingActivation: Equatable, Sendable {
+    /// Not now: nothing detached and queued, the line busy, steering still
+    /// settling, a recovery notice, unusable storage or the background.
+    case wait
+    /// It cannot follow automatically: held with this reason.
+    case hold(String)
+    case activate
+
+    static func decide(pending: PendingNext?, storageReady: Bool, lineBusy: Bool, settlingSteers: Int,
+                       primaryNotice: PrimaryNotice?, foreground: Bool, frozenAvailable: Bool,
+                       stopEpochAtAccept: UInt64, stopEpochNow: UInt64) -> PendingActivation {
+        guard storageReady, let pending, pending.state == .queued, case .detached = pending.prompt, !lineBusy,
+              settlingSteers == 0, primaryNotice == nil, foreground else { return .wait }
+        guard frozenAvailable, stopEpochNow == stopEpochAtAccept else {
+            return .hold(frozenAvailable ? "已停止；确认后再继续" : "需要重新确认模型与项目后继续")
+        }
+        return .activate
+    }
+}
+
 nonisolated enum TurnEffectPolicy {
     /// Why a job may not issue a new phone/model effect now, or nil. A job
     /// that is no longer the current owner of its session, not the engine's

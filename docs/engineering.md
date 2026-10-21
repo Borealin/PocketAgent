@@ -394,7 +394,18 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   the request also drops every raw message of roots that summary covered (the
   rest of a cut root, or a later run of an interleaved root), registers none of
   them and the status says so (`context_exclusion` in the opt-in log); history is
-  unchanged. Before each summary fold is sent, `SummaryMaintenance` checks
+  unchanged. An explicit reference is a request-only quote that keeps its
+  reference by its own ID (`QuotedReference`, no quoted text). Each request
+  rechecks it against the latest history (`AssistantContext.quotedWindow`): the
+  window must still exist in its session with the referenced digest and nothing
+  in it may be masked. A quote whose window was deleted, rewritten by a sync or
+  masked by a forget is dropped (said in the status and logged as a count only)
+  and nothing of it is registered; the request registers the window's current
+  sources (known roots, or exact messages without one) of each quote it carries
+  in the same transaction as its other reads, so a later forget of what the
+  quote showed stops the turn. A source root deleted after that registration
+  stays known to the forget (prune keeps a root another root read).
+  Before each summary fold is sent, `SummaryMaintenance` checks
   storage, explicit forgets (current root, fold sources, the extended summary),
   that the fold is exactly the eligible messages right after the valid tip's
   coverage (same content, each piece within its root, ending at a safe cut) and
@@ -464,7 +475,17 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   nothing; unreferenced files are collected afterwards.
 - Pending: one detached → promoted request with fair ordinals, Stop epoch,
   held/needsResume states, explicit same-ID continuation only before the permit,
-  abandon-unstarted, sync deferral and attachment retention. Continuing moves an
+  abandon-unstarted, sync deferral and attachment retention. Whenever a primary
+  turn ends, before or after its permit, the controller settles a detached
+  queued request before `finish` gives the line back
+  (`PrimaryTurnSettlement.settle` with `HistoryFile.pendingSettlement`): it
+  stays queued only after a turn that started and completed in the foreground
+  with no Stop since it was accepted; activation then needs
+  `PendingActivation.activate`. A hold first drops the in-memory frozen
+  configuration (the only authority for automatic activation), then writes the
+  hold; if that transaction fails, later successful writes still cannot let it
+  start (activation without a frozen configuration holds it), only an explicit
+  continue re-freezes it. Continuing moves an
   unauthorized promoted root to the project confirmed now in the same write
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
@@ -672,6 +693,49 @@ Confirmed problems found during implementation review and fixed:
   gated model now checks cancellation after each await before dispatch; a
   regression suspends the preparation, stops, releases it and requires no
   provider call and no stream trace (the control dispatches once).
+- Cross-review 2026-10-21 (source-confirmed, not reproduced on a device): an
+  explicit reference lost its sources. The quote is a synthetic message and its
+  root was only added to the raw roots, which each request keeps only while a
+  raw message of that root is in the request, so the quoted root was never
+  registered and no ID mapped the quote back. Reachable path: root A of the old
+  primary read or contributed memory E; a diverged sync was resolved with a new
+  empty primary line (old line kept as a task); turn B quoted A. Forgetting E
+  masked A but could not reach B, so B kept running and later requests still
+  carried the quote. Quotes now keep their sources (see Context); Core
+  regressions through the pinned runtime, the gate and the production
+  preparer cover a read and a contributed root and an unknown synchronized
+  window (the forget stops B: one request, the next tool refused), a forget
+  between building the context and the first request (quote dropped, nothing
+  registered), an unrelated forget, and an already masked source.
+  Host review follow-up: that first fix still checked only masks per request.
+  Deleting the old line between building B's context and its first request
+  pruned A (nobody had read it yet) with its memory reads, the next request
+  still sent the cached quote and its registration skipped the missing root,
+  so a later forget of E found no reader and later requests kept carrying the
+  forgotten fact (reproduced in Core through the production delete, now
+  `HistoryFile.deleteSession`); a sync rewriting the quoted reply likewise
+  left the stale text in every request. Each request now rechecks the window's
+  existence, digest and masks; regressions cover deletion and rewrite before
+  the first request for all three sources (quote never sent, nothing
+  registered, the forget does not stop B) and deletion after the quote was sent
+  (not resent, A kept as unknown with its reads, a later forget still stops B).
+- Cross-review 2026-10-21: an ordinary primary send that ended before its permit
+  (maintenance failure, system expiry, startup failure) went through the
+  never-started route and `finish`, which schedules `advancePendingIfReady`;
+  that only checked the queue, foreground and Stop epoch, so another detached
+  request could start without confirmation after a failed turn. The settlement
+  now runs for never-started primary turns too, before `finish`; Core tests drive
+  the controller's `pendingSettlement` and `PendingActivation` for failure and
+  expiry (foreground and background), Stop, failure after the permit and the
+  completed turn that still advances. Host review follow-up: the settlement
+  ignored a failed hold write. The hold is a transaction, so storage stayed
+  ready and the request queued with its frozen configuration; the draft restore
+  and `finish` record then wrote successfully and the advancement `finish`
+  schedules activated the request (reproduced in Core with a single failed
+  write). `PrimaryTurnSettlement.settle` now drops the frozen configuration
+  before writing the hold; the regression runs it on a real `HistoryOwner`
+  whose hold write fails once (and a second hold write too), before and after
+  the permit, and requires no activation until an explicit continue.
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a
@@ -1096,9 +1160,11 @@ acknowledgement. The model
 confirms focus or uses node-bound press_keys before submission. Callback and
 empty-value compatibility limits, and completed selected-device acceptance, are recorded in
 [devicehub-control.md](devicehub-control.md#ax-final-text-route). Real search also exposed a fractional-frame
-round-trip counterexample that can falsely trip AX's strict frame check, and a
-unreadable App Store/Safari foreground after submission. These are recorded as
-compatibility/observation limits; submitted errors require a fresh read, never replay.
+round-trip counterexample that could falsely trip AX's strict frame check (now
+parsed bit-exactly with serde_json `float_roundtrip`; see "Review fixes
+(2026-10-21)" below), and a unreadable App Store/Safari foreground after
+submission. The latter is recorded as an observation limit; submitted errors
+require a fresh read, never replay.
 A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard
@@ -1196,9 +1262,9 @@ downloads and mount share 180 s (`DDIImagePreparation`), downloads race a
 cancellable URLSession task group against the turn's stop check and are
 committed only while the preparation stands, the mount gets at most 120 s
 (`pocket_ddi_mount`; a timeout leaves the outcome unknown, nothing retries, the
-next action checks the real state); the app inventory read after `openDDI`
-is bounded at 15 s (`pocket_installed_apps`, same InstallationProxy records and
-free as before). Stop, the deadline, a revoked script lease and storage gates
+next action checks the real state); the app inventory read, which now precedes
+`openDDI`, is bounded at 15 s (`pocket_installed_apps`, same InstallationProxy
+records and free as before). Stop, the deadline, a revoked script lease and storage gates
 are rechecked between steps. The bounds hold while the native code polls
 cooperatively; synchronous work (loading image assets) is not preempted.
 
@@ -1262,6 +1328,95 @@ main request and no summary, the draft restored exactly and the new wording in
 the detail and the UI; real main and summary requests logged only the allowlisted
 fields. The provider interruption's cause stays unknown; timeouts, HTTP/2 and
 retries are unchanged.
+
+### Review fixes (2026-10-21)
+
+A three-model cross-review of 879358c, arbitrated against the source, confirmed
+these DDI/input/build defects (the assistant-side ones are in the long-lived
+section below). PR #1 (devicehub-control), now on main, fixed the same defects
+independently; the rebase onto it kept these implementations inside this
+branch's bounded calls, watcher, Stop and cleanup, with one `DDIOperationFailure`
+(in PR #1's file) and PR #1's regressions beside these. PR #1's Gemini wire-schema
+projection (`ProviderToolSchema`) lived in a model wrapper this branch replaced; it
+now runs last in the commit-gated per-request preparation, after phone and memory
+preparation, so the budget estimate still sees the strict schema.
+
+- Refusals before any effect disabled the turn's input. Native code poisoned the
+  session after any failed non-read operation, so a target/foreground/frame
+  check or an unavailable clipboard service refused before touching the phone
+  still blocked every later input of the turn; Swift marked the action as
+  possibly sent unless the error was one of a few recognized strings. Each
+  `pocket_ddi_call` now records whether its request started a physical effect
+  (`effect_started`, set right before the first touch, button, key or owned
+  keyboard, launch, clipboard write or AX setter) and, once admitted, returns
+  a result object instead of an error: `ok`, `action_issued`, `replay_allowed`
+  false, and for failures `code` (`ddi_preflight_refused`,
+  `ddi_observation_failed`, `ddi_effect_unconfirmed`, `ddi_session_poisoned`,
+  `ddi_cleanup_unconfirmed`), `message` and `requires_new_turn`. Only a started
+  effect or an unconfirmed release disables input for the session; reads stay
+  available. A refused expiry at entry stays the typed not-dispatched error.
+  `DDIOperationFailure` decodes the metadata strictly (JSON booleans, every
+  field, replay never allowed); `DDIControl` records each call in
+  `NativeEffectReports` (an effect reported or not ruled out, or a refusal
+  reporting none) and maps refusals to the existing typed issues. The executor
+  restores the action flag only when every native call of that operation
+  reported no started effect; earlier effects of the call, a sent status-band
+  gesture (unreported only when its own call proved nothing was sent),
+  uncertain effects, unconfirmed releases and the app-wide release latch are
+  kept. Results say `requires_new_turn` or `requires_replan` and attach a fresh
+  read-only observation; nothing is replayed.
+- Default paste confirmed a placeholder. With nonempty expected text equal to
+  the field's placeholder, a field still reporting its placeholder as value was
+  `input_verified`. Nonempty text now needs value == text and value !=
+  placeholder (the AX route already did); clear-only keeps empty-or-placeholder.
+- `type_text` with `method: null` was refused. The pinned AgentKit strict
+  schema makes the optional field required and nullable and its validator
+  passes null through as omission, so the host now treats null exactly as an
+  omitted method (default paste, clipboard denial unchanged); other types are
+  still refused (Core test through the pinned runtime's validation).
+- Fractional AX frames drifted by one ULP through serde_json's default float
+  parser; `Native/idevice.patch` enables `float_roundtrip` (see
+  devicehub-control.md); the comparison stays exact.
+- A failed app catalog read left an open DDI session that the next tool of the
+  same turn took as ready, so `find_apps` could report an empty catalog and
+  name/bundle opening refused real apps. `DDIServiceReadiness` now reads the
+  catalog before opening the session and treats a connection as ready only with
+  both (the catalog flag lives on the connection); a failure is an error and the
+  next preparation reads the catalog again. Stop, lease, deadline and expiry
+  checks run before each step.
+- An existing build checkout with the previous patch applied could not take an
+  upgraded patch (the reverse check failed on the new hunk, the forward check on
+  the shared applied one). Bootstrap now keeps idevice checkouts under
+  `.deps/idevice-pocketagent/<revision>-<patch digest>`: objects come from a
+  bare cache (seeded read-only from a legacy checkout at the pin), the patched
+  tree is built in staging and published by one rename, interrupted staging is
+  discarded, and a checkout whose HEAD, state or tree (ignoring the copied
+  `Native/ddi` and generated header) differs is refused with its changed paths,
+  never reset. The legacy `.deps/idevice` is left untouched. The tree check
+  first excluded the generated paths with negative pathspecs on `git add .`,
+  which fails once the ignored `ffi/idevice.h` exists, so every bootstrap after
+  the first build stopped (reproduced by the fixture with that header ignored).
+  It now lists tracked and non-ignored paths (NUL-separated), drops the
+  generated ones and force-adds exactly those, as literal pathspecs, to a
+  separate empty index; the checkout's own index and ignored files are not
+  touched.
+- Preparing empty text was recorded as an effect: the DDI paste route wrapped
+  the no-op clipboard preparation for `text=""` in the effect bracket, so a
+  later node refusal reported a possible action. Only a nonempty paste
+  preparation (a clipboard write) is an effect now.
+
+Verification boundary: the Core suite (402 tests in 81 suites after the host
+review follow-ups; the new and changed suites also under Release), the
+distribution tests (29, including the bootstrap fixtures with an ignored
+generated header) and the DDI native unit tests (42, host, through a scratch
+crate outside Git that compiles this `Native/ddi` against the pinned idevice
+sources and lock with the patched serde_json features) pass; reverting each
+Core or native fix (preparer quote handling and its per-request window check,
+settlement and its frozen-configuration drop, effect reports, placeholder
+check, null method, catalog order, empty-text predicate, `float_roundtrip`,
+the enumerated tree check) makes its regression fail. The App-target wiring
+was not compiled in those runs; the iOS build, the IPA and device behaviour of
+these changes are not verified here.
 
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current

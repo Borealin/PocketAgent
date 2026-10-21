@@ -15,6 +15,8 @@ protocol PhoneControl: AnyObject {
     /// Native calls handed to the device so far (DDI); an effect whose failure
     /// is a refusal before dispatch is reported unsent only if this did not move.
     var dispatchedCalls: Int { get }
+    /// What native calls reported about effects so far (DDI; WDA reports none).
+    var nativeEffects: NativeEffectReports { get }
     func prepare() async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
@@ -49,6 +51,7 @@ final class WDAControl: PhoneControl {
     var budget: (() -> TimeInterval?)?
     var turnEnd: Date?
     var dispatchedCalls: Int { 0 }
+    var nativeEffects: NativeEffectReports { NativeEffectReports() }
     init(_ model: Model) { self.model = model }
     func prepare() async throws {
         guard let turnEnd else { throw PhonePreparationStopped() }
@@ -137,6 +140,7 @@ final class DDIControl: PhoneControl {
     private let dropReleaseConfirmation = DeviceSettings.dropInputReleaseConfirmation
     private var refuseNextDispatch = DeviceSettings.refuseNextDDIDispatch
     private(set) var dispatchedCalls = 0
+    private(set) var nativeEffects = NativeEffectReports()
     /// Native entry's refusal of a passed expiry, exactly as `check` reports
     /// it (`ffi_err!`: code 16 `InternalError`, debug-formatted): nothing ran.
     static let nativeNotDispatched = #"idevice 16/0: InternalError("DDI call budget missing or exhausted; not dispatched")"#
@@ -232,6 +236,7 @@ final class DDIControl: PhoneControl {
         if let stall, stall != "screenshot" { requestObject["diagnostic_stall"] = stall }
         if dropReleaseConfirmation { requestObject["diagnostic_release_unconfirmed"] = true }
         let result: Data
+        let dispatchedBefore = dispatchedCalls
         do { result = try await native(op, encode: { expiresAt in
             requestObject["expires_at_ms"] = expiresAt
             return String(decoding: try JSONSerialization.data(withJSONObject: requestObject), as: UTF8.self)
@@ -250,32 +255,42 @@ final class DDIControl: PhoneControl {
         } } catch let refused as InputReleaseUnconfirmed { throw refused }
         catch let refused as PhoneCallNotDispatched { throw refused }
         catch let failure as DDIOperationFailure {
-            if ["snapshot", "foreground"].contains(op),
-               failure.message.contains("AX foreground or root changed") ||
-               (failure.message.contains("AX request type") && failure.message.contains("refused: 8")) {
-                throw PhoneObservationIssue.foregroundChanged
-            }
-            if ["snapshot", "foreground"].contains(op),
-               failure.message.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
-            // Native coordinate-effect refusals happen before any touch.
-            if !failure.actionIssued, failure.message.contains("; not tapped") { throw PhoneObservationIssue.targetCovered }
-            throw failure
+            nativeEffects.record(failure)
+            // An effect that started is uncertain: never mapped to a refusal.
+            if failure.actionIssued { throw failure }
+            throw Self.refusal(failure, op: op)
         } catch {
+            // No native metadata: once handed over, an effect cannot be ruled out.
+            if dispatchedCalls > dispatchedBefore { nativeEffects.possible += 1 }
             if error.localizedDescription.contains("AX foreground or root changed") { throw PhoneObservationIssue.foregroundChanged }
-            // The device can refuse attributes with error 8 during a UI transition.
-            // The executor retries only observation, after the old AX socket closes.
-            if ["snapshot", "foreground"].contains(object["op"] as? String ?? ""),
-               error.localizedDescription.contains("AX request type"),
-               error.localizedDescription.contains("refused: 8") { throw PhoneObservationIssue.foregroundChanged }
             if error.localizedDescription.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
-            // Native coordinate-effect refusals happen before any touch.
             if error.localizedDescription.contains("; not tapped") { throw PhoneObservationIssue.targetCovered }
-            let operation = object["op"] as? String ?? "request"
-            throw failure("DDI \(operation)：\(error.localizedDescription)")
+            throw failure("DDI \(op)：\(error.localizedDescription)")
         }
+        guard let object = try? JSONSerialization.jsonObject(with: result) as? [String: Any] else {
+            nativeEffects.possible += 1
+            throw failure("DDI 返回格式无效。")
+        }
+        _ = try nativeEffects.record(result: object)
         try cancellationCheck?()
-        guard let object = try JSONSerialization.jsonObject(with: result) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
         return object
+    }
+
+    /// A native refusal before any effect of its request, as the executor's
+    /// typed issues where one applies (observation retries, fresh recovery,
+    /// "not executed"); otherwise the failure itself with its metadata.
+    private static func refusal(_ failure: DDIOperationFailure, op: String) -> any Error {
+        let text = failure.message
+        if text.contains("AX foreground or root changed") { return PhoneObservationIssue.foregroundChanged }
+        // The device can refuse attributes with error 8 during a UI transition.
+        // The executor retries only observation, after the old AX socket closes.
+        if ["snapshot", "foreground"].contains(op), text.contains("AX request type"), text.contains("refused: 8") {
+            return PhoneObservationIssue.foregroundChanged
+        }
+        if text.contains("DDI display changed") { return PhoneObservationIssue.geometryChanged }
+        // Native coordinate-effect refusals happen before any touch.
+        if text.contains("; not tapped") { return PhoneObservationIssue.targetCovered }
+        return failure
     }
     func activeApp() async throws -> String { try await call(["op": "foreground"])["app"] as? String ?? "" }
     func readTree() async throws -> PhoneTree {

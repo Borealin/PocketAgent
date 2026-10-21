@@ -424,19 +424,21 @@ Real-search checks exposed two further limits in the current implementation:
   AX replacement target frame changed, and a fresh field read still shows its
   placeholder. Expanding the search page and freshly observing its ordinary field
   allows AX input and submission; default paste also accepts the half-height entry.
-  The original serde_json 1.0.149 build enabled default/std without
-  float_roundtrip. A local Swift JSONSerialization to Rust counterexample with
-  the observed fractional frame changes one coordinate by one f64 ULP, so strict
-  Geometry equality can reject a numerically unchanged field. This transport
-  defect is reproduced locally; the exact expected/fresh operands from the failed
-  device call were not captured, so concurrent layout motion is not fully excluded
-  for that specific failure. The revised FFI manifest enables float_roundtrip and
-  its native regression preserves the exact fractional-frame bits. No frame tolerance
-  is introduced; fresh identity, foreground, complete graph and exact hit checks stay
-  required. This fixes the reproduced transport defect but does not prove that the
-  earlier Maps refusal was caused only by numeric drift; Maps-specific acceptance
-  of that failure remains required. The renewed controlled-field and main-app
-  compatibility scope is recorded in engineering.md under confirmed integration fixes.
+  The serde_json 1.0.149 build used default/std without float_roundtrip. A
+  Swift JSONSerialization to Rust counterexample with the observed fractional
+  frame (x 23.317333333333334) parsed one f64 ULP away, so strict Geometry
+  equality could reject a numerically unchanged field. Native/idevice.patch now
+  enables float_roundtrip; a native regression parses that request through the
+  production `json_geometry` against an AX field frame with the exact bits and
+  requires equality (it fails without the feature), while one ULP still refuses.
+  The comparison stays exact; no tolerance was added. The exact expected/fresh
+  operands of the failed Maps call were not captured, so concurrent layout motion
+  is not excluded for that specific failure. This fixes the reproduced transport
+  defect but does not prove that the earlier Maps refusal was caused only by
+  numeric drift; Maps-specific acceptance of that failure remains required. Fresh
+  identity, foreground, complete graph and exact hit checks remain. The renewed
+  controlled-field and main-app compatibility scope is recorded in engineering.md
+  under confirmed integration fixes.
 - App Store and Safari submission can return AX foreground has no readable hit
   point after Return was issued. App Store later permits read-only observation
   of the actual search page. One initial page instead showed Cannot Connect; a

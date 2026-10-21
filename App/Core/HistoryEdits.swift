@@ -113,6 +113,19 @@ nonisolated extension HistoryFile {
         try editSession(sessionID) { $0.state = .running; $0.detail = "" }
     }
 
+    /// Deletes a session the caller allowed to go (never the primary line, a
+    /// session with a job or the pending request's): a tombstone is kept,
+    /// scope membership of its messages is pruned and its summaries go.
+    mutating func deleteSession(_ id: UUID, now: Date = Date()) throws {
+        sessions.removeAll { $0.id == id }
+        deletedSessions.removeAll { $0.id == id }
+        deletedSessions.append(Tombstone(id: id, deletedAt: now))
+        if selectedID == id { selectedID = primary?.id ?? sessions.first?.id }
+        let existing = Set(sessions.flatMap { $0.messages.map(\.id) })
+        try assistant.scopeIndex.prune(existing: existing)
+        assistant.compactions.removeAll { $0.sessionID == id }
+    }
+
     /// Launch recovery: active work becomes interrupted and every pending
     /// request needs an explicit decision. Nothing is rescheduled.
     mutating func recoverAfterLaunch() {

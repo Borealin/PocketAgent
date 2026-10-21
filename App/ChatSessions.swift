@@ -397,15 +397,7 @@ final class ChatController: ObservableObject {
 
     func delete(_ id: UUID) {
         guard canDelete(id), storageReady else { return }
-        let ok = transact { file in
-            file.sessions.removeAll { $0.id == id }
-            file.deletedSessions.removeAll { $0.id == id }
-            file.deletedSessions.append(Tombstone(id: id, deletedAt: Date()))
-            if file.selectedID == id { file.selectedID = file.primary?.id ?? file.sessions.first?.id }
-            let existing = Set(file.sessions.flatMap { $0.messages.map(\.id) })
-            try file.assistant.scopeIndex.prune(existing: existing)
-            file.assistant.compactions.removeAll { $0.sessionID == id }
-        }
+        let ok = transact { try $0.deleteSession(id) }
         guard ok else { return }
         statuses[id] = nil
         imports = imports.filter { $0.value.sessionID != id }
