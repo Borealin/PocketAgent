@@ -4,30 +4,37 @@ import Synchronization
 import Testing
 @testable import PocketAgentCore
 
-/// Streams scripted SSE chunks with delays; records cancellation.
+/// Streams scripted SSE chunks with delays; records cancellation. Each request
+/// carries its script's label in its URL, so a later script never takes over
+/// an earlier request.
 private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
     struct Script: Sendable {
         var chunks: [String] = []
         var delay: Double = 0
         var finish = true
-        /// Key of this load's progress in `loads`.
-        var label = ""
+        /// Key of this request's script and progress.
+        var label = UUID().uuidString
     }
     enum Load: Sendable { case started, delivered, interrupted }
-    static let script = Mutex(Script())
+    static let scripts = Mutex<[String: Script]>([:])
     static let stopped = Mutex(0)
     /// Started → delivered (every chunk handed over) or interrupted (stopped before that).
     static let loads = Mutex<[String: Load]>([:])
+    /// Chunks handed over per load.
+    static let handed = Mutex<[String: Int]>([:])
     private let cancelled = Mutex(false)
-    private let label = Mutex("")
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "consume.pocketagent.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    private var label: String { request.url!.pathComponents[1] }
+
     override func startLoading() {
-        let script = Self.script.withLock { $0 }
-        label.withLock { $0 = script.label }
-        Self.loads.withLock { $0[script.label] = .started }
+        let label = label
+        guard let script = Self.scripts.withLock({ $0[label] }) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return
+        }
+        Self.loads.withLock { $0[label] = .started }
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "text/event-stream"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -37,9 +44,10 @@ private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
                 if cancelled.withLock({ $0 }) { return }
                 if script.delay > 0 { Thread.sleep(forTimeInterval: script.delay) }
                 if cancelled.withLock({ $0 }) { return }
+                Self.handed.withLock { $0[label, default: 0] += 1 }
                 client?.urlProtocol(self, didLoad: Data(chunk.utf8))
             }
-            Self.loads.withLock { if $0[script.label] == .started { $0[script.label] = .delivered } }
+            Self.loads.withLock { if $0[label] == .started { $0[label] = .delivered } }
             if script.finish, !cancelled.withLock({ $0 }) { client?.urlProtocolDidFinishLoading(self) }
         }
     }
@@ -47,8 +55,8 @@ private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {
         cancelled.withLock { $0 = true }
         Self.stopped.withLock { $0 += 1 }
-        let key = label.withLock { $0 }
-        Self.loads.withLock { if $0[key] == .started { $0[key] = .interrupted } }
+        let label = label
+        Self.loads.withLock { if $0[label] == .started { $0[label] = .interrupted } }
     }
 }
 
@@ -60,12 +68,13 @@ private func eventually(_ condition: () -> Bool) async throws -> Bool {
 }
 
 private func provider(_ script: TimedSSEProtocol.Script) -> AgentProviderClient {
-    TimedSSEProtocol.script.withLock { $0 = script }
+    TimedSSEProtocol.scripts.withLock { $0[script.label] = script }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [TimedSSEProtocol.self]
     configuration.timeoutIntervalForRequest = 30
     return AgentProviderClient(
-        provider: ModelProvider(name: "t", apiFormat: .chatCompletions, inferenceURL: "https://consume.pocketagent.test/v1/chat"),
+        provider: ModelProvider(name: "t", apiFormat: .chatCompletions,
+                                inferenceURL: "https://consume.pocketagent.test/\(script.label)/v1/chat"),
         model: AIModel(id: "m"), secret: "", session: URLSession(configuration: configuration))
 }
 
@@ -95,21 +104,24 @@ struct ConsumeIntegrationTests {
 
     @Test func oneDeadlineIsSharedAcrossFolds() async throws {
         // A later fold gets only what is left of the turn's one budget, never a
-        // fresh one: `now:` started the production 150 s budget 149 s ago, as
-        // earlier folds would have. The fold streams 30 s of real chunks (a
-        // fixture bound a reset would let finish) until that end stops it.
+        // fresh one: `now:` started the production 150 s budget 145 s ago, as
+        // earlier folds would have. The fold streams 8 s of real chunks, about
+        // 3 s past that end (a fixture bound): a per-fold reset, or a stop
+        // that much later, lets it finish.
         let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，本轮不使用新的摘要")
-        let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 149)
+        let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 145)
         let slow = { (label: String) in
-            TimedSSEProtocol.Script(chunks: (0..<300).map { delta("片段\($0)") } + [stop], delay: 0.1, label: label)
+            TimedSSEProtocol.Script(chunks: (0..<80).map { delta("片段\($0)") } + [stop], delay: 0.1, label: label)
         }
-        let streaming = UUID().uuidString, next = UUID().uuidString
+        let streaming = slow(UUID().uuidString), next = UUID().uuidString
         await #expect(throws: overrun) {
-            try await StreamingSummary.run(request, producer: producer(provider(slow(streaming))), deadline: shared, idleSeconds: 60)
+            try await StreamingSummary.run(request, producer: producer(provider(streaming)), deadline: shared, idleSeconds: 60)
         }
         #expect(shared.remaining <= 0)
-        // The stop reached the real transfer: a load that started never delivered its whole stream.
-        #expect(try await eventually { [nil, .interrupted].contains(TimedSSEProtocol.loads.withLock { $0[streaming] }) })
+        // The stop reached the real transfer: it started, handed over content and never its whole stream.
+        #expect(try await eventually { TimedSSEProtocol.loads.withLock { $0[streaming.label] } == .interrupted })
+        let handed = TimedSSEProtocol.handed.withLock { $0[streaming.label] ?? 0 }
+        #expect(handed > 0 && handed < streaming.chunks.count, "handed over \(handed) chunks")
         // Spent: the next fold of the same budget is refused before sending a request.
         await #expect(throws: overrun) {
             try await StreamingSummary.run(request, producer: producer(provider(slow(next))), deadline: shared, idleSeconds: 60)

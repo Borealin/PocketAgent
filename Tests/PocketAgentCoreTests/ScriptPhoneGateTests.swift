@@ -31,10 +31,20 @@ struct ScriptPhoneGateTests {
         func write(_ data: Data) throws { if lock.withLock({ broken }) { throw CocoaError(.fileWriteOutOfSpace) } }
     }
 
+    /// Every helper process a run launched.
+    private final class Launched: @unchecked Sendable {
+        private let lock = NSLock()
+        private var processes: [Process] = []
+        var count: Int { lock.withLock { processes.count } }
+        var anyRunning: Bool { lock.withLock { processes.contains { $0.isRunning } } }
+        func add(_ process: Process) { lock.withLock { processes.append(process) } }
+    }
+
     private struct Run {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("pa-gate-" + UUID().uuidString)
         let paths: WorkspacePaths
         let helper: URL
+        let launched = Launched()
         init() throws {
             let root = base.appendingPathComponent("project")
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -53,19 +63,24 @@ struct ScriptPhoneGateTests {
                                    "POCKETAGENT_TOKEN": token, "POCKETAGENT_PHONE_TIMEOUT": "10", "PATH": "/usr/bin:/bin"]
             process.standardOutput = Pipe()
             try process.run()
+            launched.add(process)
+            // Whatever ends the call (status, fixture bound, cancellation, a
+            // throw) leaves no helper running.
+            defer {
+                if process.isRunning {
+                    process.terminate()
+                    process.waitUntilExit()
+                }
+            }
             let deadline = Date().addingTimeInterval(15)
             while process.isRunning, Date() < deadline {
                 // As the script runner does: after revocation pending requests are refused at once.
                 if lease.isActive { await bridge.service() } else { await bridge.refusePending() }
                 try await Task.sleep(for: .milliseconds(30))
             }
-            // Past the fixture bound (the helper itself waits 10 s): stop it and
-            // fail, never read the status of a running process (an exception).
-            guard !process.isRunning else {
-                process.terminate()
-                process.waitUntilExit()
-                throw HelperStillRunning()
-            }
+            // Past the fixture bound (the helper itself waits 10 s): fail, never
+            // read the status of a running process (an exception).
+            guard !process.isRunning else { throw HelperStillRunning() }
             return process.terminationStatus
         }
     }
@@ -144,5 +159,19 @@ struct ScriptPhoneGateTests {
         #expect(try await run.call(bridge, lease: lease, ["press_home"]) == refused)
         #expect(executed.all == ["press_home", "press_home"])
         #expect(ScriptPhoneAdmission.refusal(decision: .allow, leaseActive: false, effectsBlocked: nil) == ScriptPhoneAdmission.revoked)
+    }
+
+    /// A call cancelled while its helper waits for an answer stops that
+    /// helper, instead of leaving it to the helper's own 10 s wait.
+    @Test func aCancelledCallLeavesNoHelperRunning() async throws {
+        let run = try Run()
+        let owner = HistoryOwner(file: HistoryFile.initial(selection: nil), writer: { _ in })
+        let lease = ScriptLease(), job = Job(), executed = Executed()
+        let bridge = bridge(run, lease: lease, owner: owner, job: job, executed: executed)
+        // Cancelled before it runs: the helper is launched, then the call's first wait throws.
+        let call = Task { try await run.call(bridge, lease: lease, ["press_home"]) }
+        call.cancel()
+        await #expect(throws: CancellationError.self) { try await call.value }
+        #expect(run.launched.count == 1 && !run.launched.anyRunning)
     }
 }

@@ -98,18 +98,22 @@ struct StreamingSummaryTests {
         #expect(collector.work == 3)
     }
 
-    /// Streams real text every 50 ms for at most 30 s (a fixture bound), so
-    /// only a deadline can end it sooner; records its start and cancellation.
+    /// Streams real text every 50 ms for at least `seconds`, a fixture bound
+    /// about 3 s past the deadline it is given: only that deadline can end it
+    /// sooner, and a reset budget or a stop that much later lets it finish.
+    /// Records its start and cancellation.
     private final class Streaming: @unchecked Sendable {
         private let lock = NSLock()
         private var state = (started: false, cancelled: false)
+        private let ticks: Int
+        init(seconds: Int) { ticks = seconds * 20 }
         var started: Bool { lock.withLock { state.started } }
         var cancelled: Bool { lock.withLock { state.cancelled } }
         var producer: StreamingSummary.Producer {
             { [self] _, onEvent in
                 lock.withLock { state.started = true }
                 do {
-                    for _ in 0..<600 { try onEvent(.textDelta("…")); try await Task.sleep(for: .milliseconds(50)) }
+                    for _ in 0..<ticks { try onEvent(.textDelta("…")); try await Task.sleep(for: .milliseconds(50)) }
                 } catch is CancellationError {
                     lock.withLock { state.cancelled = true }
                     throw CancellationError()
@@ -128,37 +132,34 @@ struct StreamingSummaryTests {
             }, deadline: long, idleSeconds: 0.5)
         }
         // One maintenance budget across folds, never reset per fold. `now:`
-        // starts the production 150 s budget 149 s ago, as the turn's earlier
+        // starts the production 150 s budget 145 s ago, as the turn's earlier
         // folds would have; host load only shortens what is left of it.
         let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，本轮不使用新的摘要")
-        let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 149)
+        let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 145)
         let first = try await StreamingSummary.run(request, producer: { _, onEvent in
             try onEvent(.textDelta("摘要")); try onEvent(.finished(.completed))
         }, deadline: shared, idleSeconds: 60)
         #expect(first == "摘要")
+        // The next fold gets what is left and streams until that end stops it.
+        let stopped = Streaming(seconds: 8)
+        await #expect(throws: overrun) {
+            try await StreamingSummary.run(request, producer: stopped.producer, deadline: shared, idleSeconds: 60)
+        }
+        #expect(stopped.started && stopped.cancelled && shared.remaining <= 0)
         // Spent: the next fold of that budget is refused before its producer starts.
-        while shared.remaining > 0 { try await Task.sleep(for: .milliseconds(20)) }
-        let late = Streaming()
+        let late = Streaming(seconds: 8)
         await #expect(throws: overrun) {
             try await StreamingSummary.run(request, producer: late.producer, deadline: shared, idleSeconds: 60)
         }
         #expect(!late.started)
-        // A fold given the last second of such a budget streams until its end
-        // stops it (a reset to 150 s would let the producer finish).
-        let remainder = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 149)
-        let stopped = Streaming()
-        await #expect(throws: overrun) {
-            try await StreamingSummary.run(request, producer: stopped.producer, deadline: remainder, idleSeconds: 60)
-        }
-        #expect(stopped.started && stopped.cancelled && remainder.remaining <= 0)
         // When the turn's own deadline is the bound, the whole turn stops.
-        let turnBound = MaintenanceDeadline(turnRemaining: 0.5)
+        let turnBound = MaintenanceDeadline(turnRemaining: 3)
         #expect(turnBound.turnBound)
-        let cut = Streaming()
+        let cut = Streaming(seconds: 6)
         await #expect(throws: TurnDeadlineReached()) {
             try await StreamingSummary.run(request, producer: cut.producer, deadline: turnBound, idleSeconds: 60)
         }
-        #expect(cut.cancelled)
+        #expect(cut.started && cut.cancelled)
         #expect(!MaintenanceDeadline(turnRemaining: 600).turnBound)
         #expect(MaintenanceDeadline(turnRemaining: 600).remaining <= 150)
     }

@@ -1053,24 +1053,38 @@ probe, not kept) reproduced two of them with the previous test code in three run
 the first fold failed with the same message, and the stub, which produced on
 `DispatchQueue.global()`, had sent 0 bytes when -1001 came after 16 s; the fixed
 tests passed beside it. That the runner was starved the same way is inferred, not
-observed. The tests no longer measure host speed. Deadlines use
-`MaintenanceDeadline(now:)` with the production 150 s total started 149 s
-earlier: a fold that finishes in time succeeds, the next fold of the spent budget
-is refused before its producer starts, and a fold given the last second streams
-until that end stops it with the exact message and a cancelled producer (a
-per-fold reset lets the 30 s bounded producer finish). The consume test streams
-such a last-second fold through the pinned `consume`: a transfer that started
-never delivers its whole stream, and the next fold of that budget sends no
-request. The script gate requires the
+observed. The tests assert no total duration; what remains are fixture bounds,
+and starvation past one fails a test instead of passing it. Deadlines use
+`MaintenanceDeadline(now:)` with the production 150 s total started 145 s
+earlier: a fold that finishes in time succeeds, the next fold gets what is left
+and streams until that end stops it with the exact message and a cancelled
+producer, and a fold of the spent budget is refused before its producer starts.
+The consume test streams such a fold through the pinned `consume`, and the next
+fold of that budget sends no request. The script gate requires the
 helper's refusal status 4 (its own timeout gives 3) instead of a total time; a
 helper still running at the fixture's 15 s bound is killed and fails the test,
 where reading `terminationStatus` of a running process raised an uncaught
 NSException that ended the whole test process (shown with the old fixture). The
 image stub produces on its own thread and pauses after the first chunk past
-20 MB until the client cancels (at most 10 s, then the rest of 200 MiB), so
-exactly 21 MiB is sent; the loader's limit and 15/60 s timeouts apply unchanged.
-Temporarily resetting the budget per fold, leaving refusals unanswered or skipping
-the cancellation makes the matching test fail. Production code is unchanged; host
+20 MB until the client cancels (at most 10 s, then the rest of 200 MiB); the
+loader's limit and 15/60 s timeouts apply unchanged.
+
+Review of these test fixes found they proved less than stated; production was
+correct. The consume test passed a transfer that never started as interrupted
+and took each load's label from one global script a later fold overwrote; each
+request now carries its script's label in its URL, and the started load must be
+interrupted after handing over content. Producers of 30 s let a stop about 10 s
+past the deadline pass; they now stream for about 3 s past the deadline they are
+given (8 s for 5 s left, 6 s for a 3 s turn bound, replacing 1 s and 0.5 s
+windows to start), so a per-fold reset or a stop that late lets them finish.
+The image stub's 21 MiB is where it paused, not what the loader accepted, and a
+halved limit still passed; a chunked body of exactly 20 MiB must now load whole.
+A cancelled or throwing helper call skipped its cleanup, leaving the real
+python3 helper to its own 10 s wait; cleanup now covers every exit after launch,
+and a cancelled call must leave no helper running. Temporarily resetting the
+budget per fold, stopping 10 s late, not cancelling or never starting the
+producer, halving the image limit, leaving refusals unanswered or skipping the
+helper cleanup makes the matching test fail. Production code is unchanged; host
 runs only, the runner rerun is separate.
 
 ## DDI phone backend (2026-10-12)
