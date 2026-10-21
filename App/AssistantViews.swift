@@ -47,10 +47,14 @@ struct PrimaryNoticeCard: View {
                 Text("在你选择之前，主线不会自动开始新的执行或待处理请求。").font(.caption).foregroundStyle(.secondary)
                 ForEach(options(notice), id: \.self) { id in
                     Button("使用「\(chat.file.session(id)?.title ?? "会话")」作为主线") { chat.choosePrimary(id) }
-                        .font(.caption)
+                        .font(.caption).disabled(chat.primaryRecoveryBlocker(choosing: id) != nil)
                 }
                 Button("新建空主线（保留记忆）") { chat.startNewPrimary() }.font(.caption)
+                    .disabled(chat.primaryRecoveryBlocker(choosing: nil) != nil)
                     .accessibilityIdentifier("startNewPrimary")
+                ForEach(waiting(notice), id: \.self) { reason in
+                    Text(reason).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
@@ -75,6 +79,15 @@ struct PrimaryNoticeCard: View {
         case .diverged(let copies): ids.append(chat.primaryID); ids += copies
         }
         return ids.filter { chat.file.session($0) != nil }
+    }
+
+    /// Why disabled choices wait (a job on the primary line or on a chosen session).
+    private func waiting(_ notice: PrimaryNotice) -> [String] {
+        var reasons: [String] = []
+        for target in options(notice).map(Optional.some) + [nil] {
+            if let reason = chat.primaryRecoveryBlocker(choosing: target), !reasons.contains(reason) { reasons.append(reason) }
+        }
+        return reasons
     }
 }
 

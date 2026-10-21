@@ -1,6 +1,24 @@
 import AgentKit
 import Foundation
 
+/// A primary recovery refused because it would change the role of a session
+/// with an accepted turn. A turn keeps the role it was accepted with (the
+/// assistant's context, memory reads and forget stop, or an independent
+/// task's), and only a primary turn settles the pending request when it ends;
+/// so the user waits for the turn to end, or stops it, and chooses then.
+nonisolated enum PrimaryRecoveryError: LocalizedError, Equatable {
+    /// The current primary line has a turn.
+    case primaryBusy
+    /// The chosen session has a turn.
+    case targetBusy
+    var errorDescription: String? {
+        switch self {
+        case .primaryBusy: "当前主线的任务正在排队、准备、执行或停止；请等它结束（或先停止）后再更换主线。"
+        case .targetBusy: "所选会话的任务正在排队、准备、执行或停止；请等它结束（或先停止）后再把它设为主线。"
+        }
+    }
+}
+
 /// Applying a merged portable snapshot to the complete local file. Only
 /// portable session fields change; primary identity, memory, scope,
 /// compactions and the pending request stay local. The primary line is never
@@ -55,11 +73,26 @@ nonisolated extension HistoryFile {
         }
     }
 
+    /// Why a recovery choice cannot change roles now: the current primary line
+    /// or the chosen session (nil: a new empty line) has an accepted turn,
+    /// queued, preparing, running or cancelling. `busy` is the caller's
+    /// sessions with an accepted turn (`ChatController.jobs`); their persisted
+    /// run state repeats it. Work on any other session does not block.
+    func primaryRecoveryBlocker(choosing target: UUID?, busy: Set<UUID>) -> PrimaryRecoveryError? {
+        func working(_ id: UUID) -> Bool {
+            busy.contains(id) || session(id).map { [.queued, .running, .cancelling].contains($0.state) } == true
+        }
+        if working(assistant.primarySessionID) { return .primaryBusy }
+        if let target, working(target) { return .targetBusy }
+        return nil
+    }
+
     /// Explicit recovery choice for a missing, deleted or diverged primary:
     /// an existing session becomes the primary line. Its roots must still
     /// match their digests to stay known; old summaries revalidate.
-    mutating func choosePrimary(_ id: UUID) throws {
+    mutating func choosePrimary(_ id: UUID, busy: Set<UUID>) throws {
         guard session(id) != nil else { throw HistoryEditError.missingSession }
+        if let blocker = primaryRecoveryBlocker(choosing: id, busy: busy) { throw blocker }
         guard assistant.pendingNext == nil || assistant.pendingNext?.sessionID == id else {
             throw HistoryEditError.invalid("请先处理待处理请求，再更换主线。")
         }
@@ -72,7 +105,8 @@ nonisolated extension HistoryFile {
 
     /// Explicit recovery choice: a new empty primary line. Memory is kept; the
     /// old line stays in tasks/history and its summaries stop applying.
-    mutating func startNewPrimary(selection: ModelSelection?) throws {
+    mutating func startNewPrimary(selection: ModelSelection?, busy: Set<UUID>) throws {
+        if let blocker = primaryRecoveryBlocker(choosing: nil, busy: busy) { throw blocker }
         guard assistant.pendingNext == nil else { throw HistoryEditError.invalid("请先处理待处理请求，再新建主线。") }
         let fresh = ChatSession(selection: selection, title: ChatSession.primaryTitle)
         sessions.insert(fresh, at: 0)

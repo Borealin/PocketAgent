@@ -171,7 +171,11 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
     ])
 
     /// Same-scope, verified, unmasked, started segments of every session
-    /// (current run excluded), plus explicitly referenced windows.
+    /// (current run excluded), plus explicitly referenced windows (of any
+    /// scope) while they may still be quoted: the check every request makes
+    /// before quoting one (window present, referenced digest, nothing masked).
+    /// A window masked before the search is no candidate, so rebuilding the
+    /// list never brings it back; a mask after planning is the commit's stale.
     static func eligible(_ file: HistoryFile, scope: WorkScope, currentRoot: UUID,
                          references: [HistoryReference]) -> [SearchPageCache.Segment] {
         var result: [SearchPageCache.Segment] = []
@@ -186,12 +190,9 @@ nonisolated struct PocketMemoryAdapter: AgentMemoryAccessing {
             }
         }
         for reference in references {
-            guard let session = file.session(reference.sessionID),
-                  let first = session.messages.firstIndex(where: { $0.id == reference.firstMessageID }),
-                  let last = session.messages.firstIndex(where: { $0.id == reference.lastMessageID }), first <= last else { continue }
-            let window = Array(session.messages[first...last])
-            guard (try? AssistantContext.referenceDigest(window)) == reference.expectedContentDigest else { continue }
-            result.append(.init(sessionID: session.id, root: nil, messageIDs: window.map(\.id), digest: reference.expectedContentDigest))
+            guard let quoted = AssistantContext.quotedWindow(reference, file: file) else { continue }
+            result.append(.init(sessionID: reference.sessionID, root: nil, messageIDs: quoted.window.map(\.id),
+                                digest: reference.expectedContentDigest))
         }
         return result
     }

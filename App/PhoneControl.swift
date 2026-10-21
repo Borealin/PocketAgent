@@ -12,8 +12,9 @@ protocol PhoneControl: AnyObject {
     var budget: (() -> TimeInterval?)? { get set }
     /// The end of the turn, which bounds phone preparation (set beside `cancellationCheck`).
     var turnEnd: Date? { get set }
-    /// Native calls handed to the device so far (DDI); an effect whose failure
-    /// is a refusal before dispatch is reported unsent only if this did not move.
+    /// Native calls handed to the device so far (DDI); an effect or preparation
+    /// gesture whose failure is a refusal before dispatch is reported unsent
+    /// only if this did not move.
     var dispatchedCalls: Int { get }
     /// What native calls reported about effects so far (DDI; WDA reports none).
     var nativeEffects: NativeEffectReports { get }

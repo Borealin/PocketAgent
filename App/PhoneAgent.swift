@@ -461,13 +461,16 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
-        let previous = callEffects.preparation, reports = control.nativeEffects
+        let previous = callEffects.preparation, reports = control.nativeEffects, dispatched = control.dispatchedCalls
         callEffects.preparationSent()
         do {
             try await control.compactSurface(fromX: geometry.bounds.width * 0.90, toX: geometry.bounds.width * 0.55, y: y, seconds: 0.25)
         } catch {
-            // Unreported only when its native call proved nothing was sent.
-            callEffects.settlePreparation(after: error, restoring: previous, native: control.nativeEffects - reports)
+            // Unreported only when it provably sent nothing: refused before
+            // dispatch, or its native call reported that nothing had started.
+            callEffects.settlePreparation(after: error, restoring: previous,
+                                          dispatchedDuringOperation: control.dispatchedCalls - dispatched,
+                                          native: control.nativeEffects - reports)
             throw error
         }
         try proceed()

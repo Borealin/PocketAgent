@@ -9,8 +9,9 @@ nonisolated enum PhoneBackendKind: String, CaseIterable, Codable, Sendable {
 /// Effects of one phone tool call: the requested action and any executor
 /// preparation gesture sent while observing for it (the task-surface swipe on
 /// Dynamic Island layouts). A refusal before the requested touch restores only
-/// the action flag; a preparation gesture that was sent stays reported in every
-/// outcome, including cancellation and failed observation.
+/// the action flag; a preparation gesture stays reported in every outcome,
+/// including cancellation and failed observation, unless its own operation
+/// provably sent nothing.
 nonisolated struct PhoneCallEffects: Equatable, Sendable {
     private(set) var action = false
     private(set) var preparation = false
@@ -27,25 +28,30 @@ nonisolated struct PhoneCallEffects: Equatable, Sendable {
 
     /// An effect operation failed. Only a refusal proven to precede anything
     /// it could have sent restores the action flag: a native refusal before
-    /// any touch, a typed refusal before dispatch when no native call of this
-    /// operation was dispatched at all, or a DDI refusal whose native calls in
-    /// this operation all reported that no effect had started (`native`, the
-    /// reports of this operation only). A composite operation whose earlier
-    /// call acted stays reported; a timeout, a cancellation or any failure
-    /// without such reports may follow a sent effect and is kept. Preparation
-    /// stays reported either way.
+    /// any touch, or a failure `sentNothing` accepts. Preparation stays
+    /// reported either way.
     mutating func settle(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int,
                          native: NativeEffectReports = NativeEffectReports()) {
         if case PhoneObservationIssue.targetCovered = error { action = previous; return }
-        if error is PhoneCallNotDispatched, dispatchedDuringOperation == 0 { action = previous; return }
-        if native.provenUnsent { action = previous }
+        if Self.sentNothing(error, dispatchedDuringOperation: dispatchedDuringOperation, native: native) { action = previous }
     }
 
-    /// The preparation gesture itself failed: it is unreported only when its
-    /// native call reported that nothing had started; an earlier sent
-    /// preparation stays reported.
-    mutating func settlePreparation(after error: any Error, restoring previous: Bool, native: NativeEffectReports) {
-        if native.provenUnsent { preparation = previous }
+    /// The preparation gesture's own operation failed: it is unreported only
+    /// when `sentNothing` accepts the failure, as for an action. An earlier
+    /// sent preparation (`previous`) and the action flag stay reported.
+    mutating func settlePreparation(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int,
+                                    native: NativeEffectReports) {
+        if Self.sentNothing(error, dispatchedDuringOperation: dispatchedDuringOperation, native: native) { preparation = previous }
+    }
+
+    /// A failed operation provably sent nothing: a typed refusal before
+    /// dispatch when no native call of the operation was dispatched at all, or
+    /// a DDI refusal whose native calls in the operation all reported that no
+    /// effect had started (`native`, the reports of this operation only). A
+    /// composite operation whose earlier call acted, a timeout, a cancellation
+    /// or any failure without such proof may follow a sent effect.
+    private static func sentNothing(_ error: any Error, dispatchedDuringOperation: Int, native: NativeEffectReports) -> Bool {
+        (error is PhoneCallNotDispatched && dispatchedDuringOperation == 0) || native.provenUnsent
     }
 }
 

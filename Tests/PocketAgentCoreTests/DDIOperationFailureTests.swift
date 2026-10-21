@@ -134,26 +134,110 @@ struct DDIOperationFailureTests {
         #expect(try DDIOperationFailure.decode(refusal)?.requiresNewTurn == true)
     }
 
-    /// The executor's own status-band gesture: unreported only when its native
-    /// call proved nothing was sent; an earlier sent gesture stays reported.
-    @Test func aRefusedPreparationGestureIsNotReportedButASentOneIs() throws {
-        func gesture(_ effects: inout PhoneCallEffects, _ result: [String: Any]) {
-            var reports = NativeEffectReports()
-            let previous = effects.preparation
-            effects.preparationSent()
-            do { if let failure = try reports.record(result: result) { throw failure } }
-            catch { effects.settlePreparation(after: error, restoring: previous, native: reports) }
+    /// Stands in for `DDIControl`'s per-call accounting: `dispatchedCalls`
+    /// (counted when handed to the worker, uncounted when native entry refuses
+    /// the passed expiry) and `nativeEffects` (a result by its metadata; an
+    /// error without metadata after dispatch counts as possible).
+    private final class Native {
+        enum Call {
+            /// No budget for the call and its cleanup: refused before dispatch.
+            case budgetMissing
+            /// Native entry refused the passed expiry: counted, then uncounted.
+            case expiredAtEntry
+            /// Stop or the turn's deadline seen before dispatch (`cancellationCheck`).
+            case cancelledBeforeDispatch
+            /// A native result object.
+            case result([String: Any])
+            /// A failure after dispatch without native metadata (a transport timeout).
+            case errorWithoutMetadata
         }
-        var refused = PhoneCallEffects()
-        gesture(&refused, try failure("ddi_preflight_refused", "DDI foreground is not the observed app; not tapped", issued: false, newTurn: false))
-        #expect(!refused.issued)
-        var sentBefore = PhoneCallEffects()
-        gesture(&sentBefore, try success(issued: true))
-        gesture(&sentBefore, try failure("ddi_preflight_refused", "DDI foreground is not the observed app; not tapped", issued: false, newTurn: false))
-        #expect(sentBefore.issued && sentBefore.preparation)
-        var uncertain = PhoneCallEffects()
-        gesture(&uncertain, try failure("ddi_effect_unconfirmed", "DDI service request timed out", issued: true, newTurn: true))
-        #expect(uncertain.issued)
+        var dispatched = 0
+        var reports = NativeEffectReports()
+        func run(_ call: Call) throws {
+            switch call {
+            case .budgetMissing: throw PhoneCallNotDispatched.insufficientTime
+            case .expiredAtEntry:
+                dispatched += 1; dispatched -= 1
+                throw PhoneCallNotDispatched(reason: "手机操作的期限在交给设备前已过；未执行。")
+            case .cancelledBeforeDispatch: throw CancellationError()
+            case .result(let object):
+                dispatched += 1
+                if let failure = try reports.record(result: object) { throw failure }
+            case .errorWithoutMetadata:
+                dispatched += 1; reports.possible += 1
+                throw URLError(.timedOut)
+            }
+        }
+    }
+
+    /// `PhoneExecutor.compactTaskSurface`'s bracket around the status-band
+    /// gesture: marked sent, then settled with this operation's dispatch
+    /// count and reports if it fails.
+    private func gesture(_ effects: inout PhoneCallEffects, _ native: Native, _ calls: [Native.Call]) {
+        let previous = effects.preparation, reports = native.reports, dispatched = native.dispatched
+        effects.preparationSent()
+        do { for call in calls { try native.run(call) } }
+        catch {
+            effects.settlePreparation(after: error, restoring: previous,
+                                      dispatchedDuringOperation: native.dispatched - dispatched, native: native.reports - reports)
+        }
+    }
+
+    /// The executor's own status-band gesture is unreported only when its
+    /// operation provably sent nothing: a typed refusal before dispatch with
+    /// no native call dispatched (no native report exists then), or native
+    /// metadata that no effect had started. A dispatched call that acted or
+    /// may have, an error without metadata, a cancellation or a timeout keep
+    /// it reported.
+    @Test func aPreparationGestureIsUnreportedOnlyWhenItProvablySentNothing() throws {
+        let refused = try failure("ddi_preflight_refused", "DDI foreground is not the observed app; not tapped", issued: false, newTurn: false)
+        let cases: [(String, [Native.Call], Bool)] = [
+            ("no budget", [.budgetMissing], false),
+            ("expired at native entry", [.expiredAtEntry], false),
+            ("native refusal", [.result(refused)], false),
+            ("sent, then no budget", [.result(try success(issued: true)), .budgetMissing], true),
+            ("unflagged success, then expired", [.result(try json(#"{"ok":true}"#)), .expiredAtEntry], true),
+            ("effect unconfirmed", [.result(try failure("ddi_effect_unconfirmed", "DDI service request timed out", issued: true, newTurn: true))], true),
+            ("malformed result", [.result(try json(#"{"ok":false,"message":"x"}"#))], true),
+            ("error without metadata", [.errorWithoutMetadata], true),
+            ("cancelled before dispatch", [.cancelledBeforeDispatch], true),
+        ]
+        for (label, calls, issued) in cases {
+            var effects = PhoneCallEffects()
+            gesture(&effects, Native(), calls)
+            #expect(effects.issued == issued && effects.preparation == issued && !effects.action, "\(label)")
+            // The same proof an action's settlement accepts.
+            var action = PhoneCallEffects()
+            let before = action.beginAction(), native = Native()
+            do { for call in calls { try native.run(call) } }
+            catch { action.settle(after: error, restoring: before, dispatchedDuringOperation: native.dispatched, native: native.reports) }
+            #expect(action.issued == issued, "\(label) as an action")
+        }
+    }
+
+    /// Effects sent earlier in the same tool call stay reported when a later
+    /// gesture provably sent nothing: an earlier gesture, or an action (a
+    /// clipboard write before node recovery).
+    @Test func earlierEffectsStayReportedWhenALaterGestureSentNothing() throws {
+        let nativeRefusal = try failure("ddi_preflight_refused", "DDI foreground is not the observed app; not tapped",
+                                        issued: false, newTurn: false)
+        for refusal in [Native.Call.budgetMissing, .expiredAtEntry, .result(nativeRefusal)] {
+            var gestures = PhoneCallEffects()
+            let native = Native()
+            gesture(&gestures, native, [.result(try success(issued: true))])
+            gesture(&gestures, native, [refusal])
+            #expect(gestures.issued && gestures.preparation && !gestures.action, "\(refusal)")
+            var action = PhoneCallEffects(), reports = NativeEffectReports()
+            operation(&action, &reports, [try success(issued: true)])
+            gesture(&action, Native(), [refusal])
+            #expect(action.issued && action.action && !action.preparation, "\(refusal)")
+            // An earlier native refusal of a gesture is followed the same way.
+            var refusedTwice = PhoneCallEffects()
+            let again = Native()
+            gesture(&refusedTwice, again, [.result(try failure("ddi_preflight_refused", "DDI display changed", issued: false, newTurn: false))])
+            gesture(&refusedTwice, again, [refusal])
+            #expect(!refusedTwice.issued, "\(refusal)")
+        }
     }
 
     /// R8: preparing empty text writes nothing, so it is not wrapped as an

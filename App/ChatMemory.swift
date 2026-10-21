@@ -258,12 +258,22 @@ extension ChatController {
 
     // MARK: Primary recovery (explicit only)
 
+    /// Why choosing `target` as the primary line (nil: a new empty line)
+    /// waits, or nil: the current primary or the chosen session has a job
+    /// (queued, preparing, running or cancelling). Each job keeps the role it
+    /// was accepted with (`ChatJob.primary`: assistant support, forget stop,
+    /// pending settlement), so roles never change under it; a job of another
+    /// task does not block. The transaction checks the same again.
+    func primaryRecoveryBlocker(choosing target: UUID?) -> String? {
+        file.primaryRecoveryBlocker(choosing: target, busy: activeSessionIDs)?.localizedDescription
+    }
+
     func choosePrimary(_ id: UUID) {
-        if transact({ try $0.choosePrimary(id) }) { notice = "已将所选会话设为助理主线。" }
+        if transact({ try $0.choosePrimary(id, busy: self.activeSessionIDs) }) { notice = "已将所选会话设为助理主线。" }
     }
 
     func startNewPrimary() {
-        if transact({ try $0.startNewPrimary(selection: self.providers.defaultSelection) }) {
+        if transact({ try $0.startNewPrimary(selection: self.providers.defaultSelection, busy: self.activeSessionIDs) }) {
             notice = "已建立新的空主线；记忆保留，原主线在任务/历史中。"
         }
     }

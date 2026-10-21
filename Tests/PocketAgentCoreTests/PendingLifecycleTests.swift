@@ -341,6 +341,208 @@ struct PrimaryTurnSettlementTests {
     }
 }
 
+/// Cross-review follow-up to R9: a job's role is frozen when it is accepted
+/// (`ChatJob.primary`), with what follows from it: the assistant's context
+/// and memory reads, the forget stop (only the running primary root) and the
+/// pending settlement when the turn ends (only a primary turn settles).
+/// Before the fix a recovery choice changed roles under a job: a conflict
+/// copy S ran an independent turn J (its sends are allowed while the notice
+/// shows), was chosen as the primary line, accepted a detached next request
+/// P, and when J failed nothing settled P, so `finish`'s advancement started
+/// it on its own. `HistoryFile.primaryRecoveryBlocker` (the controller's
+/// `choosePrimary` / `startNewPrimary` pass it their jobs, the recovery card
+/// shows it) refuses a recovery that changes the role of a session with a
+/// job: the current primary line's or the chosen session's. These run the
+/// controller's transactions on a real `HistoryOwner`.
+@MainActor
+struct PrimaryRecoveryTests {
+    /// A primary line O with a finished turn, a synchronized conflict copy S
+    /// (notice `.diverged([S])`) and an unrelated task T; `busy` is the
+    /// controller's sessions with a job.
+    @MainActor private struct Lines {
+        let owner: HistoryOwner
+        let writer = PrimaryTurnSettlementTests.Writer()
+        let o: UUID, s: UUID, t: UUID
+        var busy: Set<UUID> = []
+        var file: HistoryFile { owner.file }
+
+        /// `primaryTurn`: O's own turn was accepted before the copy arrived
+        /// (the sync deferred O, which has a job).
+        init(primaryTurn: Bool = false) throws {
+            var file = HistoryFile.initial(selection: nil)
+            let primary = file.assistant.primarySessionID
+            let earlier = try file.acceptCurrent("整理今天的日程", in: primary, scope: .general)
+            try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "日程已整理"), to: primary, root: earlier)
+            try file.editSession(primary) { $0.state = .completed }
+            let task = ChatSession(title: "查快递")
+            file.sessions.append(task)
+            let synced = try #require(file.session(primary))
+            let base = PortableSnapshot(sessions: [synced], sessionTombstones: [], providers: [], providerTombstones: [])
+            var copy = ChatSession(title: ChatSession.primaryTitle)
+            copy.conflictOf = primary
+            copy.messages = synced.messages + [AgentTranscriptMessage(role: .assistant, text: "另一台设备上的回复")]
+            var deferred: Set<UUID> = []
+            if primaryTurn {
+                try Self.accept(AgentTranscriptMessage(role: .user, text: "然后订会议室"), in: primary, file: &file)
+                deferred = [primary]
+            }
+            let merged = PortableSnapshot(sessions: [try #require(PortableSession(synced)), try #require(PortableSession(copy))])
+            _ = try file.applyPortable(merged: merged, base: base, deferred: deferred)
+            let copyID = copy.id
+            #expect(file.assistant.primaryNotice == .diverged(copyIDs: [copyID]) && file.session(copyID)?.state == .idle)
+            o = primary; s = copyID; t = task.id; busy = deferred
+            let writer = writer
+            owner = HistoryOwner(file: file, writer: { try writer.write($0) })
+        }
+
+        /// `ChatController.acceptSend`'s write: the root and the queued state.
+        static func accept(_ prompt: AgentTranscriptMessage, in session: UUID, file: inout HistoryFile) throws {
+            try file.acceptRoot(prompt, attachments: [], in: session, scope: .general)
+            try file.editSession(session) { $0.state = .queued }
+        }
+
+        /// The write, then the job exists.
+        mutating func accept(_ text: String, in session: UUID) throws -> UUID {
+            let prompt = AgentTranscriptMessage(role: .user, text: text)
+            try owner.transact { try Self.accept(prompt, in: session, file: &$0) }
+            busy.insert(session)
+            return prompt.id
+        }
+
+        /// The job's stage as the controller writes it.
+        func advance(_ root: UUID, in session: UUID, to state: ChatState) throws {
+            switch state {
+            case .running: try owner.transact { try $0.commitDispatchPermit(root: root, sessionID: session, scope: .general) }
+            default: #expect(owner.record { try $0.editSession(session) { $0.state = state } })
+            }
+        }
+
+        /// `finish`: the final state is recorded and the job is gone.
+        mutating func end(_ session: UUID, _ state: ChatState) {
+            #expect(owner.record { try $0.editSession(session) { $0.state = state } })
+            busy.remove(session)
+        }
+
+        /// `ChatController.choosePrimary` / `startNewPrimary`.
+        func choose(_ id: UUID) -> (any Error)? {
+            do { try owner.transact { try $0.choosePrimary(id, busy: busy) }; return nil } catch { return error }
+        }
+        func startNew() -> (any Error)? {
+            do { try owner.transact { try $0.startNewPrimary(selection: nil, busy: busy) }; return nil } catch { return error }
+        }
+
+        /// A refusal changed nothing and wrote nothing; the card shows the same reason.
+        func expectRefused(_ attempt: () -> (any Error)?, _ reason: PrimaryRecoveryError, target: UUID?, _ label: String) {
+            let before = file, writes = writer.writes
+            let refusal = attempt() as? PrimaryRecoveryError
+            #expect(refusal == reason, "\(label)")
+            #expect(file == before && writer.writes == writes && file.assistant.primarySessionID == o, "\(label)")
+            #expect(file.assistant.primaryNotice == .diverged(copyIDs: [s]) && file.session(s)?.conflictOf == o, "\(label)")
+            #expect(file.primaryRecoveryBlocker(choosing: target, busy: busy) == reason, "\(label)")
+        }
+    }
+
+    /// S runs an independent turn while the notice shows: S is not promoted
+    /// while the job is queued or preparing, running or cancelling; either
+    /// the controller's job or the persisted run state alone refuses. Once
+    /// the job has ended, S may become the primary line.
+    @Test func aSessionWithAJobIsNotPromotedUntilItEnds() throws {
+        var lines = try Lines()
+        let j = try lines.accept("查一下明天的航班", in: lines.s)
+        for state in [ChatState.queued, .running, .cancelling] {
+            if state != .queued { try lines.advance(j, in: lines.s, to: state) }
+            #expect(lines.file.session(lines.s)?.state == state)
+            lines.expectRefused({ lines.choose(lines.s) }, .targetBusy, target: lines.s, "\(state)")
+        }
+        // A job whose session does not say so (a continued unstarted request
+        // keeps its earlier final state), and a persisted state without a job.
+        lines.end(lines.s, .failed)
+        lines.busy = [lines.s]
+        lines.expectRefused({ lines.choose(lines.s) }, .targetBusy, target: lines.s, "job only")
+        lines.busy = []
+        try lines.advance(j, in: lines.s, to: .cancelling)
+        lines.expectRefused({ lines.choose(lines.s) }, .targetBusy, target: lines.s, "state only")
+        lines.end(lines.s, .interrupted)
+        #expect(lines.choose(lines.s) == nil)
+        #expect(lines.file.assistant.primarySessionID == lines.s && lines.file.assistant.primaryNotice == nil)
+    }
+
+    /// O's turn keeps its primary role: switching to S, keeping O itself and
+    /// a new empty line all wait while it is queued, running or cancelling.
+    @Test func theCurrentPrimaryWithAJobKeepsItsRoleUntilItEnds() throws {
+        var lines = try Lines(primaryTurn: true)
+        let root = try #require(lines.file.session(lines.o)?.messages.last?.id)
+        let sessions = lines.file.sessions.count
+        for state in [ChatState.queued, .running, .cancelling] {
+            if state != .queued { try lines.advance(root, in: lines.o, to: state) }
+            lines.expectRefused({ lines.choose(lines.s) }, .primaryBusy, target: lines.s, "copy \(state)")
+            lines.expectRefused({ lines.choose(lines.o) }, .primaryBusy, target: lines.o, "keep \(state)")
+            lines.expectRefused({ lines.startNew() }, .primaryBusy, target: nil, "new \(state)")
+            #expect(lines.file.sessions.count == sessions)
+        }
+        lines.end(lines.o, .interrupted)
+        #expect(lines.startNew() == nil)
+        #expect(lines.file.assistant.primarySessionID != lines.o && lines.file.session(lines.o) != nil)
+        #expect(lines.file.assistant.primaryNotice == nil && lines.file.sessions.count == sessions + 1)
+    }
+
+    /// A job of a task whose role no choice changes (T, or S when O is kept
+    /// or a new line starts) does not block recovering the two idle lines.
+    @Test func aJobOfAnotherTaskDoesNotBlockRecovery() throws {
+        for (task, choice) in [(0, 1), (0, 2), (0, nil), (1, 2), (1, nil)] as [(Int, Int?)] {
+            var lines = try Lines()
+            let ids = [lines.t, lines.s, lines.o]
+            let job = try lines.accept("查快递", in: ids[task])
+            try lines.advance(job, in: ids[task], to: .running)
+            let label = "\(task) \(String(describing: choice))"
+            let refusal = if let choice { lines.choose(ids[choice]) } else { lines.startNew() }
+            #expect(refusal == nil, "\(label)")
+            #expect(lines.file.assistant.primaryNotice == nil, "\(label)")
+            if let choice { #expect(lines.file.assistant.primarySessionID == ids[choice], "\(label)") }
+            // The task keeps its role and its run.
+            #expect(lines.file.assistant.primarySessionID != ids[task] && lines.file.session(ids[task])?.state == .running, "\(label)")
+        }
+    }
+
+    /// The reported trigger. The pick of S while J waits is refused, so S
+    /// stays a task (its input steers J; a pending request is accepted only
+    /// on the primary line). J fails before its permit; an independent job
+    /// settles nothing and nothing is queued behind it, so `finish`'s
+    /// advancement has nothing to start. Only then may S be chosen.
+    @Test func aFailedTaskTurnNeverStartsAPendingRequestOnItsOwn() throws {
+        func advancement(_ file: HistoryFile, frozen: Bool) -> PendingActivation {
+            PendingActivation.decide(pending: file.assistant.pendingNext, storageReady: true, lineBusy: false, settlingSteers: 0,
+                                     primaryNotice: file.assistant.primaryNotice, foreground: true, frozenAvailable: frozen,
+                                     stopEpochAtAccept: 0, stopEpochNow: 0)
+        }
+        var lines = try Lines()
+        let j = try lines.accept("查一下明天的航班", in: lines.s)
+        lines.expectRefused({ lines.choose(lines.s) }, .targetBusy, target: lines.s, "pick")
+        #expect(lines.file.assistant.pendingNext == nil)
+        lines.end(lines.s, .failed)
+        #expect(advancement(lines.file, frozen: false) == .wait)
+        #expect(lines.choose(lines.s) == nil && lines.file.assistant.pendingNext == nil)
+        #expect(lines.file.session(lines.s)?.messages.last?.id == j)
+
+        // What the unguarded choice wrote: S became the primary line during J
+        // and accepted P. J's end settles nothing (a frozen independent job),
+        // so the advancement alone would start P.
+        var unguarded = try Lines()
+        _ = try unguarded.accept("查一下明天的航班", in: unguarded.s)
+        let s = unguarded.s
+        try unguarded.owner.transact { file in
+            file.assistant.primarySessionID = s; file.assistant.primaryNotice = nil
+            try file.acceptPending(PendingNext(sessionID: s, prompt: .detached(message: AgentTranscriptMessage(role: .user, text: "然后订酒店"),
+                                                                                attachments: []),
+                                               selection: ModelSelection(providerID: UUID(), modelID: "m"), workspaceID: nil,
+                                               backend: .ddi, clipboardAllowed: true, acceptedOrdinal: 2, state: .queued,
+                                               references: [], acceptedAt: Date()))
+        }
+        unguarded.end(s, .failed)
+        #expect(advancement(unguarded.file, frozen: true) == .activate)
+    }
+}
+
 /// Sync applies only portable session data from the complete local file and
 /// turns primary deletion/divergence into explicit recovery notices.
 struct AssistantSyncTests {
@@ -388,7 +590,7 @@ struct AssistantSyncTests {
         _ = try deleted.applyPortable(merged: PortableSnapshot(deletedSessions: [tombstone]), base: base, deferred: [])
         #expect(deleted.primary == nil)
         if case .remoteDeleted = deleted.assistant.primaryNotice {} else { Issue.record("expected remoteDeleted") }
-        try deleted.startNewPrimary(selection: nil)
+        try deleted.startNewPrimary(selection: nil, busy: [])
         #expect(deleted.primary?.messages.isEmpty == true && deleted.assistant.primaryNotice == nil)
 
         var diverged = file
@@ -399,7 +601,7 @@ struct AssistantSyncTests {
         // Same IDs, changed content: the root becomes unknown.
         let root = try #require(file.primary?.messages.first?.id)
         #expect(diverged.assistant.scopeIndex.scopedRoot(root)?.verified == false)
-        try diverged.choosePrimary(primary)
+        try diverged.choosePrimary(primary, busy: [])
         #expect(diverged.assistant.primaryNotice == nil)
     }
 

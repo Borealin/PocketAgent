@@ -454,7 +454,11 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   started root), registers exactly what it returns and returns that content; a
   changed page is `stale_search`, and a failed registration, a replaced run or a
   wrong root fails the run's commit epoch so no later tool or model request
-  follows (`too_large` returns IDs only). Remember mode (bookmark in the primary
+  follows (`too_large` returns IDs only). An explicitly referenced window (any
+  scope) is a `session_search` candidate only while it may be quoted (the same
+  `AssistantContext.quotedWindow` check), so one masked before the search is
+  never planned; a mask after planning is still the commit's `stale_search`,
+  and the rebuilt list no longer has it. Remember mode (bookmark in the primary
   composer) opens the editor with the draft and saves only on 保存, clearing the
   draft only if unchanged. An explicit "忘掉/删除/更正…记忆" request (verb first plus
   记忆, or `/forget`) opens a sheet of up to five lexical matches in the current
@@ -489,6 +493,15 @@ Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
   unauthorized promoted root to the project confirmed now in the same write
   (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
   from the root's.
+- Primary recovery (`choosePrimary`, `startNewPrimary`) never changes the role
+  of a session with a job. A job's role is frozen when it is accepted
+  (`ChatJob.primary`: assistant support and memory reads, the forget stop, the
+  pending settlement), so a choice waits while the current primary line or the
+  chosen session has a queued, preparing, running or cancelling turn
+  (`HistoryFile.primaryRecoveryBlocker`: the controller's jobs, repeated by the
+  persisted run state). The recovery card disables those choices and says why;
+  the controller passes its jobs into the transaction, so a stale callback is
+  refused too. A job of another task does not block recovering two idle lines.
 
 Verification scope (2026-10-14; follow-ups 2026-10-15): Core suite (381 tests in 77 suites, mock transports) passes
 on the Mac host, including the commit gates through the pinned AgentRuntime,
@@ -736,6 +749,37 @@ Confirmed problems found during implementation review and fixed:
   before writing the hold; the regression runs it on a real `HistoryOwner`
   whose hold write fails once (and a second hold write too), before and after
   the permit, and requires no activation until an explicit continue.
+- Fixed-head cross-review of eb80c36 (source-confirmed, not reproduced on a
+  device): the settlement above still depended on the role frozen at
+  acceptance. A synchronized conflict copy S could run an independent turn J
+  while the diverged notice showed (only the primary's sends wait for it); the
+  card's "使用「S」作为主线" had no job check, so S became the primary line
+  during J and accepted a detached next request P; when J failed, before or
+  after its permit, its frozen `primary == false` skipped the settlement and
+  `finish`'s advancement started P on its own. Choosing a new empty line during
+  a primary turn likewise left a running assistant turn that a forget could no
+  longer stop. Recovery now waits while the current primary line or the chosen
+  session has a job (see Pending); roles, contexts and running work are not
+  changed, rerouted or replayed. Core regressions (`PrimaryRecoveryTests`, the
+  controller's transactions on a real `HistoryOwner`): promoting a session with
+  a queued, running or cancelling job (refused by the job or the persisted
+  state alone, nothing written), switching away from or keeping a busy primary
+  and a new line while it works, another task's job not blocking, and the
+  reported sequence ending with nothing to activate (the unguarded state as the
+  control activates P).
+- The same review: an explicit reference selected before its source was
+  forgotten stayed a `session_search` candidate (the reference branch checked
+  the session, bounds and digest, not masks). The builder rightly dropped the
+  quote, but each search planned the masked window, refused the whole page as
+  `stale_search` and rebuilt the same candidate, so the empty-query listing,
+  which puts it first, never worked and matching keywords lost legitimate
+  segments. Candidates now pass `AssistantContext.quotedWindow`; the commit's
+  revalidation is unchanged. Core regressions (`MaskedReferenceSearchTests`) for
+  a read and a contributed root and an unknown synchronized window: a valid
+  reference still listed, found and registered; masked before the search, the
+  listing and a keyword search return only the legitimate segment on every
+  repeat and register nothing of the window; masked after planning, the page is
+  stale with nothing registered and the next search recovers.
 
 - The incremental writer located the messages array by the first
   `"messages":[]` in a session's bytes. A session whose attachments map had a
@@ -1404,6 +1448,21 @@ preparation, so the budget estimate still sees the strict schema.
   the no-op clipboard preparation for `text=""` in the effect bracket, so a
   later node refusal reported a possible action. Only a nonempty paste
   preparation (a clipboard write) is an effect now.
+- Fixed-head review of eb80c36 (source-confirmed; ranked a conservative false
+  positive): a status-band gesture refused before dispatch stayed reported.
+  `compactTaskSurface` marks the gesture sent first, and its settlement only
+  accepted native "not started" metadata; a call with no budget left (or whose
+  passed expiry native entry refused, uncounted again) throws the typed
+  not-dispatched refusal with no native report, so the tool said an action may
+  have happened although no input reached the phone. The gesture's settlement
+  now takes its operation's dispatch count like an action's and shares its
+  proof (`PhoneCallEffects.sentNothing`): a typed refusal with nothing
+  dispatched, or native reports that nothing started. An earlier gesture or
+  action, a dispatched call that acted or may have, an error without metadata,
+  cancellation and timeouts stay reported; no replay, budget, cleanup or
+  release-latch behaviour changes. Core matrix in `DDIOperationFailureTests`
+  (with the action settlement agreeing case by case). The Dynamic Island
+  gesture itself is not exercised on a device (the 12 mini has no such layout).
 
 Verification boundary: the Core suite (402 tests in 81 suites after the host
 review follow-ups; the new and changed suites also under Release), the

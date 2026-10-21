@@ -83,7 +83,7 @@ struct QuoteRevocationTests {
             // The user later saved the synchronized answer as memory.
             entry = try add(Self.fact, to: &file, messages: [synced[1].id])
         }
-        try file.startNewPrimary(selection: nil)
+        try file.startNewPrimary(selection: nil, busy: [])
         #expect(file.assistant.primarySessionID != old && file.session(old) != nil)
         let b = try file.acceptCurrent(Self.ask, in: file.assistant.primarySessionID, scope: .general)
         let ids = source == .unknownWindow ? synced.map(\.id) : [a, reply.id]

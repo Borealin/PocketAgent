@@ -213,6 +213,158 @@ struct ReadCommitTests {
     }
 }
 
+/// R1 neighbour: the user referenced a window for the next request, then
+/// forgot a memory entry its root read or contributed (or one taken from its
+/// synchronized messages without a root) before the turn searched. The
+/// builder already leaves the quote out; `session_search` must not offer the
+/// masked window either: a page with it is `stale_search`, and every rebuild
+/// (the empty-query listing puts it first) planned the same page again.
+private struct ReferenceFixture {
+    enum Source: CaseIterable, Sendable { case read, contributed, unknownWindow }
+    static let fact = "PKATEST_MASKREF 车位在B2层117号"
+    static let legitimate = "PKATEST_MASKREF 车位旁边有充电桩"
+    var file: HistoryFile
+    var entry: UUID
+    var reference: HistoryReference
+    /// The referenced window, in a task of another project, and its root
+    /// (nil: synchronized messages without one).
+    var window: [UUID]
+    var source: UUID?
+    /// A finished same-scope segment of the primary line that also matches.
+    var legitimate: [UUID]
+    /// The searching run, started on the primary line.
+    var current: UUID
+
+    init(_ kind: Source) throws {
+        var file = HistoryFile.initial(selection: nil)
+        let primary = file.assistant.primarySessionID
+        let task = ChatSession(title: "停车")
+        file.sessions.append(task)
+        func remember(roots: [UUID] = [], messages: [UUID] = []) throws -> UUID {
+            try #require(try file.applyMemoryEdit(.add(target: .memory, scope: .global, content: Self.fact, origin: .chatChip,
+                                                       sourceRootPromptIDs: roots, sourceMessageIDs: messages)).entryIDs.first)
+        }
+        let entry: UUID, source: UUID?, window: [AgentTranscriptMessage]
+        switch kind {
+        case .read, .contributed:
+            let a = try file.acceptCurrent("我的车位在哪", in: task.id, scope: .workspace(UUID()))
+            try file.appendEvent(AgentTranscriptMessage(role: .assistant, text: "记下了：" + Self.fact), to: task.id, root: a)
+            if kind == .read {
+                entry = try remember()
+                let revision = try #require(file.assistant.memory.entry(entry)).revision
+                try file.registerReads(root: a, memory: [MemoryReadRevision(entryID: entry, revision: revision)], roots: [], messages: [])
+            } else {
+                entry = try remember(roots: [a], messages: [a])
+            }
+            source = a
+            window = try #require(file.session(task.id)).messages
+        case .unknownWindow:
+            let synced = [AgentTranscriptMessage(role: .user, text: "车位号再说一遍"),
+                          AgentTranscriptMessage(role: .assistant, text: "另一台设备：" + Self.fact)]
+            try file.editSession(task.id) { $0.messages += synced }
+            entry = try remember(messages: [synced[1].id])
+            source = nil
+            window = synced
+        }
+        try file.editSession(task.id) { $0.state = .completed }
+        let ask = try file.acceptCurrent("车位旁边有什么", in: primary, scope: .general)
+        let answer = AgentTranscriptMessage(role: .assistant, text: Self.legitimate)
+        try file.appendEvent(answer, to: primary, root: ask)
+        try file.editSession(primary) { $0.state = .completed }
+        current = try file.acceptCurrent("查一下车位", in: primary, scope: .general)
+        reference = HistoryReference(sessionID: task.id, firstMessageID: window[0].id, lastMessageID: window[window.count - 1].id,
+                                     expectedContentDigest: try AssistantContext.referenceDigest(window))
+        self.file = file; self.entry = entry; self.source = source
+        self.window = window.map(\.id); legitimate = [ask, answer.id]
+    }
+
+    func adapter(_ box: FileBox, snapshot: (@Sendable () async -> HistoryFile)? = nil) -> PocketMemoryAdapter {
+        .testing(box, scope: .general, currentRoot: current, references: [reference], snapshot: snapshot)
+    }
+
+    /// Message IDs of each returned segment, in order.
+    static func segments(_ result: AgentJSONValue) -> [[UUID]] {
+        (result.objectValue?["segments"]?.arrayValue ?? []).map { segment in
+            (segment.objectValue?["message_ids"]?.arrayValue ?? []).compactMap { $0.stringValue.flatMap(UUID.init(uuidString:)) }
+        }
+    }
+}
+
+struct MaskedReferenceSearchTests {
+    private static let queries: [String?] = [nil, "车位"]
+
+    /// Without a forget the referenced window (another project) stays a
+    /// candidate: listed first and found by keyword with the legitimate
+    /// segment, and registered as read (its root, or its messages without one).
+    @Test(arguments: ReferenceFixture.Source.allCases)
+    fileprivate func aValidReferenceIsStillACandidate(_ kind: ReferenceFixture.Source) async throws {
+        let h = try ReferenceFixture(kind)
+        let box = FileBox(h.file)
+        let adapter = h.adapter(box)
+        let listing = try await adapter.searchSessions(AgentSessionSearchRequest())
+        #expect(ReferenceFixture.segments(listing) == [h.window, h.legitimate] && "\(listing)".contains("B2层117号"))
+        let keyword = try await adapter.searchSessions(AgentSessionSearchRequest(query: "车位"))
+        #expect(Set(ReferenceFixture.segments(keyword)) == [h.window, h.legitimate])
+        let deps = try #require(box.file.assistant.scopeIndex.scopedRoot(h.current)).dependencies
+        if let a = h.source {
+            #expect(Set(deps.rootReads) == [a, h.legitimate[0]] && deps.historicalMessageReads.isEmpty)
+        } else {
+            #expect(deps.rootReads == [h.legitimate[0]] && deps.historicalMessageReads == h.window)
+        }
+    }
+
+    /// Forgotten before the search: the listing and the keyword search return
+    /// the legitimate segment, never `stale_search` and never the window, on
+    /// every repeat; only the legitimate segment is registered and the forget
+    /// did not stop the searching run (it had read nothing of the window).
+    @Test(arguments: ReferenceFixture.Source.allCases)
+    fileprivate func aReferenceMaskedBeforeTheSearchIsNoCandidate(_ kind: ReferenceFixture.Source) async throws {
+        var h = try ReferenceFixture(kind)
+        let entry = h.entry, current = h.current
+        let preview = try ReadFixture.forget(entry, in: &h.file, activeRoot: current)
+        #expect(!preview.stopsActiveRoot && AssistantContext.quotedWindow(h.reference, file: h.file) == nil)
+        let box = FileBox(h.file)
+        let adapter = h.adapter(box)
+        for query in Self.queries {
+            for attempt in 0..<3 {
+                let result = try await adapter.searchSessions(AgentSessionSearchRequest(query: query))
+                let label = "\(kind) \(query ?? "listing") \(attempt)"
+                #expect(result.objectValue?["status"]?.stringValue == nil, "\(label)")
+                #expect(ReferenceFixture.segments(result) == [h.legitimate], "\(label)")
+                #expect("\(result)".contains(ReferenceFixture.legitimate) && !"\(result)".contains("B2层117号"), "\(label)")
+            }
+        }
+        let deps = try #require(box.file.assistant.scopeIndex.scopedRoot(h.current)).dependencies
+        #expect(deps.rootReads == [h.legitimate[0]] && deps.historicalMessageReads.isEmpty)
+        #expect(!box.file.assistant.scopeIndex.isMasked(root: h.current))
+    }
+
+    /// Forgotten after the page was planned from the earlier snapshot: the
+    /// commit still finds the mask, so the page is stale with no content and
+    /// nothing registered; the rebuilt list no longer has the window and the
+    /// next search returns the legitimate segment.
+    @Test(arguments: ReferenceFixture.Source.allCases)
+    fileprivate func aMaskAfterPlanningIsStillStaleAndTheRebuildRecovers(_ kind: ReferenceFixture.Source) async throws {
+        for query in Self.queries {
+            let h = try ReferenceFixture(kind)
+            let box = FileBox(h.file)
+            let entry = h.entry, current = h.current
+            let adapter = h.adapter(box, snapshot: {
+                let planned = box.file
+                box.edit { _ = try? ReadFixture.forget(entry, in: &$0, activeRoot: current) }
+                return planned
+            })
+            let label = "\(kind) \(query ?? "listing")"
+            let raced = try await adapter.searchSessions(AgentSessionSearchRequest(query: query))
+            #expect(raced.objectValue?["status"]?.stringValue == "stale_search" && !"\(raced)".contains("B2层117号"), "\(label)")
+            let deps = try #require(box.file.assistant.scopeIndex.scopedRoot(h.current)).dependencies
+            #expect(deps.isEmpty && box.file.assistant.memory.entry(h.entry) == nil, "\(label)")
+            let rebuilt = try await adapter.searchSessions(AgentSessionSearchRequest(query: query))
+            #expect(rebuilt.objectValue?["status"]?.stringValue == nil && ReferenceFixture.segments(rebuilt) == [h.legitimate], "\(label)")
+        }
+    }
+}
+
 /// Fails exactly the next write after `arm()`.
 private final class WriteFault: @unchecked Sendable {
     private let lock = NSLock()
