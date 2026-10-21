@@ -10,16 +10,24 @@ private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
         var chunks: [String] = []
         var delay: Double = 0
         var finish = true
+        /// Key of this load's progress in `loads`.
+        var label = ""
     }
+    enum Load: Sendable { case started, delivered, interrupted }
     static let script = Mutex(Script())
     static let stopped = Mutex(0)
+    /// Started → delivered (every chunk handed over) or interrupted (stopped before that).
+    static let loads = Mutex<[String: Load]>([:])
     private let cancelled = Mutex(false)
+    private let label = Mutex("")
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "consume.pocketagent.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let script = Self.script.withLock { $0 }
+        label.withLock { $0 = script.label }
+        Self.loads.withLock { $0[script.label] = .started }
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "text/event-stream"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -31,6 +39,7 @@ private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
                 if cancelled.withLock({ $0 }) { return }
                 client?.urlProtocol(self, didLoad: Data(chunk.utf8))
             }
+            Self.loads.withLock { if $0[script.label] == .started { $0[script.label] = .delivered } }
             if script.finish, !cancelled.withLock({ $0 }) { client?.urlProtocolDidFinishLoading(self) }
         }
     }
@@ -38,7 +47,16 @@ private final class TimedSSEProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {
         cancelled.withLock { $0 = true }
         Self.stopped.withLock { $0 += 1 }
+        let key = label.withLock { $0 }
+        Self.loads.withLock { if $0[key] == .started { $0[key] = .interrupted } }
     }
+}
+
+/// Bounded wait (fixture bound 5 s) for what the protocol's threads report.
+private func eventually(_ condition: () -> Bool) async throws -> Bool {
+    let end = ContinuousClock.now + .seconds(5)
+    while !condition(), ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(10)) }
+    return condition()
 }
 
 private func provider(_ script: TimedSSEProtocol.Script) -> AgentProviderClient {
@@ -76,14 +94,27 @@ struct ConsumeIntegrationTests {
     }
 
     @Test func oneDeadlineIsSharedAcrossFolds() async throws {
-        let shared = MaintenanceDeadline(turnRemaining: 600, total: 1.2)
-        let slow = TimedSSEProtocol.Script(chunks: (0..<8).map { delta("片段\($0)") } + [stop], delay: 0.1)
-        _ = try await StreamingSummary.run(request, producer: producer(provider(slow)), deadline: shared, idleSeconds: 5)
-        // The second fold has only the remainder (~0.3 s) and stops at the shared end.
-        await #expect(throws: SummaryPreparationError.self) {
-            try await StreamingSummary.run(request, producer: producer(provider(slow)), deadline: shared, idleSeconds: 5)
+        // A later fold gets only what is left of the turn's one budget, never a
+        // fresh one: `now:` started the production 150 s budget 149 s ago, as
+        // earlier folds would have. The fold streams 30 s of real chunks (a
+        // fixture bound a reset would let finish) until that end stops it.
+        let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，本轮不使用新的摘要")
+        let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 149)
+        let slow = { (label: String) in
+            TimedSSEProtocol.Script(chunks: (0..<300).map { delta("片段\($0)") } + [stop], delay: 0.1, label: label)
+        }
+        let streaming = UUID().uuidString, next = UUID().uuidString
+        await #expect(throws: overrun) {
+            try await StreamingSummary.run(request, producer: producer(provider(slow(streaming))), deadline: shared, idleSeconds: 60)
         }
         #expect(shared.remaining <= 0)
+        // The stop reached the real transfer: a load that started never delivered its whole stream.
+        #expect(try await eventually { [nil, .interrupted].contains(TimedSSEProtocol.loads.withLock { $0[streaming] }) })
+        // Spent: the next fold of the same budget is refused before sending a request.
+        await #expect(throws: overrun) {
+            try await StreamingSummary.run(request, producer: producer(provider(slow(next))), deadline: shared, idleSeconds: 60)
+        }
+        #expect(TimedSSEProtocol.loads.withLock { $0[next] } == nil)
     }
 
     @Test func cancellationStopsTheTransferAndSurfacesAsCancellation() async throws {

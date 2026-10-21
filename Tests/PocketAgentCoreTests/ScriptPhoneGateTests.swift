@@ -59,9 +59,21 @@ struct ScriptPhoneGateTests {
                 if lease.isActive { await bridge.service() } else { await bridge.refusePending() }
                 try await Task.sleep(for: .milliseconds(30))
             }
+            // Past the fixture bound (the helper itself waits 10 s): stop it and
+            // fail, never read the status of a running process (an exception).
+            guard !process.isRunning else {
+                process.terminate()
+                process.waitUntilExit()
+                throw HelperStillRunning()
+            }
             return process.terminationStatus
         }
     }
+
+    private struct HelperStillRunning: Error {}
+
+    /// The helper's exit status for a refused request (3 would be no answer within its own wait).
+    private let refused: Int32 = 4
 
     private func bridge(_ run: Run, lease: ScriptLease, owner: HistoryOwner, job: Job, executed: Executed) -> ScriptBridge {
         ScriptBridge(paths: run.paths, directory: "run/bridge", lease: lease) { call in
@@ -113,7 +125,6 @@ struct ScriptPhoneGateTests {
         let owner = HistoryOwner(file: file, writer: { _ in })
         let lease = ScriptLease(), job = Job(), executed = Executed()
         let bridge = bridge(run, lease: lease, owner: owner, job: job, executed: executed)
-        let started = Date()
         func forget(_ entry: UUID) throws {
             let preview = try owner.file.forgetPreview([entry], activeRoot: root)
             try owner.transact { _ = try $0.commitForget(preview, activeRoot: root) }
@@ -126,12 +137,12 @@ struct ScriptPhoneGateTests {
         #expect(try await run.call(bridge, lease: lease, ["press_home"]) == 0)
         try forget(a)
         #expect(job.revoked && owner.file.assistant.scopeIndex.isMasked(root: root))
-        #expect(try await run.call(bridge, lease: lease, ["press_home"]) != 0)
+        // Refusals are answered (exit 4), not left to the helper's own timeout.
+        #expect(try await run.call(bridge, lease: lease, ["press_home"]) == refused)
         job.revoked = false
         lease.revoke()
-        #expect(try await run.call(bridge, lease: lease, ["press_home"]) != 0)
+        #expect(try await run.call(bridge, lease: lease, ["press_home"]) == refused)
         #expect(executed.all == ["press_home", "press_home"])
-        #expect(Date().timeIntervalSince(started) < 8)
         #expect(ScriptPhoneAdmission.refusal(decision: .allow, leaseActive: false, effectsBlocked: nil) == ScriptPhoneAdmission.revoked)
     }
 }

@@ -1040,6 +1040,39 @@ concurrent successful-read and no-escape assertions, adds actual-swap/error
 witnesses and checks the normal read before and after the attack. Production
 file confinement is unchanged.
 
+Four Core tests of the assistant branch then failed on the macos-15/Xcode 26.2
+runner (406 of 410 passed) while each production path did what it is designed to
+do in the time it got. The first fold of the two shared-deadline tests
+(`StreamingSummaryTests`, `ConsumeIntegrationTests`) needed 0.7–0.9 s of sleeps or
+chunks inside a 1–1.2 s budget and ended with "上下文整理超过 150 秒";
+`ScriptPhoneGateTests` exceeded its 8 s total over four python3 helper calls
+(9.3 s) with correct statuses, refusals and masks; `endlessBodyIsCancelledAtTheLimit`
+met the loader's 15 s idle timeout (-1001) before its stub had sent 20 MB. On the
+Mac, keeping every cooperative thread CPU-busy (yielding every 300 ms; a temporary
+probe, not kept) reproduced two of them with the previous test code in three runs:
+the first fold failed with the same message, and the stub, which produced on
+`DispatchQueue.global()`, had sent 0 bytes when -1001 came after 16 s; the fixed
+tests passed beside it. That the runner was starved the same way is inferred, not
+observed. The tests no longer measure host speed. Deadlines use
+`MaintenanceDeadline(now:)` with the production 150 s total started 149 s
+earlier: a fold that finishes in time succeeds, the next fold of the spent budget
+is refused before its producer starts, and a fold given the last second streams
+until that end stops it with the exact message and a cancelled producer (a
+per-fold reset lets the 30 s bounded producer finish). The consume test streams
+such a last-second fold through the pinned `consume`: a transfer that started
+never delivers its whole stream, and the next fold of that budget sends no
+request. The script gate requires the
+helper's refusal status 4 (its own timeout gives 3) instead of a total time; a
+helper still running at the fixture's 15 s bound is killed and fails the test,
+where reading `terminationStatus` of a running process raised an uncaught
+NSException that ended the whole test process (shown with the old fixture). The
+image stub produces on its own thread and pauses after the first chunk past
+20 MB until the client cancels (at most 10 s, then the rest of 200 MiB), so
+exactly 21 MiB is sent; the loader's limit and 15/60 s timeouts apply unchanged.
+Temporarily resetting the budget per fold, leaving refusals unanswered or skipping
+the cancellation makes the matching test fail. Production code is unchanged; host
+runs only, the runner rerun is separate.
+
 ## DDI phone backend (2026-10-12)
 
 Status: implemented on the devicehub-control branch; selected-device acceptance
