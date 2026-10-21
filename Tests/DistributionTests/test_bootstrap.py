@@ -41,6 +41,7 @@ class IdeviceCheckoutTests(unittest.TestCase):
         self.write(self.upstream / 'ffi/src/lib.rs', LIB)
         self.write(self.upstream / 'ffi/Cargo.toml', '[package]\nname = "idevice-ffi"\n')
         self.write(self.upstream / 'README.md', 'idevice\n')
+        self.write(self.upstream / '.gitignore', 'ffi/idevice.h\n')
         git(base, 'init', '-q', self.upstream)
         git(self.upstream, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
         git(self.upstream, 'add', '-A')
@@ -75,6 +76,28 @@ class IdeviceCheckoutTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             path = bootstrap.prepare_idevice(self.root, self.spec)
         return path, output.getvalue()
+
+    def test_existing_ignored_generated_header_does_not_block_second_bootstrap(self):
+        path, _ = self.prepare()
+        self.write(path / 'ffi/idevice.h', 'generated header\n')
+        self.write(path / 'ignored.bin', 'must remain ignored\n')
+        # Ignore an unrelated local file without changing the recorded source.
+        (path / '.git/info/exclude').write_text('ignored.bin\n')
+        index_before = (path / '.git/index').read_bytes()
+        again, _ = self.prepare()
+        self.assertEqual(again, path)
+        self.assertEqual((path / '.git/index').read_bytes(), index_before)
+        self.assertEqual((path / 'ffi/idevice.h').read_text(), 'generated header\n')
+        self.write(path / 'ffi/keep.c', 'ordinary untracked source\n')
+        self.write(path / ' leading source.c', 'literal filename\n')
+        tree = bootstrap.worktree_tree(path)
+        names = git(path, 'ls-tree', '-r', '--name-only', '-z', tree).split('\0')
+        self.assertIn('ffi/keep.c', names)
+        self.assertIn(' leading source.c', names)
+        self.assertNotIn('ffi/idevice.h', names)
+        self.assertNotIn('ignored.bin', names)
+        self.assertFalse(any(name.startswith('ffi/src/pocket_ddi/') for name in names))
+        self.assertEqual((path / '.git/index').read_bytes(), index_before)
 
     def legacy_checkout(self):
         """Reproduce the previous bootstrap's in-place .deps/idevice result."""

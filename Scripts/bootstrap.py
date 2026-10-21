@@ -27,13 +27,13 @@ def run(args, **kwargs):
     subprocess.run([str(x) for x in args], check=True, **kwargs)
 
 
-def git(repo, *args, git_dir='.git', env=None, check=True):
+def git(repo, *args, git_dir='.git', env=None, check=True, input=None, raw=False):
     """Run Git in exactly this repository, never a discovered parent checkout."""
     result = subprocess.run(['git', '-C', str(repo), '--git-dir=' + git_dir, *map(str, args)],
-                            text=True, stdout=subprocess.PIPE, env=env)
+                            text=True, stdout=subprocess.PIPE, env=env, input=input)
     if check and result.returncode:
         raise subprocess.CalledProcessError(result.returncode, ['git', *map(str, args)])
-    return result.stdout.strip() if result.returncode == 0 else None
+    return (result.stdout if raw else result.stdout.strip()) if result.returncode == 0 else None
 
 
 def checkout(name, spec):
@@ -72,9 +72,20 @@ def locked(directory):
 
 def worktree_tree(repo):
     """Tree of the worktree's non-ignored contents; the checkout's index is untouched."""
+    # A negative literal pathspec for an existing ignored generated header can
+    # make `git add . :(exclude)header` fail. Enumerate the actual tracked and
+    # non-ignored paths first, then add only those to our separate empty index.
+    paths = [p for p in git(repo, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', raw=True).split('\0')
+             if p and not any(p == g or p.startswith(g + '/') for g in GENERATED)
+             and ((repo / p).exists() or (repo / p).is_symlink())]
     with tempfile.TemporaryDirectory() as directory:
         env = dict(os.environ, GIT_INDEX_FILE=str(Path(directory) / 'index'))
-        git(repo, 'add', '--all', '--', '.', *[':(exclude)' + p for p in GENERATED], env=env)
+        git(repo, 'read-tree', '--empty', env=env)
+        if paths:
+            # Force only the enumerated paths: tracked files may themselves
+            # match an ignore rule. Unlisted ignored files can never be added.
+            git(repo, '--literal-pathspecs', 'add', '--force', '--all', '--pathspec-from-file=-', '--pathspec-file-nul',
+                env=env, input='\0'.join(paths) + '\0')
         return git(repo, 'write-tree', env=env)
 
 
