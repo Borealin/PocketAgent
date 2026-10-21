@@ -231,7 +231,8 @@ struct RemoteImageLoaderTests {
     /// A streamed body of exactly the limit is accepted whole; with the
     /// refusal below this pins the limit the loader actually applies.
     @Test func streamedBodyOfTheLimitLoads() async throws {
-        let total = Int(RemoteImagePolicy.maxBytes)
+        let total = 20 * 1024 * 1024
+        #expect(RemoteImagePolicy.maxBytes == total)
         StubImageProtocol.register("/limit.jpg", .chunked(total: total, chunk: 1024 * 1024))
         #expect(try await load("/limit.jpg").count == total)
     }
