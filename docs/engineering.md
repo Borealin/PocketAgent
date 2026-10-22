@@ -25,9 +25,10 @@ most 30 seconds within its frozen turn budget. This is optional preparation for
 the next turn; the 70% blocking preparation policy remains. Stop, expiration and
 turn teardown cancel and drain it. Source edits/chain changes reject its CAS;
 forgetting, storage errors and the turn deadline stop the turn. An optional
-summary's own timeout/provider failure leaves the existing context in use.
+summary's own timeout or ordinary provider failure leaves the existing context
+in use; a classified provider context-limit rejection still stops the turn.
 
-AgentKit is pinned to `e382e5e5c4412e997ba42daa1230930800f88c44` in all
+AgentKit is pinned to `5800aa0335bfe4f07ecdf62388193aab33203625` in all
 dependency manifests and both lockfiles. Fork main follows upstream 4.0.0 at
 `3481866cd47e83f6bf56b80c432c7824f61130b9`; the downstream diff retains bounded
 consumption and commit acknowledgements, refines upstream bare-error handling,
@@ -38,6 +39,21 @@ catalog and re-truncated host-bounded results, losing continuation metadata.
 registration (the SDK default remains enabled). `HostToolResult` freezes its
 existing bounded projection only after SDK redaction, preserving raw history and
 continuation fields while avoiding a second generic truncation.
+Phone observations have a separate frozen, redacted projection capped at 64 KiB.
+It retains snapshot_id, app and screen while dropping only complete trailing
+nodes and marking model_omitted_elements/truncated; raw event content remains
+available to the existing history writer. This fixes the upstream generic
+head/line projection dropping the action identity even for compact observations
+with many short nodes. A text-only next request must retain that identity.
+
+A completed assistant message cancelled during its commit wait now receives one
+not-started result/card per call before terminal cleanup, preserving adjacency
+and distinguishing work never dispatched from unknown interrupted effects.
+Cancellation at the dispatch fence uses the same explicit reason; storage
+failures retain their own descriptions. Optional maintenance timeout text uses
+its configured duration (30 seconds for early work, 150 for preparation) and
+states that no new summary was generated.
+
 Its ordered drain awaits the existing
 host message/result write barrier before later dispatch. Snapshot writes throw;
 successful completion follows the terminal snapshot save. The SDK cancellation
@@ -275,9 +291,9 @@ phase bubble and Doubao's official task-queue illustration.
 ## Decisions
 
 Pin AgentKit to the published fork Borealin/AgentKit at
-e1c81c911564c39d5f78ccec6808ba96c1acd2e8 (upstream 8108c9b plus the bounded
-`consume` API used for context maintenance, and a bare SSE `error` frame
-failing the stream) and keep the verified
+5800aa0335bfe4f07ecdf62388193aab33203625 (upstream 4.0.0 plus bounded maintenance consumption,
+awaited durable/host commits, cancellation settlement and an explicit tool
+registry option) and keep the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
@@ -684,10 +700,11 @@ nothing replayed); its stalled stage and the bounds added since are under
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
 SSE line, 65,536 events, terminal required, callback in the producer task) is
-published on the fork branch `codex/pocketagent-bounded-consume` and pinned at
-its immutable revision e1c81c9, which also fails a stream on a bare SSE `error`
-frame (published 2026-10-15 as a fast-forward from 22fc575); default
-stream/complete and the loop are otherwise unchanged.
+published on the fork branch `codex/durable-event-commits` and pinned at
+immutable revision 5800aa0335bfe4f07ecdf62388193aab33203625. This includes upstream
+4.0.0, host commit acknowledgements and not-started settlement when a completed
+message is cancelled while awaiting its commit. The earlier assistant-v1
+implementation used e1c81c9; its dated acceptance remains historical context.
 Summary folds stream through it into the Core collector under one 150-second
 maintenance deadline shared by up to three folds and capped by the turn
 deadline, a 45-second idle limit refreshed only by new real content, coalesced

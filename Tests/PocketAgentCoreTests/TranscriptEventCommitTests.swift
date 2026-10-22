@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 struct TranscriptEventCommitTests {
-    @Test(arguments: ["none", "message", "result"])
+    @Test(arguments: ["none", "message", "result", "cancel"])
     func sdkDrainAwaitsTheAuthoritativeOwnerAndStopsAfterWriteFailure(failure: String) async throws {
         let writer = EventCommitWriter()
         let owner = HistoryOwner(file: .initial(selection: nil), writer: { try writer.write($0) })
@@ -39,6 +39,7 @@ struct TranscriptEventCommitTests {
                 prompt: prompt.text, permissionMode: .fullAccess)) {
             switch event {
             case .messageFinished(let message):
+                if failure == "cancel" { await runtime.cancel() }
                 if failure == "message" { writer.fail = true }
                 let stored = ChatSession.forHistory(message)
                 owner.record(commit: .init(epoch: 1, messages: [stored.id: try CommittedMessage(stored)])) {
@@ -60,10 +61,16 @@ struct TranscriptEventCommitTests {
         }
         #expect(calls.count == (failure == "none" ? 2 : failure == "result" ? 1 : 0))
         #expect(model.requests.count == (failure == "none" ? 2 : 1))
-        #expect(terminal == (failure == "none" ? .completed : .failed))
-        if failure == "none" {
+        #expect(terminal == (failure == "none" ? .completed : failure == "cancel" ? .cancelled : .failed))
+        if failure == "none" || failure == "cancel" {
             let saved = try HistoryCodec.decode(try #require(writer.last))
-            #expect(saved.primary?.messages.map(\.role) == [.user, .assistant, .tool, .tool, .assistant])
+            #expect(owner.health.isReady)
+            #expect(saved.primary?.messages.map(\.role) == (failure == "cancel"
+                ? [.user, .assistant, .tool, .tool] : [.user, .assistant, .tool, .tool, .assistant]))
+            if failure == "cancel" {
+                #expect(saved.primary?.messages.suffix(2).map(\.toolCallID) == ["first", "second"])
+                #expect(saved.primary?.messages.suffix(2).allSatisfy(\.isError) == true)
+            }
         } else {
             #expect(!owner.health.isReady)
             // An effect which happened remains visible even when its write fails.

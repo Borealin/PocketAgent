@@ -380,7 +380,7 @@ final class PhoneExecutor {
         defer { release() }
         do {
             let result = try await perform(call)
-            return AgentToolResult(callID: call.id, content: result.content, isError: result.isError)
+            return try PhoneToolResult.make(callID: call.id, content: result.content, isError: result.isError)
         } catch is ActionStopped { throw CancellationError() }
     }
 

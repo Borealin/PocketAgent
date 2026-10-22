@@ -134,7 +134,7 @@ struct StreamingSummaryTests {
         // One maintenance budget across folds, never reset per fold. `now:`
         // starts the production 150 s budget 145 s ago, as the turn's earlier
         // folds would have; host load only shortens what is left of it.
-        let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，本轮不使用新的摘要")
+        let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，未生成新的摘要")
         let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 145)
         let first = try await StreamingSummary.run(request, producer: { _, onEvent in
             try onEvent(.textDelta("摘要")); try onEvent(.finished(.completed))
@@ -162,6 +162,17 @@ struct StreamingSummaryTests {
         #expect(cut.started && cut.cancelled)
         #expect(!MaintenanceDeadline(turnRemaining: 600).turnBound)
         #expect(MaintenanceDeadline(turnRemaining: 600).remaining <= 150)
+    }
+
+    @Test(arguments: [30.0, 150.0])
+    func timeoutExplainsTheConfiguredMaintenanceLimit(total: TimeInterval) async throws {
+        let deadline = MaintenanceDeadline(turnRemaining: 600, total: total,
+                                           now: ProcessInfo.processInfo.systemUptime - total - 1)
+        let calls = CallCounter()
+        await #expect(throws: SummaryPreparationError(detail: "上下文整理超过 \(Int(total)) 秒，未生成新的摘要")) {
+            try await StreamingSummary.run(request, producer: { _, _ in calls.increment() }, deadline: deadline)
+        }
+        #expect(calls.count == 0)
     }
 
     /// Cancelling the preparing turn surfaces as cancellation even when the

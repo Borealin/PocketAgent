@@ -34,6 +34,7 @@
 		568A57DD3305D84BA6EA0463 /* TranscriptCommitBarrier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5663978DEBD3F751D7210B1 /* TranscriptCommitBarrier.swift */; };
 		57C44385DA945E2A5354D679 /* ScriptBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3DAE3AE5F2A927B0D4EE00C /* ScriptBridge.swift */; };
 		58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */; };
+		5BA9A2FB10F9F4683CD3D9A3 /* PhoneToolResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA287EE426C153B9DCAD7DF /* PhoneToolResult.swift */; };
 		6310CDFC25B8F19D1BAE638E /* AgentContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2149D605EB4681C28AA432 /* AgentContextBuilder.swift */; };
 		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
 		675D3CF2870105A39B860779 /* LongHistoryBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */; };
@@ -158,6 +159,7 @@
 		92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViews.swift; sourceTree = "<group>"; };
 		9546B4615DB532FC42BF7335 /* Rules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rules.swift; sourceTree = "<group>"; };
 		977B20A2A6DF7983523E8FCB /* PhoneAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAgent.swift; sourceTree = "<group>"; };
+		9AA287EE426C153B9DCAD7DF /* PhoneToolResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneToolResult.swift; sourceTree = "<group>"; };
 		9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIOperationFailure.swift; sourceTree = "<group>"; };
 		A187CEE22A5291401CCFC137 /* DDICallBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDICallBudget.swift; sourceTree = "<group>"; };
 		A1886BBBBAFC254584C69CDD /* SummaryMaintenanceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryMaintenanceProbe.swift; sourceTree = "<group>"; };
@@ -281,6 +283,7 @@
 				88E51E4C8A00C974E4731352 /* PairingImport.swift */,
 				ADAD0AE6F0F16BBF4D67A42D /* PendingEdits.swift */,
 				E39E07338DA36C6016FB8828 /* PhoneBackend.swift */,
+				9AA287EE426C153B9DCAD7DF /* PhoneToolResult.swift */,
 				7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
 				55ACD59AFD5BF28ED85E3B02 /* PrecompactionTask.swift */,
@@ -506,6 +509,7 @@
 				721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */,
 				F0045BD4B028EC7CD11A0D87 /* PhoneConnectionStatus.swift in Sources */,
 				8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */,
+				5BA9A2FB10F9F4683CD3D9A3 /* PhoneToolResult.swift in Sources */,
 				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				EE2DB1A7602817A794DF95CA /* PocketMemoryAdapter.swift in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
@@ -746,7 +750,7 @@
 			repositoryURL = "https://github.com/Borealin/AgentKit.git";
 			requirement = {
 				kind = revision;
-				revision = e382e5e5c4412e997ba42daa1230930800f88c44;
+				revision = 5800aa0335bfe4f07ecdf62388193aab33203625;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
