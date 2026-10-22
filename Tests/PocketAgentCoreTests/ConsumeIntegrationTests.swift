@@ -108,7 +108,7 @@ struct ConsumeIntegrationTests {
         // earlier folds would have. The fold streams 8 s of real chunks, about
         // 3 s past that end (a fixture bound): a per-fold reset, or a stop
         // that much later, lets it finish.
-        let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，本轮不使用新的摘要")
+        let overrun = SummaryPreparationError(detail: "上下文整理超过 150 秒，未生成新的摘要")
         let shared = MaintenanceDeadline(turnRemaining: 600, now: ProcessInfo.processInfo.systemUptime - 145)
         let slow = { (label: String) in
             TimedSSEProtocol.Script(chunks: (0..<80).map { delta("片段\($0)") } + [stop], delay: 0.1, label: label)

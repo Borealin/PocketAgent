@@ -92,9 +92,7 @@ extension Model {
                     let origin = streamStamp.origin(), fields = trace.fields
                     Task { @MainActor in self?.log("model_stream", fields, origin: origin) }
                 }
-                var loop = AgentLoopConfiguration()
-                loop.toolExecution = .sequential; loop.maximumToolConcurrency = 1
-                loop.modelRetryPolicy = AgentModelRetryPolicy(delays: [.seconds(1)])
+                var loop = AgentInstructions.loopConfiguration()
                 var tools = turn.tools()
                 var prior = priorMessages
                 var systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,
@@ -161,7 +159,11 @@ extension Model {
                     case .deny(let reason): .deny(reason)
                     }
                 }
-                let runtime = AgentRuntime(model: gatedModel, tools: tools, approval: approval, configuration: loop)
+                let repository = InMemoryAgentRunRepository()
+                let commit = TranscriptEventCommit(barrier: gates.barrier, epoch: gates.epoch)
+                let channel = AgentEventChannel(repository: repository, committing: { try await commit.commit($0) })
+                let runtime = AgentRuntime(model: gatedModel, tools: tools, approval: approval,
+                                           repository: repository, configuration: loop, channel: channel)
                 log("phone_agent_started", ["tools": tools.map { $0.descriptor.name }, "imageInput": config.supportsImages,
                     "workspace": workspace != nil, "globalRules": rules.globalRules != nil,
                     "projectRules": rules.projectRules != nil, "skills": rules.skills.count,
@@ -172,9 +174,11 @@ extension Model {
                 try Task.checkCancellation()
                 try gates.permit()
                 activeAgentRuntime = runtime
+                activeMaintenance = gates.assistant?.precompaction
                 let watchdog = Task {
                     do { try await Task.sleep(for: .seconds(max(0, deadline.remaining))) } catch { return }
                     log("deadline_exceeded")
+                    self.activeMaintenance?.cancel()
                     // The turn's own limit, not a user Stop: it is the reported cause.
                     if status.value.failure == nil { status.value.failure = TurnDeadlineReached().errorDescription }
                     await runtime.cancel()
@@ -192,6 +196,13 @@ extension Model {
                         switch event {
                         // Default diagnostics omit arguments, results and message text.
                         case .toolStarted(let invocation):
+                            gates.assistant?.startPrecompaction(
+                                prompt: AgentTranscriptMessage(id: promptID, role: .user, text: goal, images: images),
+                                systemPrompt: systemPrompt, tools: tools.map(\.descriptor), provider: provider, deadline: deadline,
+                                stopTurn: { error in
+                                    if status.value.failure == nil { status.value.failure = error.localizedDescription }
+                                    Task { await runtime.cancel() }
+                                })
                             log("tool_started", ["name": invocation.call.name, "callID": invocation.call.id])
                         case .toolFinished(let invocation, let result):
                             log("tool_finished", ["name": invocation.call.name, "callID": result.callID,
@@ -214,6 +225,10 @@ extension Model {
                 }
                 log(Task.isCancelled ? "interrupted" : "failed", Model.errorFields(error))
             }
+            await gates.assistant?.precompaction.finish()
+            if gates.assistant?.precompaction.requiresTurnStop == true { successful = false }
+            if let note = gates.assistant?.maintenanceNote { status.value.contextNote = note }
+            activeMaintenance = nil
             task.expirationHandler = nil
             if !status.value.phase.isTerminal { status.value.phase = .finishing }
             publish("finishing")
@@ -365,7 +380,7 @@ final class PhoneExecutor {
         defer { release() }
         do {
             let result = try await perform(call)
-            return AgentToolResult(callID: call.id, content: result.content, isError: result.isError)
+            return try PhoneToolResult.make(callID: call.id, content: result.content, isError: result.isError)
         } catch is ActionStopped { throw CancellationError() }
     }
 
@@ -588,8 +603,7 @@ final class PhoneExecutor {
         apps.map { ["bundle_id": $0.bundleID, "name": $0.name as Any? ?? NSNull(), "names": $0.names] }
     }
     private static func result(_ object: [String: Any], error: Bool = false) throws -> (content: String, isError: Bool) {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return (String(decoding: data, as: UTF8.self), error)
+        try PhoneToolResult.encode(object, isError: error)
     }
     private func inputElement(_ a: [String: String], base: String, proceed: () throws -> Void) async throws -> PhoneInput {
         let input = try await control.input(a)

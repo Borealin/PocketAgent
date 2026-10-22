@@ -1,5 +1,6 @@
 import QuartzCore
 import SwiftUI
+import AgentKit
 
 /// Next-frame and frame-interval timing from the display link.
 @MainActor
@@ -96,12 +97,33 @@ struct ViewportBenchmarkRoot: View {
             status = "\(size) 条：请滚动（8 秒）"
             let intervals = await probe.record(seconds: 8)
             let sorted = intervals.sorted()
+            // Exercise the display cache under rapid live-row replacement,
+            // using the same read-only synthetic controller. This is a UI
+            // workload, without a provider, run events or history writes.
+            status = "\(size) 条：流式显示"
+            let sessionID = file.sessions[0].id
+            let stream = Task { @MainActor in
+                var partial = AgentTranscriptMessage(role: .assistant, text: "流式显示：")
+                for _ in 0..<200 {
+                    partial.text += "这是新增的一段文字。"
+                    controller.live[sessionID] = partial
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            let streaming = await probe.record(seconds: 3)
+            await stream.value
+            controller.live[sessionID] = nil
+            let sortedStreaming = streaming.sorted()
             results.append(["messages": size, "nextFrameAfterShowSeconds": firstFrame,
                             "nextFrameAfterProgrammaticLoadEarlierSeconds": earlier,
                             "visibleAfterLoads": ChatTranscriptView.pageSize * 6,
                             "scrollFrames": intervals.count, "frameIntervalP50": sorted.isEmpty ? 0 : sorted[sorted.count / 2],
                             "frameIntervalP95": sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, sorted.count * 95 / 100)],
                             "frameIntervalMax": sorted.last ?? 0, "framesOver50ms": intervals.filter { $0 > 0.05 }.count,
+                            "syntheticLiveUpdates": 200,
+                            "streamFrameIntervalP95": sortedStreaming.isEmpty ? 0 : sortedStreaming[min(sortedStreaming.count - 1, sortedStreaming.count * 95 / 100)],
+                            "streamFrameIntervalMax": sortedStreaming.last ?? 0,
+                            "streamFramesOver50ms": streaming.filter { $0 > 0.05 }.count,
                             "writerCalls": writerCalls,
                             "storageLoadBlocked": { if case .loadBlocked = controller.owner.health { true } else { false } }()])
             viewer = nil

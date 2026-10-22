@@ -23,6 +23,25 @@ nonisolated struct SummaryPreparationError: LocalizedError, Equatable {
     var errorDescription: String? { "上下文整理失败：\(detail)" }
 }
 
+/// The SDK's ordered drain awaits the existing host write, without a second
+/// history owner. UI delivery stays separate so it can supply the write ACK.
+nonisolated struct TranscriptEventCommit: Sendable {
+    let barrier: TranscriptCommitBarrier
+    let epoch: UInt64
+    var timeout: Duration = .seconds(30)
+
+    func commit(_ event: AgentEvent) async throws {
+        switch event {
+        case .messageFinished(let message):
+            let digest = try MessageDigestDTO.requestDigest(message)
+            try await barrier.wait(epoch: epoch, .messages([message.id: digest]), timeout: timeout)
+        case .toolFinished(let invocation, let result):
+            try await barrier.wait(epoch: epoch, .toolResult(runID: invocation.runID, callID: result.callID), timeout: timeout)
+        default: break
+        }
+    }
+}
+
 /// Every actual model request of a gated run passes here: first the awaited
 /// save acknowledgement of every real message since this run's prompt, then
 /// the host's per-request preparation (memory refresh, projections, budget,

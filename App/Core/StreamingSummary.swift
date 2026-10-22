@@ -111,12 +111,14 @@ nonisolated struct MaintenanceDeadline: Sendable {
     let end: TimeInterval
     /// True when the turn deadline, not the maintenance limit, is the end.
     let turnBound: Bool
+    let maintenanceLimit: TimeInterval
 
     init(turnRemaining: TimeInterval, total: TimeInterval = MaintenanceDeadline.total,
          now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         let budget = max(0, min(total, turnRemaining))
         end = now + budget
         turnBound = turnRemaining <= total
+        maintenanceLimit = max(0, total)
     }
 
     var remaining: TimeInterval { end - ProcessInfo.processInfo.systemUptime }
@@ -183,6 +185,6 @@ nonisolated enum StreamingSummary {
 
     private static func expired(_ deadline: MaintenanceDeadline) -> any Error {
         deadline.turnBound ? TurnDeadlineReached()
-            : SummaryPreparationError(detail: "上下文整理超过 \(Int(MaintenanceDeadline.total)) 秒，本轮不使用新的摘要")
+            : SummaryPreparationError(detail: "上下文整理超过 \(Int(deadline.maintenanceLimit)) 秒，未生成新的摘要")
     }
 }

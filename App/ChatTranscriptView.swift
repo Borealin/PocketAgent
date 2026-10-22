@@ -20,22 +20,22 @@ struct ChatTranscriptView: View {
     @State private var pendingLink: URL?
 
     var body: some View {
-        let all = chat.displayedMessages
         let limit = chat.selectedID.flatMap { chat.visibleLimit[$0] } ?? Self.pageSize
-        let messages = Self.page(all, limit: limit)
-        let hidden = all.count - messages.count
-        let items = TranscriptItem.build(messages)
+        let page = chat.transcriptPage(limit: limit)
+        let messages = page.messages
+        let hidden = page.hiddenCount
+        let items = page.items
         let running = chat.selectedID.map(chat.isRunning) ?? false
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                if all.isEmpty {
+                if page.totalCount == 0 {
                     Text(chat.isPrimary(chat.selectedID)
                          ? "这是你的助理。换话题、换模型或隔天回来都在这里继续；用“记住：…”保存你希望它记住的事。"
                          : "开始一个新话题，也可以让助手打开 App、查找内容或操作手机。")
                         .font(.callout).foregroundStyle(.secondary).padding(.vertical, 24)
                 }
                 if hidden > 0, let id = chat.selectedID {
-                    Button("显示更早的 \(min(hidden, Self.pageSize)) 条（共 \(all.count) 条）") {
+                    Button("显示更早的 \(min(hidden, Self.pageSize)) 条（共 \(page.totalCount) 条）") {
                         chat.visibleLimit[id] = limit + Self.pageSize
                     }
                     .font(.footnote).frame(maxWidth: .infinity).accessibilityIdentifier("loadEarlier")

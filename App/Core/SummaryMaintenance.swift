@@ -30,13 +30,18 @@ enum SummaryMaintenance {
     }
 
     static func run(_ plan: SummaryPlan, turn: Turn, owner: HistoryOwner, producer: @escaping StreamingSummary.Producer,
-                    deadline: MaintenanceDeadline, progress: ProgressCoalescer? = nil) async throws {
+                    deadline: MaintenanceDeadline, progress: ProgressCoalescer? = nil,
+                    isActive: @MainActor () -> Bool = { true }) async throws {
+        try Task.checkCancellation()
+        guard isActive() else { throw CancellationError() }
         var predecessor = plan.predecessor
         let forgetEpoch = owner.file.assistant.memory.forgetEpoch
         if let tip = predecessor, plan.predecessorDepth + plan.folds.count > AssistantContext.maxChainDepth {
             predecessor = try checkpoint(tip, turn: turn, owner: owner, forgetEpoch: forgetEpoch)
         }
         for fold in plan.folds {
+            try Task.checkCancellation()
+            guard isActive() else { throw CancellationError() }
             let messages = fold.flatMap(\.messages)
             guard let last = messages.last else { continue }
             try ensureStorage(owner)
@@ -56,6 +61,8 @@ enum SummaryMaintenance {
             let input = try AssistantContext.inputDigest(messages: messages, attachments: file.session(turn.sessionID)?.attachments ?? [:],
                                                          scope: turn.scope, parent: predecessor)
             let text = try await StreamingSummary.run(request, producer: producer, deadline: deadline, progress: progress)
+            try Task.checkCancellation()
+            guard isActive() else { throw CancellationError() }
             // A forget during the fold discards its result and stops the turn.
             try ensureStorage(owner)
             try checkSources(owner.file, fold: fold, predecessor: predecessor, turn: turn, forgetEpoch: forgetEpoch)

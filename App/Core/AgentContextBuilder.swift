@@ -554,6 +554,8 @@ nonisolated enum AssistantContext {
         var tools: [AgentToolDescriptor]
         /// Prompt text/images of this run.
         var prompt: [AgentTranscriptMessage]
+        /// Optional maintenance can start below the blocking preparation watermark.
+        var earlyMaintenance = false
     }
 
     /// Pure: no await, no history mutation.
@@ -599,13 +601,28 @@ nonisolated enum AssistantContext {
                                                 messages: messages + input.prompt)
         var plan: SummaryPlan?
         var refusal: MaintenanceRefusal?
-        if estimate > input.budget.summaryTrigger {
+        if estimate > (input.earlyMaintenance ? input.budget.target / 2 : input.budget.summaryTrigger) {
             (plan, refusal) = summaryPlan(remaining, predecessor: summary, input: input)
             plan?.predecessorDepth = depth
         }
         return PreparedContext(messages: messages, syntheticIDs: synthetic, rawRoots: rawRoots, summaryRoots: summaryRoots,
                                summaryID: summary?.id, quotes: quotes, partialSuffix: partialSuffix,
                                plan: plan, refusal: refusal, estimatedTokens: estimate)
+    }
+
+    /// One stable prefix before the active prompt, for the next turn. Never
+    /// summarize the active root or re-root a chain the current request uses.
+    static func precompactionPlan(_ input: Input) -> SummaryPlan? {
+        guard input.sessionID == input.file.assistant.primarySessionID,
+              input.file.session(input.sessionID)?.messages.contains(where: { $0.id == input.promptID }) == true,
+              input.file.assistant.scopeIndex.scopedRoot(input.promptID)?.dispatchAuthorized == true,
+              !input.file.assistant.scopeIndex.isMasked(root: input.promptID) else { return nil }
+        var early = input
+        early.earlyMaintenance = true
+        guard var plan = build(early).plan, !plan.folds.isEmpty, plan.predecessorDepth < maxChainDepth else { return nil }
+        plan.folds = Array(plan.folds.prefix(1))
+        plan.blocked = nil
+        return plan
     }
 
     /// Tokens a summary is assumed to carry into the next fold of the same

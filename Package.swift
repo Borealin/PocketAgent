@@ -9,7 +9,7 @@ let package = Package(
     products: [.library(name: "PocketAgentCore", targets: ["PocketAgentCore"])],
     dependencies: [
         .package(url: "https://github.com/Borealin/AgentKit.git",
-                 revision: "e1c81c911564c39d5f78ccec6808ba96c1acd2e8"),
+                 revision: "5800aa0335bfe4f07ecdf62388193aab33203625"),
     ],
     targets: [
         .target(

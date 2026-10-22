@@ -50,6 +50,7 @@ nonisolated final class TranscriptCommitBarrier: @unchecked Sendable {
         /// A tool call may run once its assistant message (with this call's
         /// arguments) and every earlier call's result in that message are saved.
         case toolDispatch(runID: UUID, sourceMessageID: UUID, callID: String, callDigest: String)
+        case toolResult(runID: UUID, callID: String)
     }
 
     private struct Waiter {
@@ -179,6 +180,8 @@ nonisolated final class TranscriptCommitBarrier: @unchecked Sendable {
             // Each earlier call's own watermark, not the existence of a local
             // result message: provider-answered calls have none.
             return message.calls[..<index].allSatisfy { results.contains(ResultKey(runID: runID, callID: $0.id)) }
+        case .toolResult(let runID, let callID):
+            return results.contains(ResultKey(runID: runID, callID: callID))
         }
     }
 }

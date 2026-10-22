@@ -15,6 +15,71 @@ impact before excluding sources. Status and verification scope are in
 breaking data format without legacy compatibility or migration, and then the
 full implementation.
 
+The [agent runtime and display follow-up](agent-runtime-experience.md) keeps
+that contract and the assistant-v1 format. The transcript caches a visible
+window by owner revision and live identity; only replaceable live text is
+published at 50 ms intervals. Final messages, results and commit acknowledgements
+retain their original event path. Once tool work starts, a primary turn may
+summarize one stable prefix of earlier history at the 50% input target, for at
+most 30 seconds within its frozen turn budget. This is optional preparation for
+the next turn; the 70% blocking preparation policy remains. Stop, expiration and
+turn teardown cancel and drain it. Source edits/chain changes reject its CAS;
+forgetting, storage errors and the turn deadline stop the turn. An optional
+summary's own timeout or ordinary provider failure leaves the existing context
+in use; a classified provider context-limit rejection still stops the turn.
+
+AgentKit is pinned to `5800aa0335bfe4f07ecdf62388193aab33203625` in all
+dependency manifests and both lockfiles. Fork main follows upstream 4.0.0 at
+`3481866cd47e83f6bf56b80c432c7824f61130b9`; the downstream diff retains bounded
+consumption and commit acknowledgements, refines upstream bare-error handling,
+and extends its unified finish without restoring per-run secret teardown.
+The upstream upgrade initially advertised shared scratch tools outside the host
+catalog and re-truncated host-bounded results, losing continuation metadata.
+`AgentInstructions.loopConfiguration()` explicitly disables automatic scratch
+registration (the SDK default remains enabled). `HostToolResult` freezes its
+existing bounded projection only after SDK redaction, preserving raw history and
+continuation fields while avoiding a second generic truncation.
+Phone observations have a separate frozen, redacted projection capped at 64 KiB.
+It retains the nested screen.snapshot_id, app and dimensions while dropping
+only complete trailing nodes and marking screen.model_omitted_elements/truncated.
+The outer ok/action outcome/input/recovery/no-replay fields are preserved;
+oversized remote failure prose can be shortened with an explicit marker.
+The phone executor and contract fixtures share the result serializer and cover
+both successful and unconfirmed-action envelopes. Raw event content remains
+available to the existing history writer. This fixes the upstream generic
+head/line projection dropping the action identity even for compact observations
+with many short nodes. A text-only next request must retain that identity.
+
+A completed assistant message cancelled during its commit wait now receives one
+not-started result/card per call before terminal cleanup, preserving adjacency
+and distinguishing work never dispatched from unknown interrupted effects.
+Cancellation at the dispatch fence uses the same explicit reason; storage
+failures retain their own descriptions. Optional maintenance timeout text uses
+its configured duration (30 seconds for early work, 150 for preparation) and
+states that no new summary was generated.
+
+The SDK's ordered drain awaits the existing
+host message/result write barrier before later dispatch. Snapshot writes throw;
+successful completion follows the terminal snapshot save. The SDK cancellation
+regression found during this work was caused by flushing from an already
+cancelled task: its cancellation-aware wait aborted the terminal save and
+reported failure. Cleanup now drains and attempts the terminal save from an
+uncancelled task, retaining a real storage failure as failure. This adds no
+phone-action replay or second authoritative history writer. The viewport launch
+probe also replaces a synthetic live row rapidly in its read-only controller;
+its display-link intervals measure main-thread availability, not completed
+presentation or a provider/phone workflow. Build and device acceptance records
+remain local outside Git.
+
+The synthetic live-row probe exposed another repeated cost after paging:
+`TranscriptItem.build` reparsed tool observations across all 2,400 expanded
+messages on each update. The visible window now caches its grouped timeline
+as well as messages and replaces just the live item. The same 200-update
+workload over 10k/50k histories on the 12 mini changed display-link p95 from
+about 450–470 ms to about 23 ms. This is a short synthetic regression check,
+including updates faster than the production display coalescer; it does not
+measure end-to-end provider latency or prove every frame was presented.
+
 Native provider management on a dedicated page, provider/model selection per
 conversation (the primary line and independent tasks alike), iCloud Drive
 synchronization of portable data, reproducible IPA
@@ -230,9 +295,9 @@ phase bubble and Doubao's official task-queue illustration.
 ## Decisions
 
 Pin AgentKit to the published fork Borealin/AgentKit at
-e1c81c911564c39d5f78ccec6808ba96c1acd2e8 (upstream 8108c9b plus the bounded
-`consume` API used for context maintenance, and a bare SSE `error` frame
-failing the stream) and keep the verified
+5800aa0335bfe4f07ecdf62388193aab33203625 (upstream 4.0.0 plus bounded maintenance consumption,
+awaited durable/host commits, cancellation settlement and an explicit tool
+registry option) and keep the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
@@ -639,10 +704,11 @@ nothing replayed); its stalled stage and the bounds added since are under
 AgentKit dependency: the bounded maintenance API
 (`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
 SSE line, 65,536 events, terminal required, callback in the producer task) is
-published on the fork branch `codex/pocketagent-bounded-consume` and pinned at
-its immutable revision e1c81c9, which also fails a stream on a bare SSE `error`
-frame (published 2026-10-15 as a fast-forward from 22fc575); default
-stream/complete and the loop are otherwise unchanged.
+published on the fork branch `codex/durable-event-commits` and pinned at
+immutable revision 5800aa0335bfe4f07ecdf62388193aab33203625. This includes upstream
+4.0.0, host commit acknowledgements and not-started settlement when a completed
+message is cancelled while awaiting its commit. The earlier assistant-v1
+implementation used e1c81c9; its dated acceptance remains historical context.
 Summary folds stream through it into the Core collector under one 150-second
 maintenance deadline shared by up to three folds and capped by the turn
 deadline, a 45-second idle limit refreshed only by new real content, coalesced
