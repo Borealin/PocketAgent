@@ -518,11 +518,42 @@ file confinement is unchanged.
 ## DDI phone backend (2026-10-12)
 
 Status: implemented on the devicehub-control branch; selected-device acceptance
-includes the shared executor and production chat path for cross-app Unicode input.
+includes the shared executor and production chat path for clipboard-based cross-app Unicode input.
 The same-identity original-app update preserved existing data, and the settings
 selector was exercised in both directions before restoring DDI.
 The user selected DDI as the default with a manual
-WDA selector, and requires text input in other apps without XCTest.
+WDA selector, and requires text input in other apps without XCTest. The DDI
+path and all new input methods must also avoid testmanagerd/XCTestSession and
+UI Automation authorization; removing the separate Runner alone is insufficient.
+The attempted local NSXPC Unicode integration has been withdrawn because it
+violates that requirement. Clipboard-free Unicode with normal business callbacks
+remains unresolved under this constraint. On 2026-10-22 the user accepted the
+existing paste, physical-key and guarded AX replacement routes and deferred the
+new Unicode route; it is no longer an input-delivery prerequisite. The APIs
+already exist, so this decision needs no new runtime implementation. See the
+[consolidated findings and review](devicehub-control.md#input-decision-and-review-disposition-2026-10-22)
+for the three-method contract, fixed review issues and remaining stability limits.
+Existing explicit WDA compatibility is separate and never an automatic DDI fallback.
+The subsequent strict-no-XCTest investigation closes the ordinary-app IOKit
+type-zero lead on the inspected iOS 27.0/24A437 seed: connection creation requires
+HID admin permission; nonzero types require HID event-dispatch permission at the
+virtual-service/dispatch receivers. An ordinary-signed, UUID-pinned admission
+probe creates a type-zero client object but obtains no server port, while types
+3/4 obtain valid send rights. No input event is sent by that probe; the dispatch
+restriction is established from matching receiver code, not a runtime dispatch
+result. This does not establish that an Apple DDI sender has the same restriction.
+
+Independent UITextView controls receive a physical HID `7`, update the business
+model and call `textViewDidChange`, both with and without an active media session.
+Arbitrary Unicode remains unproven. Raw DDI `createService` requests using either
+a Unicode-page or standard keyboard descriptor trigger the same dtuhidd
+RemoteXPC reply-channel assertion; event-channel framing instead times out without
+an observed service. Matching receiver disassembly places the assertion in the
+CreatedServiceID encoding/sendReply path, without proving the reply-object
+root cause or service lifetime. No Unicode input report is issued. Establish the
+legitimate creation/reply protocol and text receiver before any future integration; neither
+request acceptance nor a HID Unicode usage page proves committed text. These are
+research boundaries, not a new product input method or stability acceptance.
 The baseline is main `f8f82a4` and all 14 phone tools retain their schemas,
 snapshot validation, script lease checks, FIFO action queue and no-replay rule.
 The backend is captured in ChatJob at enqueue, alongside the model configuration.

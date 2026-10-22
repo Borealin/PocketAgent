@@ -1,6 +1,6 @@
 # Device Hub services for phone control
 
-> Status: baseline DDI implementation and selected-device acceptance completed. The user approved model-controlled keyboard input and clipboard policy on 2026-10-13; implementation and selected-device gates are complete. AX whole-field input and selected-device acceptance are complete (2026-10-14). DDI remains default with selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
+> Status (2026-10-22): retain the three implemented DDI input routes: clipboard paste, physical keys and guarded AX whole-field replacement. Selected-device acceptance exists for their documented scope; arbitrary clipboard-free Unicode with normal callbacks remains unestablished and is deferred. DDI remains default with explicitly selectable WDA. Main baseline: `f8f82a4` (14 existing tools); press_keys is additive.
 > Readers: PocketAgent app and native (idevice FFI) developers.
 > Scope: whether PocketAgent's phone tools can run on the developer disk image (DDI)
 > services that Xcode 27 Device Hub uses, instead of the WebDriverAgent (XCTest) runner.
@@ -34,6 +34,10 @@ document records the implemented backend, confirmed integration failures and the
 
 ## 2. Research conclusions
 
+The DDI path must remove XCTest dependencies, including testmanagerd sessions
+and UI Automation authorization. Avoiding a linked framework or separate Runner
+does not satisfy this requirement. New input methods must meet the same rule.
+
 - Decision: implement DDI as the default and retain an explicit WDA selector. Never
   switch backends or replay an action automatically after an uncertain result.
   A separately signed native probe reused PocketAgent's pinned idevice
@@ -50,7 +54,7 @@ document records the implemented backend, confirmed integration failures and the
   FFI exports only app_service among them.
 - Production implementation: bounded AX graph traversal and role mapping, native screenshots, owned HID input and app launch are integrated with the existing executor. Development signing is available again; on-phone clipboard preparation and Unicode paste passed independent receiver checks in another app and system search.
 - Remaining boundary: long background lifetime, physically unplugged operation, system-dialog input and PocketAgent's downloaded DDI are not established by the initial probe.
-- Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and a shallower AX graph. This implementation accepts portrait geometry and writes Unicode through the device pasteboard service without activating PocketAgent; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
+- Main tradeoff: DDI removes the companion, XCTest and Automation Mode authorization, but uses private interfaces and PocketAgent's existing AXChildren observation adapter. ipb already has native deep-tree reads; bringing them into PocketAgent is a separate integration task. This implementation accepts portrait geometry and writes Unicode through the device pasteboard service without activating PocketAgent; the target may ask for paste permission. Keyboard dismissal is an Escape request and requires fresh-state verification.
 
 <details>
 <summary>Research details and sources</summary>
@@ -60,8 +64,8 @@ document records the implemented backend, confirmed integration failures and the
 | Candidate | Advantages | Cost / risk | Conclusion |
 |---|---|---|---|
 | WDA compatibility backend | Hierarchical source, element types, verified tool semantics | Companion signing, Automation Mode authorization, per-turn runner lifecycle | Keep selectable; no automatic action fallback |
-| DDI services through idevice FFI | No companion or XCTest; same tunnel; faster element reads | Shallow AX graph; private interfaces; portrait only; target may request paste permission | Production backend and selected-device acceptance completed |
-| DDI observation with WDA input | Faster observation, independent of the stream question | Keeps the runner and its authorization | Fallback if DDI input proves impractical |
+| DDI services through idevice FFI | No companion or XCTest; same tunnel; bounded element reads | PocketAgent AXChildren adapter; private interfaces; portrait only; target may request paste permission | Retain the three input routes within their selected-device scope; ipb native deep trees are a separate integration |
+| DDI observation with WDA input | Observation can be separate from input | Keeps XCTest and its authorization | Rejected for the no-XCTest DDI input path; explicit WDA compatibility remains separate |
 | pymobiledevice3 on the phone | Complete implementation | GPL-3.0; adds a Python runtime | Rejected |
 
 ### Tool mapping
@@ -485,3 +489,116 @@ Rejected approaches: automatically replacing the old route despite callback
 differences; treating nil ACK or placeholder text as effect confirmation;
 introducing a duplicate paste_text tool. No automatic keyboard/IME final-text
 route is added before candidate and interrupted-composition coverage exists.
+
+### Input decision and review disposition (2026-10-22)
+
+The user asked to consolidate the findings and accept the three existing input
+methods if no reasonable new route was available. No candidate currently proves
+all of arbitrary Unicode, no clipboard, normal business callbacks and no XCTest.
+Defer that research as a product dependency and retain the three methods below.
+All three DDI methods avoid XCTest/testmanagerd/XCTestSession, a Runner and UI
+Automation authorization. Existing explicit WDA selection remains a separate
+compatibility backend, never an automatic fallback from a DDI action.
+
+| Input method | Existing API | Appropriate use | Confirmed limits and result contract |
+|---|---|---|---|
+| Clipboard paste | `type_text(method="paste")`; omitted/null method has the same default | Final Unicode text in a target that accepts paste | Replaces the system clipboard; requires the turn's frozen clipboard permission and may encounter an iOS paste prompt. Readback before paste and a fresh field comparison are separate from business acceptance. Secure/append or unreadable results remain unverified. |
+| Keyboard input | `press_keys(node, keys, modifiers, snapshot_id)` | Physical keys, shortcuts and observed IME interaction | 1–32 physical key positions, not a Unicode-string API. Layout/composition are unknown; read actual candidates before selecting. Returns `input_verified=false`; normal typing callbacks are evidenced in controlled receivers, not guaranteed for every App. |
+| UI text replacement | `type_text(method="ax", clear=true)` | Nonempty whole-field replacement of ordinary TextField/SearchField, especially when clipboard access is denied | One guarded request8/attribute53 setter. No clipboard, focus tap, HID clear or callback synthesis. Excludes secure fields, TextView and append/empty replacement. Exact fresh AX value confirms the field only; `business_outcome_verified=false`. |
+
+The model and scripts already share these APIs in `App/Core/ToolCatalog.swift`,
+`TextInputRequest.swift`, `KeyboardSequence.swift` and `App/PhoneAgent.swift`, with
+native execution in `Native/ddi`. No new input interface or fourth mode is needed.
+Backend and clipboard policy freeze when a job is queued. Denial blocks paste and
+copy/cut/paste chords before effects. Each action uses a fresh target; partial or
+unknown effects are neither replayed nor automatically switched to another method.
+A later action must use the newly observed state. A matching field value, keyboard
+request or successful setter ACK must not be presented as completed App business.
+
+#### Consolidated findings
+
+- **AX depth:** ipb native deep trees already exist and matched the recorded
+  same-page reference graphs. PocketAgent still uses its own AXChildren adapter.
+  Context-dependent wrappers, cross-process Web/overlays and state semantics have
+  separate limits; tree depth is not the Unicode input blocker.
+- **Callback mismatch:** the ipb six-control matrix found AX text replacement
+  changed all displayed texts but did not update the business model in UITextView
+  and SwiftUI TextEditor. The matching UIKit callback paths explain that scoped
+  failure. Paste and physical ASCII typing passed those controlled business
+  checks. This is not an all-App success rate or arbitrary-Unicode keyboard proof.
+  Ordinary TextField AX can also skip validation delegates even when editingChanged
+  fires. Keep the product AX scope narrow; do not add space/delete compensation.
+- **Excluded Unicode route:** phone-local NSXPC string input still requires
+  testmanagerd/XCTestSession and Automation Mode. The client, method=unicode,
+  preparation/authorization UI and related integration were withdrawn. Its
+  callback experiments do not satisfy this branch's requirement.
+- **Ordinary-app HID:** matching IOKit receiver code requires HID admin permission
+  for type-zero creation and event-dispatch permission on inspected nonzero
+  receivers. An ordinary-signed admission control obtained no type-zero server
+  port. This blocks that inspected route, not Apple's DDI daemon's own permissions.
+- **DDI createService:** Unicode-page and standard-keyboard controls both hit a
+  dtuhidd RemoteXPC reply-channel assertion. Matching disassembly locates the crash
+  after encoding `CreatedServiceID` and calling Mercury `sendReply()`. The legal
+  creation/reply contract is not resolved; neither permanent service creation nor
+  Unicode text delivery is accepted. One-way framing times out and is not a fix.
+  No Unicode report was sent, so Unicode-page consumption remains untested.
+
+#### Review results and arbitration
+
+The renewed compatibility review baseline is
+`d93cf052eb954d1f83f0d257af17d291b3453c3f`, which includes `6234826` and `eb12439`.
+The final PR update also includes the generated-header bootstrap correction and
+its regression: repeated bootstrap must accept its own ignored generated header
+while preserving the source index and refusing unrelated source changes.
+The App/native/Core/project contents remain identical to that reviewed baseline.
+
+| Confirmed review problem / trigger | Resolution | Remaining verification boundary |
+|---|---|---|
+| Optional `method=null` rejected despite provider/runtime omission semantics; placeholder-equal paste falsely confirmed text | Null selects the existing paste default and its permission check; placeholder-equal values cannot confirm nonempty paste | Live Gemini request acceptance is not established by schema tests |
+| Native pre-effect refusal disabled all later input; composite observation/focus/clear effects could be lost in failure reporting | Preserve effect phase through FFI/shared executor; only uncertain effects or failed release poison input; retain earlier preparation effects | Device refusal recovery checked; same-turn poison behavior also relies on native regression coverage |
+| DDI opened before failed shared inventory initialization let later preparation skip the catalog | Preparation requires the shared installed-app catalog before readiness | General app/foreground coverage remains limited to observed pages |
+| Gemini wire schema retained OpenAPI-incompatible keywords | Project the provider wire schema only; registered runtime schema and executor sequence/policy checks remain enforced | Schema regressions pass; live Gemini API acceptance remains unverified |
+| Managed native checkout could not upgrade an old patch safely; generated ignored header was mistaken for source drift | Revision+patch-specific staging preserves unknown edits; local bootstrap source verification excludes generated header state | Repeated-bootstrap regression covers generated and unrelated ignored files, ordinary source changes and preservation of the checkout index |
+| Fractional-frame JSON round trip changed one f64 ULP, causing strict target geometry rejection | Enable exact float round trip and retain strict identity/geometry checks | The earlier Maps refusal lacked both captured operands, so layout movement is not excluded there |
+
+DeepSeek Flash and Grok 4.7 were consulted using sanitized, read-only protocol
+facts. **来源：peer**: both recommended resolving producer/receiver encoding and
+reply semantics before any further createService attempt, and neither supplied a
+validated implementation. Main-source arbitration does not accept the initial
+unsupported `ServiceDescriptorMessage` name/wire shape; both were withdrawn from
+the consultation premise. The client reader does not filter decoded dictionaries
+by stream ID/REPLY, so a timeout cannot prove that event frames were discarded or
+that no frame arrived. Common descriptor fields and reply-object handling remain
+possible causes. The later local control-flow trace narrows the crash to the
+creation-result reply path; it does not by itself resolve that cause.
+No valid independent Opus 5.5 technical review was obtained; automatic 4.8 output
+is not counted as one, and further Opus consultation has stopped.
+
+#### Stability and delivery boundary
+
+The existing input paths have selected-device build/install/executor and callback
+checks, plus regressions for policy, target freshness, cancellation and effect
+reporting. They are usable within that scope; no long-run failure rate or broad
+WDA parity is established. Keyboard lifecycle transport failures led to a fresh,
+separate owned channel without replay; the original idle/traffic cause is still
+open. AX unsubscribe may close before ACK and is reported distinctly, rather than
+claimed as successful acknowledgement. Safari/App Store can become unreadable
+through AX after Return; re-observe without repeating the submitted action.
+Script-runtime reuse after a stop, long background duration, physical unplugged
+cold start, other OS/DDI combinations and arbitrary custom controls remain open.
+
+The final PR update changes the host bootstrap, its regression and these
+documents; it adds no phone runtime input code. The three input APIs already
+exist. Host regression/privacy checks and final-head CI are checked before merge.
+There is no new binary, build/install run or 13 Pro device acceptance in this
+update. Prior native/archive/IPA and device records retain their original scope;
+they do not validate the deferred Unicode route. Raw logs,
+fixtures, transcripts, signing/pairing data and success references stay outside
+Git. Only PocketAgent iOS/native and the isolated ipb research plan are involved;
+Android, glasses BT/ISP/Wi-Fi firmware, schema/rpc and audio are unaffected.
+
+Future investigation needs a legitimate successful creation/reply trace or an
+independent, demonstrably admissible no-XCTest Unicode sender before more device probes. Then separately
+prove actual backing text, normal callback/model, actual submission and
+cancellation without replay. That investigation is deferred and does not block
+the user's three-method decision.
