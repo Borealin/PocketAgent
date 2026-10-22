@@ -19,7 +19,7 @@ final class TurnStatus {
 
 @MainActor
 extension Model {
-    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, goal: String, images: [AgentImageAttachment],
+    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, clipboardAllowed: Bool, goal: String, images: [AgentImageAttachment],
                            task: BGContinuedProcessingTask, progress: Progress, status: TurnStatus,
                            conversationID: UUID, promptID: UUID,
                            priorMessages: [AgentTranscriptMessage],
@@ -58,8 +58,8 @@ extension Model {
                     RulesContext.load(global: WorkspaceStore.globalDirectory, workspace: workspace?.root)
                 }.value
                 let capabilities = ToolCapabilities(workspace: workspace != nil, scripts: ScriptRuntime.shared.isBundled,
-                                                    skills: !rules.skills.isEmpty)
-                let phone = PhoneExecutor(model: self, task: task, config: config)
+                                                    skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed)
+                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed)
                 let turn = TurnTools(phone: phone, workspace: workspace, capabilities: capabilities,
                     onScriptStage: { stage in
                         status.value.applyScript(stage); publish("script_" + stage.rawValue); onStatus?(status.value)
@@ -179,7 +179,8 @@ private struct PhoneObservingModel: AgentModelStreaming {
             let task = Task {
                 do {
                     let enriched = try await phone.prepare(request)
-                    for try await event in client.stream(enriched) { continuation.yield(event) }
+                    let wire = ProviderToolSchema.prepare(enriched, format: phone.config.format)
+                    for try await event in client.stream(wire) { continuation.yield(event) }
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
@@ -194,6 +195,7 @@ private struct PhoneObservingModel: AgentModelStreaming {
 final class PhoneTree: NSObject, XMLParserDelegate {
     var nodes: [[String: String]] = []
     var frame = CGRect.zero
+    var bundleID: String?
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                 qualifiedName: String?, attributes: [String: String]) {
         guard elementName.hasPrefix("XCUIElementType") else { return }
@@ -227,6 +229,10 @@ final class PhoneExecutor {
     let config: RunConfiguration
     let started = Date()
     var base: String?
+    let control: any PhoneControl
+    let backend: PhoneBackendKind
+    let clipboardAllowed: Bool
+    var inputCapabilities: ToolCapabilities { ToolCapabilities(phoneBackend: backend, clipboardAllowed: clipboardAllowed) }
     var requests = 0
     var calls = 0
     var snapshotID = 0
@@ -240,8 +246,10 @@ final class PhoneExecutor {
     /// layouts never receive a guessed system-surface gesture.
     private let taskSurfaceGeometry: (bounds: CGRect, topInset: CGFloat)?
     private var compactedTaskTitle: String?
-    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration) {
-        self.model = model; self.task = task; self.config = config
+    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool) {
+        self.model = model; self.task = task; self.config = config; self.backend = backend
+        self.clipboardAllowed = clipboardAllowed
+        control = backend == .ddi ? DDIControl(model) : WDAControl(model)
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first { $0.isKeyWindow }
         if UIDevice.current.userInterfaceIdiom == .phone,
@@ -277,7 +285,7 @@ final class PhoneExecutor {
     /// limit) no further effect is issued, including one that was waiting
     /// for the action lock or for the runner to start.
     func executeScript(_ call: AgentToolCall, lease: ScriptLease) async -> (content: String, isError: Bool, denied: Bool) {
-        if case .deny(let reason) = ToolCatalog.scriptDecision(for: call.name) { return (reason, true, true) }
+        if case .deny(let reason) = ToolCatalog.scriptDecision(for: call.name, capabilities: inputCapabilities) { return (reason, true, true) }
         guard lease.isActive else { return ("脚本的手机授权已撤销，动作未执行。", true, true) }
         await acquire()
         defer { release() }
@@ -320,21 +328,13 @@ final class PhoneExecutor {
     }
     func ready() async throws -> String {
         if let base { return base }
-        let result = try await model.prepareWDA()
+        try await control.prepare()
         try checkDeadline()
-        base = result
-        return result
+        base = backend.rawValue
+        return backend.rawValue
     }
-    func readTree(_ base: String) async throws -> PhoneTree {
-        let raw = try await model.request("GET", "\(base)/source")["value"] as? String ?? ""
-        let tree = PhoneTree(), parser = XMLParser(data: Data(raw.utf8))
-        parser.delegate = tree
-        guard parser.parse(), tree.frame.width > 0 else { throw failure("无法读取当前界面树。") }
-        return tree
-    }
-    func currentApp(_ base: String) async throws -> String {
-        (try await model.request("GET", "\(base)/wda/activeAppInfo")["value"] as? [String: Any])?["bundleId"] as? String ?? ""
-    }
+    func readTree(_ base: String) async throws -> PhoneTree { try await control.readTree() }
+    func currentApp(_ base: String) async throws -> String { try await control.activeApp() }
     private func invalidateObservation() {
         image = nil; nodes = []; snapshotID += 1; appID = ""; screen = .zero
     }
@@ -367,9 +367,7 @@ final class PhoneExecutor {
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
         let y = geometry.topInset * 0.42
-        _ = try await model.request("POST", "\(base)/wda/dragfromtoforduration", [
-            "fromX": geometry.bounds.width * 0.90, "fromY": y,
-            "toX": geometry.bounds.width * 0.55, "toY": y, "duration": 0.25])
+        try await control.drag(geometry.bounds.width * 0.90, y, geometry.bounds.width * 0.55, y, seconds: 0.25)
         try proceed()
         try await Task.sleep(for: .milliseconds(300))
         try proceed()
@@ -411,16 +409,15 @@ final class PhoneExecutor {
         try proceed()
         let tree = try await readTree(base)
         try proceed()
+        if let observedApp = tree.bundleID, observedApp != app { throw PhoneObservationIssue.foregroundChanged }
         let observed = prepareSurface ? try await compactTaskSurface(base, app: app, tree: tree, proceed: proceed) : tree
         try proceed()
         // Text-only models skip the screenshot unless diagnostics opted in.
         let keepScreenshot = DeviceSettings.saveScreenshots
         var png: Data?
         if config.supportsImages || keepScreenshot {
-            let pngText = try await model.request("GET", "/screenshot")["value"] as? String ?? ""
+            png = try await control.screenshot()
             try proceed()
-            guard let data = Data(base64Encoded: pngText) else { throw failure("截屏失败。") }
-            png = data
         }
         try await requireApp(app, base: base, proceed: proceed)
         try proceed()
@@ -442,7 +439,9 @@ final class PhoneExecutor {
                 "label": String((a["label"] ?? "").prefix(2000)), "enabled": a["enabled"] == "true",
                 "rect": ["x": r.origin.x, "y": r.origin.y, "width": r.width, "height": r.height]]
             if let name = a["name"], name != a["label"] { result["name"] = String(name.prefix(400)) }
+            if let placeholder = a["placeholder"] { result["placeholder"] = String(placeholder.prefix(400)) }
             if let value = a["value"], a["type"] != "XCUIElementTypeSecureTextField" { result["value"] = String(value.prefix(2000)) }
+            if ["true", "false"].contains(a["focused"] ?? "") { result["focused"] = a["focused"] == "true" }
             return result
         }
         let state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
@@ -468,11 +467,12 @@ final class PhoneExecutor {
         try proceed()
         try await requireApp(appID, base: base, proceed: proceed)
         try proceed()
-        guard current.nodes.contains(where: {
+        guard let refreshed = current.nodes.first(where: {
             $0["type"] == old["type"] && $0["name"] == old["name"] && $0["label"] == old["label"] &&
-            $0["enabled"] == "true" && PhoneTree.rect($0) == PhoneTree.rect(old)
+            $0["enabled"] == "true" && PhoneTree.rect($0) == PhoneTree.rect(old) &&
+            $0["ddi_identity"] == old["ddi_identity"]
         }) else { throw PhoneObservationIssue.nodeChanged }
-        return old
+        return refreshed
     }
 
     private static func appRecords(_ apps: [InstalledApp]) -> [[String: Any]] {
@@ -482,14 +482,11 @@ final class PhoneExecutor {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return (String(decoding: data, as: UTF8.self), error)
     }
-    private func inputElement(_ a: [String: String], base: String, proceed: () throws -> Void) async throws -> String {
-        let nameFilter = a["name"].map { "@name=\(Self.xpathLiteral($0)) and " } ?? ""
-        let xpath = "//\(a["type"]!)[\(nameFilter)@x=\(Self.xpathLiteral(a["x"] ?? "")) and @y=\(Self.xpathLiteral(a["y"] ?? ""))]"
-        let found = try await model.request("POST", "\(base)/element", ["using": "xpath", "value": xpath])["value"] as? [String: Any]
+    private func inputElement(_ a: [String: String], base: String, proceed: () throws -> Void) async throws -> PhoneInput {
+        let input = try await control.input(a)
         try proceed()
-        guard let id = found?["element-6066-11e4-a52e-4f735466cecf"] as? String else { throw PhoneObservationIssue.nodeChanged }
         try await requireApp(appID, base: base, proceed: proceed)
-        return id
+        return input
     }
     /// One phone action. Cancellation, the deadline and (for scripts) the
     /// lease are rechecked after every await that can take long (runner
@@ -499,20 +496,52 @@ final class PhoneExecutor {
     private func perform(_ call: AgentToolCall, lease: ScriptLease? = nil) async throws -> (content: String, isError: Bool) {
         var issued = false
         var openedBundle: String?
+        var expectedInput: (identity: String, text: String)?
+        var submittedInput = false
+        var submittedKeys = false
+        var keySequence: KeyboardSequence?
+        var textInput: TextInputRequest?
+        var inputApp: String?
         func proceed() throws {
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
             if let lease, !lease.isActive { throw ActionStopped(issued: issued, reason: "脚本的手机授权已撤销。") }
             try checkDeadline()
         }
-        func effect(_ method: String, _ path: String, _ body: [String: Any]) async throws {
+        func effect(_ operation: () async throws -> Void) async throws {
             try proceed()
+            let earlierEffect = issued
             issued = true
-            _ = try await model.request(method, path, body)
+            do { try await operation() }
+            catch let failure as DDIOperationFailure {
+                issued = failure.actionWasIssued(after: earlierEffect)
+                throw failure
+            }
             try proceed()
         }
+        control.cancellationCheck = proceed
+        defer { control.cancellationCheck = nil }
         let args = call.arguments.objectValue ?? [:], name = call.name
         do {
             try proceed()
+            if case .deny(let reason) = ToolCatalog.decision(for: name, capabilities: inputCapabilities) {
+                return try Self.result(["ok": false, "code": "capability_denied", "message": reason,
+                    "action_issued": false, "action_outcome": "not_started", "replay_allowed": false], error: true)
+            }
+            if name == "press_keys" {
+                do { keySequence = try KeyboardSequence(arguments: args, clipboardAllowed: clipboardAllowed) }
+                catch let issue as KeyboardSequence.Issue {
+                    return try Self.result(["ok": false, "code": issue == .clipboardDenied ? "clipboard_denied" : "invalid_keys",
+                        "message": issue.localizedDescription, "action_issued": false,
+                        "action_outcome": "not_started", "replay_allowed": false], error: true)
+                }
+            }
+            if name == "type_text" {
+                do { textInput = try TextInputRequest(arguments: args, backend: backend, clipboardAllowed: clipboardAllowed) }
+                catch let issue as TextInputRequest.Issue {
+                    return try Self.result(["ok": false, "code": issue.code, "message": issue.localizedDescription,
+                        "action_issued": false, "action_outcome": "not_started", "replay_allowed": false], error: true)
+                }
+            }
             guard calls < 100 else { throw failure("本轮手机工具已达到 100 次上限。") }
             calls += 1
             let base = try await ready()
@@ -533,7 +562,7 @@ final class PhoneExecutor {
                 switch InstalledApps.resolve(name: target, in: model.installedApps) {
                 case .found(let app):
                     openedBundle = app.bundleID
-                    try await effect("POST", "\(base)/wda/apps/activate", ["bundleId": app.bundleID])
+                    try await effect { try await control.activate(app.bundleID) }
                 case .ambiguous(let apps):
                     return try Self.result(["ok": false, "code": "app_name_ambiguous",
                         "message": "有多个同名 App，请根据候选确认目标，不要盲选。",
@@ -551,18 +580,17 @@ final class PhoneExecutor {
                         "message": "此 Bundle ID 不在手机实际安装列表中。请用 find_apps 按名称查找，或返回主屏幕读屏定位；不要再次尝试这个 ID。"], error: true)
                 }
                 openedBundle = bundle
-                try await effect("POST", "\(base)/wda/apps/activate", ["bundleId": bundle])
+                try await effect { try await control.activate(bundle) }
             case "tap", "long_press":
                 let a = try await node(args, base: base, proceed: proceed), rect = PhoneTree.rect(a).intersection(screen)
                 try proceed()
                 guard !rect.isNull, !rect.isEmpty else { throw failure("目标在屏幕外。") }
-                var body: [String: Any] = ["x": rect.midX, "y": rect.midY]
-                let path: String
+                var seconds: Double?
                 if name == "long_press" {
-                    guard let seconds = args["seconds"]?.numberValue, (0.5...3).contains(seconds) else { throw failure("长按时间应在 0.5–3 秒。") }
-                    body["duration"] = seconds; path = "/wda/touchAndHold"
-                } else { path = "/wda/tap" }
-                try await effect("POST", "\(base)\(path)", body)
+                    guard let duration = args["seconds"]?.numberValue, duration.isFinite, (0.5...3).contains(duration) else { throw failure("长按时间应在 0.5–3 秒。") }
+                    seconds = duration
+                }
+                try await effect { try await control.tap(rect.midX, rect.midY, seconds: seconds) }
             case "tap_point":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
@@ -574,7 +602,7 @@ final class PhoneExecutor {
                 try proceed()
                 try await requireApp(appID, base: base, proceed: proceed)
                 try proceed()
-                try await effect("POST", "\(base)/wda/tap", ["x": x, "y": y])
+                try await effect { try await control.tap(x, y, seconds: nil) }
             case "swipe":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
@@ -582,9 +610,8 @@ final class PhoneExecutor {
                 let vertical = ["up", "down"].contains(direction)
                 let reverse = ["down", "right"].contains(direction)
                 let start = reverse ? 0.28 : 0.72, end = reverse ? 0.72 : 0.28
-                try await effect("POST", "\(base)/wda/dragfromtoforduration", [
-                    "fromX": screen.width * (vertical ? 0.5 : start), "fromY": screen.height * (vertical ? start : 0.5),
-                    "toX": screen.width * (vertical ? 0.5 : end), "toY": screen.height * (vertical ? end : 0.5), "duration": 0.25])
+                try await effect { try await control.drag(screen.width * (vertical ? 0.5 : start), screen.height * (vertical ? start : 0.5),
+                    screen.width * (vertical ? 0.5 : end), screen.height * (vertical ? end : 0.5), seconds: 0.25) }
             case "swipe_from_to":
                 try await reference(args, base: base, proceed: proceed)
                 guard let fromX = args["from_x"]?.numberValue, let fromY = args["from_y"]?.numberValue,
@@ -595,29 +622,83 @@ final class PhoneExecutor {
                     throw failure("滑动起终点必须位于最新屏幕的逻辑坐标内，时长为 0.1–2 秒。")
                 }
                 try await requireApp(appID, base: base, proceed: proceed)
-                try await effect("POST", "\(base)/wda/dragfromtoforduration", [
-                    "fromX": fromX, "fromY": fromY, "toX": toX, "toY": toY, "duration": seconds])
+                try await effect { try await control.drag(fromX, fromY, toX, toY, seconds: seconds) }
             case "type_text":
-                let a = try await node(args, base: base, proceed: proceed)
+                guard let request = textInput else { throw failure("缺少输入请求。") }
+                // Refuse unsupported AX targets before node recovery can compact
+                // a system task surface. Fresh node/native checks follow below.
+                if request.method == .ax {
+                    try await reference(args, base: base, proceed: proceed)
+                    if let id = args["node"]?.integerValue, id > 0, id <= nodes.count {
+                        try request.validateTarget(nodes[id - 1])
+                    }
+                }
+                var a = try await node(args, base: base, proceed: proceed)
                 try proceed()
                 guard ["XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField"].contains(a["type"] ?? ""),
-                      let text = args["text"]?.stringValue, text.count <= 4000, let clear = args["clear"]?.boolValue else {
+                      a["enabled"] == "true" else {
                     throw failure("请选择实际输入框并提供 text 和 clear。")
                 }
+                try request.validateTarget(a)
+                let text = request.text, clear = request.clear
+                inputApp = appID
+                if request.method == .ax {
+                    let input = try await inputElement(a, base: base, proceed: proceed)
+                    guard let identity = a["ddi_identity"] else { throw PhoneObservationIssue.nodeChanged }
+                    try await effect { try await control.replaceTextAX(text, into: input) }
+                    submittedInput = true
+                    expectedInput = (identity, text)
+                    break
+                }
+                if backend == .ddi {
+                    if text.isEmpty { try await control.prepareText(text) }
+                    else { try await effect { try await control.prepareText(text) } }
+                    // Revalidate the target after clipboard preparation; no effect is replayed.
+                    a = try await node(args, base: base, proceed: proceed)
+                }
                 let id = try await inputElement(a, base: base, proceed: proceed)
-                try await effect("POST", "\(base)/element/\(id)/click", [:])
-                if clear { try await effect("POST", "\(base)/element/\(id)/clear", [:]) }
-                try await effect("POST", "\(base)/element/\(id)/value", ["text": text])
+                try await effect { try await control.click(id) }
+                try await requireApp(appID, base: base, proceed: proceed)
+                if clear { try await effect { try await control.clear(id) } }
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect { try await control.type(text, into: id) }
+                submittedInput = backend == .ddi
+                if backend == .ddi, clear, a["type"] != "XCUIElementTypeSecureTextField",
+                   let identity = a["ddi_identity"] { expectedInput = (identity, text) }
             case "press_key":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
                 guard let key = args["key"]?.stringValue, ["return", "delete"].contains(key) else { throw failure("无效键盘按键。") }
-                try await effect("POST", "\(base)/wda/keys", ["value": [key == "return" ? "\n" : "\u{8}"]])
+                try await effect { try await control.key(key) }
+            case "press_keys":
+                let a = try await node(args, base: base, proceed: proceed)
+                guard ["XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeTextView", "XCUIElementTypeSecureTextField"].contains(a["type"] ?? ""),
+                      let sequence = keySequence else { throw failure("请选择实际输入框并提供硬件按键序列。") }
+                guard ["true", "false"].contains(a["focused"] ?? "") else {
+                    throw failure("输入框未提供可核实的焦点状态，未点击或发送按键；请先观察并明确聚焦目标。")
+                }
+                let input = try await inputElement(a, base: base, proceed: proceed)
+                // Retapping a focused field can move its caret or disturb IME composition.
+                if a["focused"] == "false" {
+                    let expectedApp = appID
+                    try await effect { try await control.click(input) }
+                    // Keyboard appearance can change AXChildren during traversal.
+                    // Reuse bounded read-only observation recovery; never repeat
+                    // the focus tap or send keys before the same field is verified.
+                    let focused = try await observe(proceed: proceed, prepareSurface: false)
+                    guard focused["app"] as? String == expectedApp,
+                          nodes.contains(where: { $0["ddi_identity"] == a["ddi_identity"] && $0["focused"] == "true" }) else {
+                        throw failure("聚焦请求已发出，但目标焦点未确认；未发送按键，请读取实际页面。")
+                    }
+                }
+                try await requireApp(appID, base: base, proceed: proceed)
+                try await effect { try await control.pressKeys(sequence) }
+                submittedKeys = true
             case "dismiss_keyboard":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
-                try await effect("POST", "\(base)/wda/keyboard/dismiss", [:])
-            case "press_home": try await effect("POST", "/wda/homescreen", [:])
+                try await effect { try await control.dismissKeyboard() }
+            case "press_home": try await effect { try await control.home() }
             case "wait":
                 guard let seconds = args["seconds"]?.numberValue, (0.2...5).contains(seconds) else { throw failure("等待时间应在 0.2–5 秒。") }
                 try await Task.sleep(for: .seconds(seconds))
@@ -628,9 +709,47 @@ final class PhoneExecutor {
                 try await Task.sleep(for: .milliseconds(600))
                 try proceed()
             }
-            let state = try await observe(proceed: proceed)
+            let state = try await observe(proceed: proceed, prepareSurface: textInput?.method != .ax)
             try proceed()
-            let result: [String: Any] = ["ok": true, "screen": state]
+            var result: [String: Any] = ["ok": true, "screen": state]
+            if submittedKeys {
+                result["input_method"] = "physical_keys"
+                result["input_verified"] = false
+                result["composition_state"] = "unknown"
+                result["keyboard_layout"] = "unknown"
+                result["action_outcome"] = "submitted"
+                result["replay_allowed"] = false
+                result["clipboard_shortcut_requested"] = keySequence?.clipboardShortcut ?? false
+                result["message"] = "按键请求已发出；字段值可能仍是输入法组合串。请核对新屏幕中的实际文字和候选，不推断布局、已提交状态或候选顺序。"
+            }
+            if let expectedInput,
+               state["app"] as? String != inputApp || !nodes.contains(where: { $0["ddi_identity"] == expectedInput.identity &&
+                   (textInput?.method == .ax ? TextInputRequest.confirmsAXInput($0, text: expectedInput.text) :
+                    DDINodeMapping.confirmsInput($0, text: expectedInput.text)) }) {
+                return try Self.result(["ok": false, "code": "text_input_not_confirmed", "screen": state,
+                    "action_issued": true, "action_outcome": "unconfirmed", "replay_allowed": false,
+                    "input_method": textInput?.method.rawValue ?? "paste",
+                    "input_verified": false, "clipboard_replaced": textInput?.method == .paste && !expectedInput.text.isEmpty,
+                    "message": "输入请求已发出，但实际输入框尚未确认目标文字。请检查新页面和目标 App 反应；不要重放或自动切换输入方式。"], error: true)
+            }
+            if submittedInput {
+                result["action_issued"] = true
+                result["input_method"] = textInput?.method.rawValue ?? "paste"
+                result["clipboard_replaced"] = textInput?.method == .paste && !(textInput?.text.isEmpty ?? true)
+                result["input_verified"] = expectedInput != nil
+                result["action_outcome"] = expectedInput == nil ? "submitted" : "confirmed"
+                result["replay_allowed"] = false
+                if textInput?.method == .ax {
+                    result["verification_source"] = "fresh_ax_value"
+                    result["business_outcome_verified"] = false
+                    let focus = nodes.first(where: { $0["ddi_identity"] == expectedInput?.identity })?["focused"]
+                    result["target_focused"] = ["true", "false"].contains(focus ?? "") ? (focus == "true") as Any : NSNull()
+                    result["message"] = "新 AX 字段值已匹配目标文字；焦点可能仍在其他字段，部分校验回调可能未触发。提交前核对目标焦点，或用绑定目标节点的 press_keys。请观察 App 的实际反应，不推断业务成功，不自动重试或改用粘贴。"
+                }
+                if expectedInput == nil {
+                    result["message"] = "输入动作已发送，内容未独立确认（密码值被隐藏，或插入位置未固定）。请根据返回页面或目标 App 行为确认，不要直接重放。"
+                }
+            }
             if let openedBundle, state["app"] as? String != openedBundle {
                 return try Self.result(["ok": false, "code": "app_open_not_confirmed", "screen": state,
                     "expected_app": openedBundle, "action_issued": true, "action_outcome": "unconfirmed",
@@ -641,6 +760,35 @@ final class PhoneExecutor {
             invalidateObservation()
             if let stop = error as? ActionStopped { throw stop }
             if Task.isCancelled || model.pendingAgentCancellation { throw ActionStopped(issued: issued, reason: "本轮已取消。") }
+            if let failure = error as? DDIOperationFailure {
+                // Observation/node preparation can itself issue a system-surface
+                // gesture outside effect {}; retain its native effect metadata.
+                issued = failure.actionWasIssued(after: issued)
+                var result: [String: Any] = ["ok": false, "code": failure.code,
+                    "message": failure.message + (failure.requiresNewTurn
+                        ? " 本轮输入已停用，请结束本轮并在新回合重新观察；不要重试或切换输入方式。"
+                        : " 请读取新屏幕后重新规划；本工具不会重放或自动切换输入方式。"),
+                    "action_issued": issued, "action_outcome": issued ? "unconfirmed" : "not_started",
+                    "requires_new_turn": failure.requiresNewTurn, "requires_replan": !failure.requiresNewTurn,
+                    "replay_allowed": false]
+                if let textInput { result["input_method"] = textInput.method.rawValue; result["input_verified"] = false }
+                // Read-only recovery is allowed even when input is disabled.
+                do { result["screen"] = try await observe(proceed: proceed, prepareSurface: false) }
+                catch {
+                    if error is ActionStopped || error is CancellationError || Task.isCancelled || model.pendingAgentCancellation {
+                        throw ActionStopped(issued: issued, reason: "本轮已取消。")
+                    }
+                    result["recovery"] = "observe_screen_required"
+                }
+                return try Self.result(result, error: true)
+            }
+            if textInput?.method == .ax, !(error is PhoneObservationIssue) {
+                return try Self.result(["ok": false, "code": (error as? TextInputRequest.Issue)?.code ?? "ax_input_failed",
+                    "message": "\(error.localizedDescription) 请读取新屏幕；不能重放或自动切换输入方式。",
+                    "action_issued": issued, "action_outcome": issued ? "unconfirmed" : "not_started",
+                    "input_method": "ax", "input_verified": false, "clipboard_replaced": false,
+                    "replay_allowed": false], error: true)
+            }
             if let issue = error as? PhoneObservationIssue {
                 var recovery: [String: Any] = ["ok": false, "code": issue.code,
                     "message": issue.localizedDescription, "action_issued": issued,

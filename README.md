@@ -1,11 +1,34 @@
 # PocketAgent
 
 A native iPhone assistant with multiple conversations, configurable model
-providers and phone automation through AgentKit, idevice and WebDriverAgent.
+providers and phone automation through AgentKit and idevice. This branch defaults
+to DDI services; WebDriverAgent remains selectable in phone settings.
 The model loop and phone tools run on the iPhone. Model inference uses the API
 provider you configure.
 
 ## Installation
+
+This branch's DDI backend uses the main app, Developer Mode, an RP pairing record
+and a local VPN. It needs no Automation companion or XCTest authorization.
+Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
+selection is captured when a turn is queued. DDI currently accepts verified
+portrait display geometry; switch explicitly to WDA for other layouts. Text input
+writes the device clipboard through CoreDevice, checks its actual UTF-8 contents,
+then pastes through the owned HID keyboard without activating PocketAgent. The
+target app can request paste permission; rejected or unconfirmed insertion is
+reported rather than replayed.
+DDI also offers `press_keys` for model-controlled physical keys and IME candidates.
+The phone setup's clipboard switch permits or forbids the paste path and known
+clipboard shortcuts; permission and backend are captured when the turn is queued.
+`type_text` retains its required parameters and defaults to paste. Optional
+`method: "ax"` replaces a nonempty ordinary TextField/SearchField value without
+clipboard access; use it only for authorized whole-field replacement and inspect
+the App response because some validation callbacks may not fire. AX excludes
+password fields, TextView and caret insertion. AX does not promise focus transfer;
+confirm target focus before submitting a keyboard action. Uncertain effects are never replayed. Keyboard calls return the actual screen
+without assuming the layout or claiming that composition has committed.
+The published candidate instructions below describe the earlier WDA release;
+the DDI change has not been published to that feed.
 
 The source offers both apps from the
 [v0.3.7 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.7).
@@ -81,8 +104,8 @@ guest execution are separate, unverified paths.
 ## Requirements
 
 - iOS 26 or later, Developer Mode enabled.
-- PocketAgent and its separate **PocketAgent Automation** companion installed
-  with a development-capable signature, such as AltStore Classic or SideStore.
+- PocketAgent installed with a development-capable signature, such as AltStore
+  Classic or SideStore. **PocketAgent Automation** is needed only for WDA.
 - An idevice RP pairing property list created during initial setup. An ordinary
   USB/Lockdown pairing record has a different format and cannot replace it.
 - A local VPN exposing the device's developer services, such as LocalDevVPN.
@@ -91,8 +114,9 @@ guest execution are separate, unverified paths.
 
 The first pairing, installation and system authorization require setup. After
 setup, a conversation can invoke phone tools without a connected computer.
-Keep the local VPN connected. iOS can require the device passcode when enabling
-UI automation; enter it only in the system page on the phone.
+Keep the local VPN connected and the phone unlocked. For WDA, iOS can require the
+device passcode when enabling UI automation; enter it only in the system page on
+the phone. DDI does not launch XCTest.
 
 If connection checks fail only on cellular, open Settings → 手机操作配置 →
 蜂窝连接恢复. Temporarily disable cellular and disconnect Wi-Fi while leaving
@@ -155,7 +179,7 @@ Later configuration changes apply to subsequent turns. Conversations preserve
 their own history and model attribution. Interrupted phone actions are never
 replayed after restarting the app.
 
-Settings → 手机操作配置 walks through installing Automation, connecting
+Settings → 手机操作配置 selects DDI or WDA, then walks through connecting
 LocalDevVPN and importing this phone's **RP pairing file** from Files. The
 easiest first setup uses the upstream **idevice_pair** GUI: choose the USB phone,
 select **Remote pairing**, then **Create → Validate → Save to file…**.
@@ -271,6 +295,12 @@ for this purpose; see THIRD_PARTY_NOTICES.md). Each release publishes its
 complete corresponding source next to the IPA.
 
 ## Build
+
+Bootstrap keeps patched idevice sources under `.deps/idevice-pocketagent/`, keyed
+by pinned revision and the digest of `Native/idevice.patch`. Changing the patch
+creates a new checkout; an existing legacy `.deps/idevice` is left untouched.
+Managed checkouts with unknown local edits are refused rather than reset. Put
+maintained native changes in `Native/ddi` or `Native/idevice.patch`.
 
 On macOS, install Xcode 26.2 or later, XcodeGen, Rust 1.95.0, meson and lld, plus
 Docker able to run linux/386 containers for the script rootfs. Select the full

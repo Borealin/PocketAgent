@@ -145,11 +145,24 @@ struct PhoneSetupView: View {
     var body: some View {
         Form {
             Section {
-                Label("安装 PocketAgent Automation", systemImage: "1.circle")
-                Text("在 SideStore / AltStore 中同时安装主 App 和 Automation，保持版本一致。开启 iOS 设置 → 隐私与安全性 → 开发者模式。")
+                Picker("控制方式", selection: $device.backend) {
+                    Text("DDI（默认）").tag(PhoneBackendKind.ddi)
+                    Text("WDA").tag(PhoneBackendKind.wda)
+                }.disabled(settingsBusy).accessibilityIdentifier("phoneControlBackend")
+                    .onChange(of: device.backend) { device.saveBackend() }
+                Text(device.backend == .ddi
+                    ? "DDI 直接使用开发服务，无需 Automation。开启 iOS 设置 → 隐私与安全性 → 开发者模式。"
+                    : "在 SideStore / AltStore 中同时安装主 App 和 Automation，保持版本一致。开启 iOS 设置 → 隐私与安全性 → 开发者模式。")
                     .font(.caption).foregroundStyle(.secondary)
                 Link("打开安装说明", destination: URL(string: "https://github.com/Borealin/PocketAgent#installation")!)
             } header: { Text("首次配置") }
+            Section {
+                Toggle("允许使用剪贴板", isOn: $device.clipboardAllowed)
+                    .disabled(settingsBusy).accessibilityIdentifier("allowPhoneClipboard")
+                    .onChange(of: device.clipboardAllowed) { device.saveClipboardPolicy() }
+                Text("默认通过粘贴输入。关闭后，DDI 的粘贴和复制、剪切、粘贴组合键被拒绝；模型仍可在你授权的范围内直接替换普通单行文本框，或逐键输入。直接替换可能不触发部分校验，需检查 App 的反应；逐键输入中文需观察候选。WDA 保留原有文本接口。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("文字输入") }
             Section {
                 Label("连接 LocalDevVPN", systemImage: "2.circle")
                 Text("打开 LocalDevVPN，点 Connect 并允许添加 VPN。运行手机操作期间保持连接，手机保持解锁。")
@@ -177,7 +190,9 @@ struct PhoneSetupView: View {
                     .font(.caption).accessibilityIdentifier("deviceConnectionStatus")
                 if !device.status.isEmpty { Text(device.status).font(.caption).accessibilityIdentifier("deviceSetupStatus") }
             } footer: {
-                Text("检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
+                Text(device.backend == .ddi
+                    ? "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。DDI 无需 XCTest 授权；默认输入会替换剪贴板并粘贴，目标 App 可能提示许可。模型也可选择直接替换普通单行文本框，之后需检查 App 的反应。"
+                    : "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
             }
             Section {
                 Text("1. 临时关闭蜂窝数据，并断开 Wi-Fi；保持 LocalDevVPN 连接和手机解锁。\n2. 点下面的准备按钮，等待连接已保留。\n3. 开回蜂窝数据，回到聊天发送新消息。")
@@ -202,7 +217,7 @@ struct PhoneSetupView: View {
                 Text(engine.networkPath.description).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("phoneNetworkPath")
             } header: { Text("蜂窝连接恢复") } footer: {
-                Text("用于蜂窝开启时无法建立初始连接的情况。只建立并短暂保留 RP 隧道，下一次手机操作才会启动 Automation 并验证连接；不会自动执行或重试手机操作。默认网络路径状态不代表 VPN 是否可用。")
+                Text("用于蜂窝开启时无法建立初始连接的情况。只建立并短暂保留 RP 隧道，下一次手机操作才会启动所选控制后端；不会自动执行或重试手机操作。默认网络路径状态不代表 VPN 是否可用。")
             }
             Section {
                 DisclosureGroup("高级设备设置", isExpanded: $showAdvanced) {
