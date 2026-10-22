@@ -39,6 +39,7 @@ EPOCH = 1767225600  # fixed archive timestamps
 
 
 def idevice_source_path():
+    """The bootstrap-managed idevice checkout for the current pin and patch."""
     spec = importlib.util.spec_from_file_location('pocketagent_bootstrap', Path(__file__).with_name('bootstrap.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

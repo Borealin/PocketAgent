@@ -83,3 +83,74 @@ struct InstalledAppsTests {
         #expect(prompt.contains("不能直接重放点击或输入"))
     }
 }
+
+/// Review finding R6: `Model.prepareDDI` runs `DDIServiceReadiness.prepare`
+/// on each tool's preparation; the executor publishes DDI as ready only when
+/// it returns. A first preparation whose catalog read fails must leave the
+/// next one (same turn, same connection) to read the catalog again; the
+/// failure is never a ready backend with an empty catalog.
+@MainActor
+struct DDIServiceReadinessTests {
+    /// The connection state `prepareDDI` reads and the steps it runs.
+    @MainActor
+    private final class Connection {
+        var catalogLoaded = false, sessionOpen = false
+        var catalogReads = 0, sessionOpens = 0
+        var failCatalogReads = 0, failSessionOpens = 0
+        var apps: [InstalledApp] = []
+        var readiness: DDIServiceReadiness { .init(catalogLoaded: catalogLoaded, sessionOpen: sessionOpen) }
+
+        /// One tool's preparation: true when the executor would publish ready.
+        func prepare(stopped: Bool = false) async -> Bool {
+            guard !readiness.ready else { return true }
+            do {
+                try await DDIServiceReadiness.prepare(readiness, checkpoint: {
+                    if stopped { throw CancellationError() }
+                }, readCatalog: {
+                    catalogReads += 1
+                    if failCatalogReads > 0 { failCatalogReads -= 1; throw URLError(.timedOut) }
+                    apps = [InstalledApp(bundleID: "test.settings", names: ["设置"])]
+                    catalogLoaded = true
+                }, openSession: {
+                    sessionOpens += 1
+                    if failSessionOpens > 0 { failSessionOpens -= 1; throw URLError(.cannotConnectToHost) }
+                    sessionOpen = true
+                })
+                return true
+            } catch { return false }
+        }
+    }
+
+    @Test func aFailedCatalogReadIsRetriedNotPublishedAsAnEmptyCatalog() async {
+        let connection = Connection()
+        connection.failCatalogReads = 1
+        #expect(await connection.prepare() == false)
+        #expect(!connection.sessionOpen && connection.apps.isEmpty && connection.sessionOpens == 0)
+        // The next tool of the same turn prepares again and finds the app.
+        #expect(await connection.prepare())
+        #expect(connection.catalogReads == 2 && connection.sessionOpens == 1)
+        #expect(InstalledApps.search("设置", in: connection.apps).map(\.bundleID) == ["test.settings"])
+        // Ready now: later tools prepare nothing more.
+        #expect(await connection.prepare() && connection.catalogReads == 2 && connection.sessionOpens == 1)
+    }
+
+    @Test func aLeftoverSessionWithoutItsCatalogIsNotReady() async {
+        #expect(DDIServiceReadiness(catalogLoaded: false, sessionOpen: true).remaining == [.readCatalog])
+        #expect(!DDIServiceReadiness(catalogLoaded: false, sessionOpen: true).ready)
+        let connection = Connection()
+        connection.sessionOpen = true
+        #expect(await connection.prepare() && connection.catalogReads == 1 && connection.sessionOpens == 0)
+        // A failed open after a loaded catalog only opens again.
+        let reopened = Connection()
+        reopened.failSessionOpens = 1
+        #expect(await reopened.prepare() == false && reopened.catalogLoaded && !reopened.sessionOpen)
+        #expect(await reopened.prepare() && reopened.catalogReads == 1 && reopened.sessionOpens == 2)
+    }
+
+    @Test func aStopBeforeOrBetweenStepsRunsNothingFurther() async {
+        let connection = Connection()
+        #expect(await connection.prepare(stopped: true) == false)
+        #expect(connection.catalogReads == 0 && connection.sessionOpens == 0)
+        #expect(DDIServiceReadiness(catalogLoaded: false, sessionOpen: false).remaining == [.readCatalog, .openSession])
+    }
+}

@@ -140,12 +140,15 @@ private final class StubImageProtocol: URLProtocol, @unchecked Sendable {
         case image(Data, mime: String = "image/png", length: Int? = nil)
         case redirect(to: String)
         case endless(chunk: Int)
+        /// `total` bytes in `chunk`-sized pieces without a declared length, then finished.
+        case chunked(total: Int, chunk: Int)
     }
     nonisolated(unsafe) static var behaviors: [String: Behavior] = [:]
     nonisolated(unsafe) static var sentBytes: [String: Int] = [:]
     static let lock = NSLock()
     private var stopped = false
     private let stopLock = NSLock()
+    private let stopSignal = DispatchSemaphore(value: 0)
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host?.hasSuffix("stub.test") == true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -169,21 +172,39 @@ private final class StubImageProtocol: URLProtocol, @unchecked Sendable {
                                            headerFields: ["Location": target])!
             client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: URL(string: target)!), redirectResponse: response)
         case .endless(let chunk):
-            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                                           headerFields: ["Content-Type": "image/jpeg"])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            DispatchQueue.global().async {
-                for _ in 0..<200 {
-                    if self.stopLock.withLock({ self.stopped }) { return }
-                    Self.lock.withLock { Self.sentBytes[key, default: 0] += chunk }
-                    self.client?.urlProtocol(self, didLoad: Data(count: chunk))
-                    Thread.sleep(forTimeInterval: 0.002)
-                }
-                self.client?.urlProtocolDidFinishLoading(self)
-            }
+            // Past the limit it pauses until the client cancels (at most 10 s,
+            // inside the loader's 15 s idle timer); a client that keeps reading
+            // then gets the rest of the 200 MiB.
+            stream(key, chunk: chunk, count: 200, holdPastLimit: true)
+        case .chunked(let total, let chunk):
+            stream(key, chunk: chunk, count: total / chunk, holdPastLimit: false)
         }
     }
-    override func stopLoading() { stopLock.withLock { stopped = true } }
+
+    /// Sends from its own thread, not the dispatch pool a loaded host holds
+    /// back, and stops once the client cancels.
+    private func stream(_ key: String, chunk: Int, count: Int, holdPastLimit: Bool) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "image/jpeg"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        Thread.detachNewThread {
+            var held = !holdPastLimit
+            for index in 0..<count {
+                if index * chunk > Int(RemoteImagePolicy.maxBytes), !held {
+                    held = true
+                    _ = self.stopSignal.wait(timeout: .now() + 10)
+                }
+                if self.stopLock.withLock({ self.stopped }) { return }
+                Self.lock.withLock { Self.sentBytes[key, default: 0] += chunk }
+                self.client?.urlProtocol(self, didLoad: Data(count: chunk))
+            }
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() {
+        stopLock.withLock { stopped = true }
+        stopSignal.signal()
+    }
 
     static func register(_ path: String, _ behavior: Behavior) { lock.withLock { behaviors["img.stub.test" + path] = behavior } }
     static func sent(_ path: String) -> Int { lock.withLock { sentBytes["img.stub.test" + path] ?? 0 } }
@@ -207,14 +228,23 @@ struct RemoteImageLoaderTests {
         await #expect(throws: RemoteImageError("图片超过 20 MB")) { try await load("/big.png") }
     }
 
+    /// A streamed body of exactly the limit is accepted whole; with the
+    /// refusal below this pins the limit the loader actually applies.
+    @Test func streamedBodyOfTheLimitLoads() async throws {
+        let total = 20 * 1024 * 1024
+        #expect(RemoteImagePolicy.maxBytes == total)
+        StubImageProtocol.register("/limit.jpg", .chunked(total: total, chunk: 1024 * 1024))
+        #expect(try await load("/limit.jpg").count == total)
+    }
+
     @Test func endlessBodyIsCancelledAtTheLimit() async {
         let chunk = 1024 * 1024
         StubImageProtocol.register("/endless.jpg", .endless(chunk: chunk))
         await #expect(throws: RemoteImageError("图片超过 20 MB")) { try await load("/endless.jpg") }
-        try? await Task.sleep(for: .milliseconds(100))
+        // Where the stub paused, not what the loader accepted: no read past it.
         let sent = StubImageProtocol.sent("/endless.jpg")
-        #expect(sent > Int(RemoteImagePolicy.maxBytes) && sent < Int(RemoteImagePolicy.maxBytes) + 20 * chunk,
-                "stopped near the limit instead of reading all 200 MB (sent \(sent))")
+        #expect(sent == (Int(RemoteImagePolicy.maxBytes) / chunk + 1) * chunk,
+                "cancelled while the stub paused after its first chunk past the limit, not after reading on (sent \(sent))")
     }
 
     @Test func unsafeRedirectIsNotFollowed() async {

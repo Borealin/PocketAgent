@@ -93,12 +93,18 @@ final class DeviceConnection {
     var handshake: OpaquePointer?
     var ddi: OpaquePointer?
     var ddiCancellation: OpaquePointer?
+    /// The installed-app catalog of this connection was read for DDI tools.
+    var catalogLoaded = false
     private var server: OpaquePointer?
     private var process: OpaquePointer?
     private var runnerPID: UInt64?
     var ownsRunner: Bool { runnerPID != nil }
+    /// Set when the closed DDI session reported that releasing held input was
+    /// left unconfirmed (its typed outcome, not an AX unsubscribe failure).
+    private(set) var inputReleaseUnconfirmed = false
     deinit {
-        if let ddi { if let error = pocket_ddi_close(ddi, ddiCancellation) { idevice_error_free(error) } }
+        // Only a session that never reached `closeDDI` (no turn used it) ends here.
+        if let ddi { if let error = pocket_ddi_close(ddi, ddiCancellation, nil) { idevice_error_free(error) } }
         closeDVT()
         if let handshake { rsd_handshake_free(handshake) }
         if let adapter { adapter_free(adapter) }
@@ -145,30 +151,34 @@ final class DeviceConnection {
         guard let output else { throw failure("DDI 返回为空。") }
         defer { idevice_string_free(output) }
         guard let result = try JSONSerialization.jsonObject(with: Data(String(cString: output).utf8)) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
+        // A failure after native admission is a result with its effect metadata.
         if let failure = try DDIOperationFailure.decode(result) { throw failure }
         return result
     }
     func closeDDI() throws {
         let session = ddi, cancel = ddiCancellation
         ddi = nil; ddiCancellation = nil
-        try check(pocket_ddi_close(session, cancel))
+        var unconfirmed = false
+        defer { inputReleaseUnconfirmed = inputReleaseUnconfirmed || unconfirmed }
+        try check(pocket_ddi_close(session, cancel, &unconfirmed))
     }
-    func hasDDI() -> Bool {
-        var installed: UnsafeMutablePointer<InstalledCryptexC>?
-        if let error = cryptexd_installed_ddi(adapter, handshake, &installed) {
-            idevice_error_free(error)
-            return false
-        }
-        guard let installed else { return false }
-        cryptexd_free_installed_cryptex(installed)
-        return true
+    /// Whether the developer disk image is mounted, by the wall-clock expiry
+    /// fixed before this call was handed over. A check that times out or fails
+    /// throws; it is never read as "not installed" (which would download and
+    /// mount an image).
+    func hasDDI(expiresAt: UInt64) throws -> Bool {
+        var installed = false
+        try check(pocket_ddi_installed(adapter, handshake, expiresAt, &installed))
+        return installed
     }
-    func mountDDI(_ directory: URL) throws {
+    /// Mounts the image by its expiry (natively bounded; a passed expiry mounts
+    /// nothing). After a timeout the outcome is unknown; it is never retried here.
+    func mountDDI(_ directory: URL, expiresAt: UInt64) throws {
         var assets: OpaquePointer?
         try directory.path.withCString { try check(cryptex1_assets_load($0, &assets)) }
         guard let assets else { throw failure("Missing Cryptex assets") }
         defer { cryptex1_assets_free(assets) }
-        try check(cryptexd_install_ddi(adapter, handshake, assets, nil))
+        try check(pocket_ddi_mount(adapter, handshake, assets, expiresAt))
     }
     func connectRunnerDVT() throws {
         guard !ownsRunner else { throw failure("This turn already owns a runner") }
@@ -176,15 +186,14 @@ final class DeviceConnection {
         try check(remote_server_connect_rsd(adapter, handshake, &server))
         guard server != nil else { throw failure("Missing DVT server") }
     }
-    func installedApplications() throws -> [InstalledApp] {
+    /// The installed applications' InstallationProxy records, read by the
+    /// wall-clock expiry fixed before this call was handed over (natively
+    /// bounded; a passed expiry reads nothing).
+    func installedApplications(expiresAt: UInt64) throws -> [InstalledApp] {
         guard let adapter, let handshake, process == nil else { throw failure("Missing available device tunnel") }
-        var client: OpaquePointer?
-        defer { if let client { installation_proxy_client_free(client) } }
-        try check(installation_proxy_connect_rsd(adapter, handshake, &client))
-        guard let client else { throw failure("Missing installation service") }
         var raw: UnsafeMutableRawPointer?
         var count = 0
-        try check(installation_proxy_get_apps(client, nil, nil, 0, &raw, &count))
+        try check(pocket_installed_apps(adapter, handshake, expiresAt, &raw, &count))
         let apps = raw?.assumingMemoryBound(to: plist_t?.self)
         defer { if let apps { installation_proxy_free_apps(apps, UInt(count)) } }
         guard count == 0 || apps != nil else { throw failure("Missing installed application records") }
@@ -317,8 +326,17 @@ final class Model: ObservableObject {
             MainActor.assumeIsolated { self?.networkPath = PhoneNetworkPath(path) }
         }
         pathMonitor.start(queue: .main)
-        // Native file logging only when the user opted in (read at launch).
-        if DeviceSettings.saveDiagnosticLogs {
+        for (name, phase) in [(UIApplication.willResignActiveNotification, "willResignActive"),
+                              (UIApplication.didEnterBackgroundNotification, "didEnterBackground"),
+                              (UIApplication.willEnterForegroundNotification, "willEnterForeground"),
+                              (UIApplication.didBecomeActiveNotification, "didBecomeActive")] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if self?.busy == true { self?.log("scene_phase", ["phase": phase]) } }
+            }
+        }
+        // Native file logging only when the user opted in (read at launch) or
+        // the diagnostics launch argument is present.
+        if DeviceSettings.diagnosticsEnabled {
             let path = documents.appendingPathComponent("idevice-stages.log").path
             _ = path.withCString {
                 idevice_init_logger(IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 3), UnsafeMutablePointer(mutating: $0))
@@ -334,6 +352,18 @@ final class Model: ObservableObject {
 
     func ffi<T>(_ action: @escaping () throws -> T) async throws -> T {
         try await runOnFFIThread(action)
+    }
+    private var ddiCallSequence = 0
+    func nextDDICallSequence() -> Int { ddiCallSequence += 1; return ddiCallSequence }
+    /// App-instance latch: a DDI session reported (typed) that releasing held
+    /// input was left unconfirmed. Every later input is refused before it is
+    /// sent, in this and later turns and over new connections; observation
+    /// still runs. Only relaunching the app clears it, and nothing here claims
+    /// the phone's input was physically released.
+    private(set) var inputReleaseUnconfirmed = false
+    func latchInputReleaseUnconfirmed(op: String) {
+        if !inputReleaseUnconfirmed { log("input_release_unconfirmed_latched", ["op": op]) }
+        inputReleaseUnconfirmed = true
     }
     /// Settings handshakes and turn startup share this gate. A turn may begin
     /// model work while preparation finishes, but cannot touch the phone yet.
@@ -357,7 +387,7 @@ final class Model: ObservableObject {
     /// turn's runID/logURL. Callers supply only the non-sensitive fields below.
     private func logPhoneConnection(_ event: String, context: PhoneConnectionDiagnosticContext,
                                     fields: [String: Any] = [:]) {
-        guard DeviceSettings.saveDiagnosticLogs else { return }
+        guard DeviceSettings.diagnosticsEnabled else { return }
         let allowed = Set(["networkPath", "usesWiFi", "usesCellular", "usesOtherInterface",
                            "isExpensive", "isConstrained", "connectionStage", "connectionError",
                            "nativeErrorCode", "errorDomain", "errorCode"])
@@ -533,13 +563,38 @@ final class Model: ObservableObject {
     /// Writes run metadata (event names, counts, IDs; never prompts, keys,
     /// arguments, results or response bodies) only when diagnostics are on.
     func log(_ event: String, _ fields: [String: Any] = [:]) {
-        guard DeviceSettings.saveDiagnosticLogs else { return }
+        guard DeviceSettings.diagnosticsEnabled else { return }
         var record = fields
         record["event"] = event
         record["runID"] = runID
         record["time"] = ISO8601DateFormatter().string(from: Date())
-        record["appState"] = UIApplication.shared.applicationState.rawValue
-        guard let logURL, let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
+        // Uptime stops while the system sleeps; the raw monotonic clock does not.
+        record["upMs"] = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_000_000
+        record["rawMs"] = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1_000_000
+        append(record, to: logURL, stateKey: "appState")
+    }
+    /// This run's log identity, for diagnostics delivered later from other
+    /// tasks (script stop path, model streams).
+    func runLogStamp() -> RunLogStamp { runStamp ?? RunLogStamp(runID: runID, url: logURL) }
+    /// Created with each run's ID and log file (`beginAgent`).
+    var runStamp: RunLogStamp?
+    /// A diagnostic recorded at `origin` (its run, time, clocks and sequence),
+    /// written to that run's own log whenever it is delivered.
+    func log(_ event: String, _ fields: [String: Any], origin: RunLogStamp.Origin) {
+        guard DeviceSettings.diagnosticsEnabled else { return }
+        var record = fields
+        record["event"] = event
+        record["runID"] = origin.runID
+        record["seq"] = origin.sequence
+        record["time"] = ISO8601DateFormatter().string(from: origin.time)
+        record["upMs"] = origin.upMs
+        record["rawMs"] = origin.rawMs
+        append(record, to: origin.url, stateKey: "appStateAtWrite")
+    }
+    private func append(_ fields: [String: Any], to url: URL?, stateKey: String) {
+        var record = fields
+        record[stateKey] = UIApplication.shared.applicationState.rawValue
+        guard let logURL = url, let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]) }
         if let handle = try? FileHandle(forWritingTo: logURL) {
@@ -550,6 +605,7 @@ final class Model: ObservableObject {
         }
     }
     func cancel() {
+        log("agent_cancel_requested", ["hadRuntime": activeAgentRuntime != nil])
         releasePreparedPhoneConnection(message: "已停止并释放准备连接")
         pendingAgentCancellation = true
         if let runtime = activeAgentRuntime {
@@ -558,7 +614,11 @@ final class Model: ObservableObject {
             Task { await runtime.cancel() }
         } else { job?.cancel() }
     }
-    private func preparePhoneTransport() async throws -> DeviceConnection {
+    /// `stopRequested` is the executor's own check (Stop, turn deadline, script
+    /// lease, storage gates), rechecked between preparation steps; `turnEnd`
+    /// bounds every step's expiry.
+    private func preparePhoneTransport(turnEnd: Date,
+                                       stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws -> DeviceConnection {
         let device: DeviceConnection
         if let existing = connection {
             // A failed HTTP/session setup may already own a running process.
@@ -580,50 +640,128 @@ final class Model: ObservableObject {
             connection = device
             log("rp_tunnel_connected")
         }
-        if !(try await ffi { device.hasDDI() }) {
-            log("ddi_download")
+        if stopRequested() { throw PhonePreparationStopped() }
+        guard let checkExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+        let checkExpiresAt = DDIImagePreparation.milliseconds(checkExpiry)
+        let checkStarted = ContinuousClock.now
+        func checkMs() -> Int { Int((ContinuousClock.now - checkStarted) / .milliseconds(1)) }
+        log("ddi_check_started")
+        let installed: Bool
+        do { installed = try await ffi { try device.hasDDI(expiresAt: checkExpiresAt) } } catch {
+            log("ddi_check_finished", ["ms": checkMs(), "outcome": error.localizedDescription.contains("timed out") ? "timeout" : "error"])
+            throw failure("无法确认手机上的开发者磁盘映像状态；未执行手机操作。请稍后重试或检查 VPN 与手机连接。")
+        }
+        log("ddi_check_finished", ["ms": checkMs(), "outcome": installed ? "installed" : "missing"])
+        if stopRequested() { throw PhonePreparationStopped() }
+        if !installed {
+            // Downloads and the mount share one budget, cut by the turn's end.
+            let preparationEnd = DDIImagePreparation.preparationEnd(now: Date(), turnEnd: turnEnd)
+            let stopped = PhonePreparationStopped()
             let directory = documents.appendingPathComponent("DDI", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
-                let destination = directory.appendingPathComponent(name)
-                if !FileManager.default.fileExists(atPath: destination.path) {
-                    let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
-                    let (temporary, response) = try await URLSession.shared.download(from: url)
-                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw failure("DDI download failed: \(name)") }
-                    try FileManager.default.moveItem(at: temporary, to: destination)
+            let names = ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"]
+            let missing = names.filter { !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
+            log("ddi_download", ["files": missing.count])
+            for (index, name) in missing.enumerated() {
+                if stopRequested() { throw stopped }
+                let url = URL(string: "https://github.com/doronz88/DeveloperDiskImage/raw/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex/\(name)")!
+                let started = ContinuousClock.now
+                do { try await downloadImageFile(url, to: directory.appendingPathComponent(name), until: preparationEnd,
+                                                 stopRequested: stopRequested) } catch {
+                    log("ddi_download_file", ["index": index, "ms": Int((ContinuousClock.now - started) / .milliseconds(1)), "outcome": "failed"])
+                    throw stopRequested() ? stopped : error
                 }
+                log("ddi_download_file", ["index": index, "ms": Int((ContinuousClock.now - started) / .milliseconds(1)), "outcome": "ok"])
             }
-            try await ffi { try device.mountDDI(directory) }
+            if stopRequested() { throw stopped }
+            guard let mountExpiry = DDIImagePreparation.mountExpiry(now: Date(), preparationEnd: preparationEnd) else {
+                throw failure("开发者磁盘映像准备超出时限；未挂载，未执行手机操作。")
+            }
+            // Fixed before the handoff; native code deducts the delay.
+            let mountExpiresAt = DDIImagePreparation.milliseconds(mountExpiry)
+            log("ddi_mount_started", ["limitMs": Int(mountExpiry.timeIntervalSinceNow * 1000)])
+            let mountStarted = ContinuousClock.now
+            do { try await ffi { try device.mountDDI(directory, expiresAt: mountExpiresAt) } } catch {
+                log("ddi_mount_finished", ["ms": Int((ContinuousClock.now - mountStarted) / .milliseconds(1)),
+                                           "outcome": error.localizedDescription.contains("timed out") ? "timeout" : "error"])
+                throw failure("开发者磁盘映像挂载未在限时内确认，结果未知；不会自动重试。下一次手机操作会先检查实际状态。")
+            }
+            log("ddi_mount_finished", ["ms": Int((ContinuousClock.now - mountStarted) / .milliseconds(1)), "outcome": "ok"])
         }
         log("ddi_ready")
         try Task.checkCancellation()
         return device
     }
-    func prepareDDI() async throws {
+    /// One image file under the preparation's absolute deadline. Stop, the turn
+    /// deadline or a revoked script lease cancel the transfer (URLSession
+    /// cancellation; no native code is involved). The file is moved into place
+    /// only after a complete 200 response.
+    private func downloadImageFile(_ url: URL, to destination: URL, until end: Date,
+                                   stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws {
+        let overrun = failure("开发者磁盘映像下载超出准备时限；未挂载，未执行手机操作。")
+        if stopRequested() { throw PhonePreparationStopped() }
+        guard Date() < end else { throw overrun }
+        let temporary = try await withThrowingTaskGroup(of: URL.self) { group in
+            group.addTask {
+                let (temporary, response) = try await URLSession.shared.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw failure("DDI download failed: \(url.lastPathComponent)")
+                }
+                return temporary
+            }
+            group.addTask {
+                while Date() < end {
+                    if await stopRequested() { throw PhonePreparationStopped() }
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+                throw overrun
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CancellationError() }
+            return first
+        }
+        // A complete file is committed only while the preparation still stands.
+        guard !stopRequested(), Date() < end else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw stopRequested() ? PhonePreparationStopped() : overrun
+        }
+        try FileManager.default.moveItem(at: temporary, to: destination)
+    }
+    func prepareDDI(turnEnd: Date, stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws {
         await acquireDeviceConnection()
         defer { releaseDeviceConnection() }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
-        let device = try await preparePhoneTransport()
-        guard device.ddi == nil else { return }
-        // Do not publish native readiness before the shared app catalog exists.
-        // A failed catalog read leaves no DDI session that can skip this stage.
-        installedApps = try await ffi { try device.installedApplications() }
-        try Task.checkCancellation()
-        guard !pendingAgentCancellation else { throw CancellationError() }
-        try await runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
-            try await self.ffi { try device.openDDI() }
-        }
-        try Task.checkCancellation()
-        guard !pendingAgentCancellation else { throw CancellationError() }
+        if stopRequested() { throw PhonePreparationStopped() }
+        let device = try await preparePhoneTransport(turnEnd: turnEnd, stopRequested: stopRequested)
+        // Ready only with both the catalog and the session; a session left by
+        // a preparation whose catalog read failed is not ready.
+        let readiness = DDIServiceReadiness(catalogLoaded: device.catalogLoaded, sessionOpen: device.ddi != nil)
+        guard !readiness.ready else { return }
+        try await DDIServiceReadiness.prepare(readiness, checkpoint: {
+            try Task.checkCancellation()
+            guard !self.pendingAgentCancellation else { throw CancellationError() }
+            if stopRequested() { throw PhonePreparationStopped() }
+        }, readCatalog: {
+            guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+            let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
+            self.installedApps = try await self.ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
+            device.catalogLoaded = true
+        }, openSession: {
+            try await self.runnerStage("ddi_services_connect", description: "DDI 控制服务连接失败") {
+                try await self.ffi { try device.openDDI() }
+            }
+        })
         log("ddi_services_ready")
     }
-    func prepareWDA() async throws -> String {
+    func prepareWDA(turnEnd: Date, stopRequested: @escaping @MainActor @Sendable () -> Bool) async throws -> String {
         await acquireDeviceConnection()
         defer { releaseDeviceConnection() }
         try Task.checkCancellation()
         guard !pendingAgentCancellation else { throw CancellationError() }
-        let device = try await preparePhoneTransport()
+        if stopRequested() { throw PhonePreparationStopped() }
+        let device = try await preparePhoneTransport(turnEnd: turnEnd, stopRequested: stopRequested)
+        if stopRequested() { throw PhonePreparationStopped() }
         if !device.ownsRunner {
             wdaSessionBase = nil
             let override = DeviceSettings.runnerBundleIDOverride
@@ -633,8 +771,11 @@ final class Model: ObservableObject {
                 try await self.ffi { try device.connectRunnerDVT() }
             }
             try Task.checkCancellation()
+            if stopRequested() { throw PhonePreparationStopped() }
+            guard let inventoryExpiry = DDIImagePreparation.checkExpiry(now: Date(), turnEnd: turnEnd) else { throw PhonePreparationStopped() }
+            let inventoryExpiresAt = DDIImagePreparation.milliseconds(inventoryExpiry)
             let apps = try await runnerStage("runner_apps_listing", description: "App 安装列表读取失败") {
-                try await self.ffi { try device.installedApplications() }
+                try await self.ffi { try device.installedApplications(expiresAt: inventoryExpiresAt) }
             }
             installedApps = apps
             let installedIDs = Set(apps.map(\.bundleID))
@@ -677,7 +818,11 @@ final class Model: ObservableObject {
     /// Called in an uncancelled task after the agent has stopped using tools.
     /// Keep the serial queue occupied until activation and runner teardown finish.
     func finishPhoneAutomation() async -> String {
+        let waitStarted = ContinuousClock.now
+        func elapsed() -> Int { Int((ContinuousClock.now - waitStarted) / .milliseconds(1)) }
+        if deviceConnectionBusy { log("finish_gate_wait") }
         await acquireDeviceConnection()
+        log("finish_gate_acquired", ["waitedMs": elapsed()])
         defer { releaseDeviceConnection() }
         defer {
             wdaSessionBase = nil; connection = nil; installedApps = []
@@ -693,6 +838,7 @@ final class Model: ObservableObject {
             // App activation can otherwise race late accessibility callbacks.
             // A failed unsubscribe still drops its socket and must not prevent
             // returning to this app or releasing the owned input services.
+            log("finish_step_enter", ["step": "stop_observing", "ms": elapsed()])
             do {
                 let closed = try await ffi { try device.ddiRequest(["op": "stop_observing"]) }
                 log("ddi_observation_closed", ["subscription_stop": closed["subscription_stop"] as? String ?? "unknown"])
@@ -700,11 +846,18 @@ final class Model: ObservableObject {
             do {
                 // Finalization runs uncancelled. Returning to our app is a
                 // cleanup effect, even after Stop or a failed AX observation.
+                log("finish_step_enter", ["step": "return", "ms": elapsed()])
                 _ = try await ffi { try device.ddiRequest(["op": "return", "bundle_id": DeviceSettings.assistantBundleID]) }
                 log("assistant_returned")
             } catch { warnings.append("未能自动返回 App，请手动切回。"); log("assistant_return_failed", Model.errorFields(error)) }
+            log("finish_step_enter", ["step": "close", "ms": elapsed()])
             do { try await ffi { try device.closeDDI() }; log("ddi_services_closed") }
             catch { warnings.append("DDI 服务清理未完全确认，连接已释放。"); log("ddi_close_failed", Model.errorFields(error)) }
+            if device.inputReleaseUnconfirmed {
+                latchInputReleaseUnconfirmed(op: "close")
+                warnings.append(InputReleaseUnconfirmed().localizedDescription)
+            }
+            log("finish_step", ["step": "ddi_finished", "ms": elapsed()])
             return warnings.joined(separator: " ")
         }
         guard device.ownsRunner else { return "" }
@@ -780,7 +933,12 @@ struct ControllerApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
+            if DeviceSettings.viewportBenchmark {
+                ViewportBenchmarkRoot(engine: model, providers: providers, workspaces: workspaces)
+            } else {
+                ChatRootView(engine: model, chat: chat, providers: providers, sync: sync, device: device, workspaces: workspaces)
+                    .task { await DeviceSettings.runLongHistoryBenchmarkIfRequested() }
+            }
         }
     }
 }

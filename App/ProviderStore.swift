@@ -45,35 +45,44 @@ enum ProviderKeychain {
 @MainActor
 final class ProviderStore: ObservableObject {
     @Published private(set) var providers: [ProviderRecord] = []
-    @Published private(set) var defaultSelection: ModelSelection?
+    @Published private(set) var defaultSelection: ModelSelection? { didSet { onDefaultSelection?() } }
     @Published private(set) var keyed: Set<UUID> = []
     @Published var storageError = ""
     @Published var notice = ""
     private(set) var deletedProviders: [Tombstone] = []
-    private var legacySecretPending = false
     private var keyOrigins: [String: [String]] = [:]
-    private let file = applicationSupport.appendingPathComponent("providers.json")
+    private var legacySecretPending = false
+    /// Local context budget settings; never synchronized.
+    @Published private(set) var budgetOverrides: [ContextBudgetOverride] = []
+    /// Called after the default selection is assigned.
+    var onDefaultSelection: (() -> Void)?
+    /// The app's common Settings file, shared by the assistant and independent tasks.
+    private let storage = ProviderSettingsStorage(applicationSupport: applicationSupport)
 
     init() {
         load()
-        importProvisioningFile()
-    }
-
-    /// Selection for conversations stored before per-session selection existed.
-    /// Deterministic, so it holds even if the provider file is unreadable.
-    var legacySelection: ModelSelection? {
-        let defaults = UserDefaults.standard
-        let legacy = providers.first { $0.id == LegacyProviderMigration.providerID }
-            ?? LegacyProviderMigration.provider(endpoint: defaults.string(forKey: "agentEndpoint"),
-                                                model: defaults.string(forKey: "agentModel"))
-        return legacy.flatMap(LegacyProviderMigration.selection)
     }
     var isConfigured: Bool { !providers.isEmpty }
     func provider(_ id: UUID) -> ProviderRecord? { providers.first { $0.id == id } }
 
     func configuration(for selection: ModelSelection?) throws -> RunConfiguration {
         try RunConfiguration.resolve(selection, providers: providers, secret: { try ProviderKeychain.secret(for: $0) },
-                                     boundOrigins: boundOrigins)
+                                     boundOrigins: boundOrigins, budgetOverride: selection.flatMap(budgetOverride))
+    }
+
+    func budgetOverride(_ selection: ModelSelection) -> ContextBudgetOverride? {
+        budgetOverrides.first { $0.providerID == selection.providerID && $0.modelID == selection.modelID }
+    }
+
+    /// Local budget for one provider/model; empty values remove the override.
+    /// Validated before saving; accepted turns keep the value frozen at acceptance.
+    func setBudget(_ override: ContextBudgetOverride) throws {
+        guard storageError.isEmpty else { throw failure(storageError) }
+        if !override.isEmpty { _ = try ContextBudgetPolicy.resolve(override) }
+        let previous = budgetOverrides
+        budgetOverrides.removeAll { $0.providerID == override.providerID && $0.modelID == override.modelID }
+        if !override.isEmpty { budgetOverrides.append(override) }
+        do { try persist() } catch { budgetOverrides = previous; throw error }
     }
 
     func boundOrigins(_ id: UUID) -> Set<String>? { keyOrigins[id.uuidString].map(Set.init) }
@@ -117,7 +126,7 @@ final class ProviderStore: ObservableObject {
         keyOrigins[record.id.uuidString] = bound.map { $0.sorted() }
         if let index = providers.firstIndex(where: { $0.id == record.id }) { providers[index] = record }
         else { providers.append(record) }
-        if defaultSelection == nil { defaultSelection = LegacyProviderMigration.selection(for: record) }
+        if defaultSelection == nil { defaultSelection = record.models.first.map { ModelSelection(providerID: record.id, modelID: $0.id) } }
         refreshKeys()
         try persist()
     }
@@ -137,6 +146,7 @@ final class ProviderStore: ObservableObject {
         deletedProviders.append(Tombstone(id: id, deletedAt: Date()))
         try? ProviderKeychain.removeSecret(for: id)
         keyOrigins[id.uuidString] = nil
+        budgetOverrides.removeAll { $0.providerID == id }
         refreshKeys()
         persistReporting()
     }
@@ -169,9 +179,14 @@ final class ProviderStore: ObservableObject {
 
     // MARK: Sync
 
+    /// Only portable provider fields change; local keys, bindings, default
+    /// selection and budget overrides are carried over from the current file.
     func applySync(merged: PortableSnapshot, base: PortableSnapshot) {
         let result = SyncApplication.providers(providers, tombstones: deletedProviders, merged: merged, base: base)
-        for id in result.removed { try? ProviderKeychain.removeSecret(for: id); keyOrigins[id.uuidString] = nil }
+        for id in result.removed {
+            try? ProviderKeychain.removeSecret(for: id); keyOrigins[id.uuidString] = nil
+            budgetOverrides.removeAll { $0.providerID == id }
+        }
         providers = result.providers
         deletedProviders = result.tombstones
         refreshKeys()
@@ -180,74 +195,20 @@ final class ProviderStore: ObservableObject {
 
     // MARK: Storage
 
+    /// Existing settings are used as stored (same provider IDs, so Keychain
+    /// items and key origin bindings keep applying); nothing is written here.
     private func load() {
         do {
-            if FileManager.default.fileExists(atPath: file.path) {
-                let data = try Data(contentsOf: file)
-                guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let version = root["version"] as? Int else { throw failure("无效的服务商文件") }
-                guard version == ProviderFile.currentVersion else { throw ProviderError.unsupportedVersion(version) }
-                let stored = try JSONDecoder().decode(ProviderFile.self, from: data)
+            if let stored = try storage.load() {
                 providers = stored.providers
                 defaultSelection = stored.defaultSelection
                 deletedProviders = stored.deletedProviders
                 legacySecretPending = stored.legacySecretPending
                 keyOrigins = stored.keyOrigins
-                if legacySecretPending { legacySecretPending = !copyLegacySecret(); try persist() }
-            } else {
-                migrateLegacySettings()
-                try persist()
+                budgetOverrides = stored.budgetOverrides
             }
         } catch { storageError = "服务商配置读取失败，原文件已保留：\(error.localizedDescription)" }
         refreshKeys()
-    }
-
-    /// One time: earlier builds kept one endpoint/model in UserDefaults and
-    /// one key in a fixed Keychain item. Without them, setup UI is shown.
-    private func migrateLegacySettings() {
-        let defaults = UserDefaults.standard
-        guard let provider = LegacyProviderMigration.provider(endpoint: defaults.string(forKey: "agentEndpoint"),
-                                                              model: defaults.string(forKey: "agentModel")) else { return }
-        providers = [provider]
-        defaultSelection = LegacyProviderMigration.selection(for: provider)
-        legacySecretPending = !copyLegacySecret()
-    }
-
-    /// Copies, never moves, the legacy key into the provider-scoped item.
-    private func copyLegacySecret() -> Bool {
-        let service = LegacyProviderMigration.keychainService(
-            info: Bundle.main.object(forInfoDictionaryKey: "PocketAgentLegacyKeychainService") as? String)
-        do {
-            guard let secret = try ProviderKeychain.read(service: service, account: LegacyProviderMigration.keychainAccount),
-                  !secret.isEmpty else { return true }
-            try ProviderKeychain.setSecret(secret, for: LegacyProviderMigration.providerID)
-            // The legacy key was used with the migrated endpoint.
-            if let legacy = provider(LegacyProviderMigration.providerID) {
-                keyOrigins[legacy.id.uuidString] = legacy.credentialOrigins.sorted()
-            }
-            return true
-        } catch { return false }
-    }
-
-    /// Local provisioning drop (`agent-import.json` in Documents) used by
-    /// earlier builds: deleted after its key is stored in the Keychain.
-    private func importProvisioningFile() {
-        let url = documents.appendingPathComponent("agent-import.json")
-        guard storageError.isEmpty, let data = try? Data(contentsOf: url) else { return }
-        do {
-            let config = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
-            let existing = provider(LegacyProviderMigration.providerID)
-            guard let migrated = LegacyProviderMigration.provider(endpoint: config["endpoint"] ?? existing?.inferenceURL,
-                                                                  model: config["model"] ?? existing?.models.first?.id) else {
-                throw failure("缺少有效的 HTTPS endpoint 或模型")
-            }
-            var record = existing ?? migrated
-            record.inferenceURL = migrated.inferenceURL
-            if record.model(migrated.models[0].id) == nil { record.models.insert(migrated.models[0], at: 0) }
-            if let format = config["format"].flatMap(ModelAPIFormat.init(rawValue:)) { record.format = format }
-            try save(record, newSecret: config["apiKey"] ?? "", removeSecret: false)
-            try FileManager.default.removeItem(at: url)
-        } catch { notice = "导入配置失败，请在模型服务中手动填写：\(error.localizedDescription)" }
     }
 
     private func refreshKeys() {
@@ -260,9 +221,8 @@ final class ProviderStore: ObservableObject {
 
     private func persist() throws {
         guard storageError.isEmpty else { return }
-        let stored = ProviderFile(providers: providers, defaultSelection: defaultSelection,
-                                  deletedProviders: deletedProviders, legacySecretPending: legacySecretPending,
-                                  keyOrigins: keyOrigins)
-        try JSONEncoder().encode(stored).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try storage.write(ProviderFile(providers: providers, defaultSelection: defaultSelection,
+                                       deletedProviders: deletedProviders, legacySecretPending: legacySecretPending,
+                                       keyOrigins: keyOrigins, budgetOverrides: budgetOverrides))
     }
 }

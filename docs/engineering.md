@@ -2,12 +2,30 @@
 
 ## Requirements and scope
 
+The [single-entry and long-term memory design](long-lived-assistant.md)
+records the user-confirmed 2026-10-14 direction, the public research behind it
+and the implemented P1–P4 contract: a default "你的助理" entry on the existing
+AgentKit loop and phone execution path, one MainActor-owned strictly decoded
+assistant-v1 history with scope/dependency rows, explicit host-written memory,
+validated summaries and one pending-next request. Startup permits and awaited
+transcript commit barriers preserve the no-replay boundary; correction
+refreshes the next request; explicit forgetting shows its known dependency
+impact before excluding sources. Status and verification scope are in
+"Long-lived assistant (assistant-v1)" below. The user authorized a clean
+breaking data format without legacy compatibility or migration, and then the
+full implementation.
+
 Native provider management on a dedicated page, provider/model selection per
-conversation, iCloud Drive synchronization of portable data, reproducible IPA
+conversation (the primary line and independent tasks alike), iCloud Drive
+synchronization of portable data, reproducible IPA
 builds and AltStore Classic/SideStore source publication. Borealin/PocketAgent is
-public following the user's authorization on 2026-10-11. Existing installed conversations and local API
-settings must migrate intact. Siri and arbitrary on-phone XCTest compilation
-remain outside this iteration.
+public following the user's authorization on 2026-10-11. The assistant
+release uses an empty assistant-v1 history namespace with mandatory
+current-schema fields; old history is not adopted. Provider settings are not
+part of that namespace: the app's common Settings file is reused in place with
+its provider IDs, default model, Keychain references and key origin bindings,
+so no reconfiguration is needed. Siri
+and arbitrary on-phone XCTest compilation remain outside this iteration.
 
 Setup must use one Base URL for standard model services, with Sub2API and protocol
 presets, clear model-loading outcomes and manual fallback. iCloud setup proposes
@@ -71,27 +89,29 @@ one-to-six-line composer, removable image thumbnails and Photos, camera and
 user-initiated paste. Replies use native block Markdown and attachment views. Real
 model/tool phases must remain visible both in the chat and through the system
 task surface while another app is foreground. The review proposes native SwiftUI
-components over the existing AgentKit events. Attachment metadata extends the
-current history with optional fields while retaining its current version;
-image bytes remain outside portable synchronization. The earlier teardown fix
+components over the existing AgentKit events. Attachment metadata is a required
+field of the assistant-v1 session record; image bytes remain outside portable
+synchronization. The earlier teardown fix
 did not include this UI rewrite.
 
-This revision must preserve every existing conversation/message ID, message
-content, draft, selection and attribution. Back up the installed history before
-upgrade, install using the same local bundle/signing identity, and compare the
-original records after migration and device checks. User photos use protected
-local binary files and explicit metadata in the existing atomic history; image
-capability is checked against the accepted turn's frozen configuration. Failed
-import/send retains the user's draft. Image-only sends and image steering use
-AgentKit's existing image fields. Portable sync carries no image bytes or local
-paths; attachment-unavailable placeholders and retention of unchanged local
-attachments are part of compatibility validation.
+The assistant release is an explicitly authorized breaking change. It supersedes
+prior preserve-on-upgrade requirements: no historical decoder, field backfill,
+legacy deduplication/import, upgrade backup or multi-version migration matrix.
+Use an assistant-v1 local history namespace and separate assistant-v1 portable
+cloud folder/envelope; prior client history formats are rejected rather than
+converted. Old folders are not active data sources and are not automatically
+removed. The break covers history only: provider settings keep the current
+version-1 Settings file (see below). New
+current-format messages keep their IDs, order and call/result adjacency; crash
+recovery and storage failure handling remain required.
 
-The user explicitly removed multi-version history compatibility from this
-unreleased iteration. Preserve the currently installed records through one
-upgrade; do not build or maintain a general legacy-version compatibility layer
-or expand the old-format test matrix. Existing portable merging remains a
-current-data integrity requirement.
+User photos use protected local binary files and explicit metadata in the new
+atomic history; image capability is checked against the accepted turn's frozen
+configuration. Failed import/send retains the user's draft. Image-only sends and
+image steering use AgentKit's existing image fields. Portable sync carries no
+image bytes or local paths; missing attachments display an unavailable
+placeholder. Current-format conflict merging and deletion tombstones remain data
+integrity requirements.
 
 Normalize user images to a maximum 2048-pixel edge, apply orientation and remove
 source EXIF/GPS before storage. A message may contain up to six images. Draft and
@@ -209,7 +229,10 @@ phase bubble and Doubao's official task-queue illustration.
 
 ## Decisions
 
-Retain pinned AgentKit 8108c9bb87c546860cfc1769571e115af919fe8a and the verified
+Pin AgentKit to the published fork Borealin/AgentKit at
+e1c81c911564c39d5f78ccec6808ba96c1acd2e8 (upstream 8108c9b plus the bounded
+`consume` API used for context maintenance, and a bare SSE `error` frame
+failing the stream) and keep the verified
 native idevice/WDA execution path. Use a small Codable store with Keychain
 credentials, per-session selection and frozen queued-turn configuration.
 
@@ -260,11 +283,15 @@ remove sideload signing, the separate automation companion or device setup.
 
 ## Architecture and compatibility
 
-App: SwiftUI sessions/provider/sync views. AgentKit: model protocols and agent
+App: SwiftUI assistant entry, task/history list, memory panel, provider/sync views. AgentKit: model protocols and agent
 loop. Native: Rust FFI RP/DDI preparation, then owned DDI service primitives or selectable WDA runner/HTTP tools.
-Run configuration is captured before enqueue; changing a session selection does
-not alter work already accepted. Existing transcript event order and tool result
-IDs are preserved. Restart interrupts active work, never replays it.
+Run configuration (provider, model, key, local context budget, project,
+backend, clipboard policy, attachments) is captured at acceptance; changing a
+selection does not alter accepted work. `HistoryOwner` is the only writer of
+`assistant-v1/history.json`; run events are recorded in event order with their
+root membership, tool result IDs are preserved, and model requests and tool
+dispatches wait for the saved request view of their inputs. Restart interrupts
+active work and asks before any pending request continues; nothing is replayed.
 
 Every turn that starts automation owns its runner PID. Retain the tunnel and
 reopen the Instruments control channel for teardown because the launch channel
@@ -275,10 +302,508 @@ the runtime's terminal events instead of abandoning an in-flight tool. Cleanup
 runs without inherited cancellation; failures appear in the conversation status
 without changing an already completed action into a replay.
 
-Legacy endpoint/model and Keychain settings migrate once; production defaults
-contain no private gateway or company identity. Local build overrides preserve
-the installed test app identity without committing them. Device pairing import
+Current-format provider configuration is set up directly; no legacy endpoint,
+model or Keychain-ID migration is required for the assistant release. Production
+defaults contain no private gateway or company identity. Local build overrides
+preserve the installed test app identity without committing them. Device pairing import
 and runner/VPN settings are local to each device.
+
+## Long-lived assistant (assistant-v1)
+
+Status: P1–P4 implemented on `codex/long-lived-assistant-implementation`;
+Core and DDI native tests, the iOS Release build/IPA inspection and the
+real-model device scenarios on the iPhone 12 mini pass, including observation of
+PocketAgent's own pages; uncovered items are listed below.
+Design and file map: [long-lived-assistant.md](long-lived-assistant.md).
+
+- Data: one strict `assistant-v1/history.json` (explicit nulls, no legacy
+  decoder), `assistant-v1/Attachments`, and an `assistant-v1/` subfolder in the
+  sync location with a generation-tagged portable envelope. Earlier history
+  files and folders are never read, converted or removed. An unreadable current
+  file blocks writes until an explicit reset moves it aside.
+- Settings: the common `providers.json` (version 1) is shared by Settings, the
+  assistant and independent tasks and read with the earlier version-1 rules;
+  provider IDs, default selection, tombstones, Keychain items (account =
+  provider ID) and key origin bindings apply unchanged. Local per-model context
+  budgets are an additive `budgetOverrides` key that earlier version-1 readers
+  ignore; `legacySecretPending` is written back as found and never acted on (no
+  legacy endpoint/model/Keychain migration). Loading never writes; another
+  version or an invalid file is reported, left untouched and not overwritten.
+  A primary line without a model takes the Settings default (at launch and when
+  the default is assigned); an existing selection is kept.
+- Owner: transactions publish only after a successful write; run events stay
+  visible when their write fails, storage becomes dirty, every gate fails and
+  only an explicit retry restores storage (never the stopped run). The file is
+  one JSON value in one atomic file (`HistoryLayout`; same value as the codec,
+  key order and whitespace differ): the sessions array first, each session's
+  message array followed by whitespace capacity and then its other fields with
+  their own capacity, and the other file fields (including the assistant
+  section) last without capacity. Each region's spare comes from its own length
+  only (message arrays an eighth, at least 16 KiB; session fields half, at
+  least 1 KiB). A plan keeps every session still in place and rewrites from the
+  first moved session to the end of the file, so the tail growing, a later
+  session outgrowing its capacity, or a session appended or removed after the
+  first one all patch. While the file still has the identity the writer last
+  published (device, inode, size, modification and change time, checked before
+  and after cloning), `PatchingHistoryWriter` clones it, sets the clone's size,
+  writes only the changed ranges, fsyncs and renames the clone over it; the
+  clone must be confirmed as protection class C on iOS. Otherwise (no adopted
+  baseline, a changed file, the first session moved, no cloning, an unconfirmed
+  class, and at least every 512 patches) it writes the whole file atomically.
+  Failures before the rename leave the file and the baseline untouched; the
+  baseline moves only after publication. Changed messages are found with
+  ordinary equality against the last published layout; cache misses (messages,
+  scope rows) are encoded in parallel with sorted keys. At launch the file is
+  read through one descriptor under one identity and strictly decoded; off the
+  main actor every message is encoded again, capacities are read from the
+  whitespace runs and the rebuilt image must equal the bytes. The owner adopts
+  it only while storage is ready, nothing was written and it still holds that
+  exact decoding, so the first write after launch can patch.
+- Gates: a startup permit is committed before `runtime.start`; each model
+  request waits for the saved request view (text/modelText, calls, provider
+  items, image identity) of every real message since its prompt; each tool
+  dispatch waits for its assistant call and per-call result watermarks of earlier
+  calls (local result saved or provider-answered). One turn deadline; effects
+  require the job to still own its session and run.
+- Context: same-scope complete segments of requests that actually started
+  (permit committed; a request that failed before it, an unstarted pending or an
+  abandoned one stays visible but is not context, summary input or automatic
+  search result), deterministic interruption repairs,
+  summaries accepted only when coverage, digests and parent chain recompute
+  (CAS commit), fresh memory block per request, forget filtering, stale phone
+  screens projected, one estimator with bounded per-model usage calibration;
+  known windows/explicit ceilings are hard guards, unknown windows only a soft
+  target. A summary covers an exact prefix of the eligible messages ending at a
+  safe cut: a segment end, or a point inside a root where repairing each side
+  alone equals repairing the whole (never at a tool result; a segment holding a
+  result detached from its call's group has no inner cut). Raw history continues
+  exactly there, so a root may be partly summarized and partly raw
+  (`builderVersion` 2; records of other versions stay in the file unused and the
+  chain is rebuilt from raw history, at most three folds per turn, while a known
+  ceiling may refuse main requests). Planning uses the turn's calibrated estimate:
+  the recent tail keeps whole segments within 35% of the target, or, when the
+  newest alone exceeds it, its longest suffix of whole groups; older history is
+  folded oldest first in at most three folds of whole segments or windows of whole
+  groups, each payload within 60% of the target (a host packing window), the first
+  fold's complete request with the actual previous summary within the target and
+  estimated once; later folds open within the window and are checked with the real
+  summary before dispatch, so their progress is not guaranteed. A group larger
+  than the window, or (first fold) than the room the previous summary leaves,
+  stops packing before it with a typed maintenance note; nothing is split,
+  truncated or skipped. If a forget invalidates the summary a request includes,
+  the request also drops every raw message of roots that summary covered (the
+  rest of a cut root, or a later run of an interleaved root), registers none of
+  them and the status says so (`context_exclusion` in the opt-in log); history is
+  unchanged. An explicit reference is a request-only quote that keeps its
+  reference by its own ID (`QuotedReference`, no quoted text). Each request
+  rechecks it against the latest history (`AssistantContext.quotedWindow`): the
+  window must still exist in its session with the referenced digest and nothing
+  in it may be masked. A quote whose window was deleted, rewritten by a sync or
+  masked by a forget is dropped (said in the status and logged as a count only)
+  and nothing of it is registered; the request registers the window's current
+  sources (known roots, or exact messages without one) of each quote it carries
+  in the same transaction as its other reads, so a later forget of what the
+  quote showed stops the turn. A source root deleted after that registration
+  stays known to the forget (prune keeps a root another root read).
+  Before each summary fold is sent, `SummaryMaintenance` checks
+  storage, explicit forgets (current root, fold sources, the extended summary),
+  that the fold is exactly the eligible messages right after the valid tip's
+  coverage (same content, each piece within its root, ending at a safe cut) and
+  the complete request estimate against the frozen target, then durably registers
+  the fold's roots (once each, in order) and the parent summary's roots as reads
+  of the turn's root; storage failures, forgets and the turn deadline stop the
+  turn, while an over-budget or changed fold only skips the new summary. When this turn's folds
+  would take the valid chain past 128 records, maintenance first commits a
+  checkpoint: a host copy receipt of the valid tip (no model request; same summary
+  bytes and anchor, exactly the eligible prefix up to it and all its roots, the tip
+  kept as parent; `builderVersion` 1002, no format change), committed by the same
+  CAS only while the tip is the current valid tip. Later validation trusts that
+  sealed receipt instead of re-walking the old chain: it recomputes the current
+  raw-prefix fingerprint, the parent's record digest from its stored body and the
+  receipt, and checks anchor, bytes, prefix and roots. Validation checks each
+  record once (roots and checkpoints downward), rejects anything on or leading
+  into a parent cycle, and requires every record (checkpoints included) to end at
+  a safe cut and list exactly the roots of the messages it covers. A remainder
+  needing more than three folds starts with the oldest three. The forget preview
+  counts only current-version summaries as newly invalidated (the commit removes
+  every affected record). The per-request preparation lives in Core
+  (`AssistantRequestPreparer`). A provider rejection of a too-large request (400/413/
+  422 or an in-stream failure with an overflow code or explicit overflow wording;
+  never 401/403/429/5xx, rate limits or network errors) becomes
+  `ProviderContextLimit` on the main and summary paths: the turn stops without a
+  retry, model change or replay, and the text names only the status, a known code
+  and a reported limit, with request-size rejections (413) advised separately. The
+  in-stream case reads AgentKit's internal failure type through a bounded bridge
+  pinned to its shape. At the pinned SDK a Chat Completions SSE frame whose root
+  `error` is an object or a non-empty string, without an event name or type,
+  fails the stream too, so it maps on both paths; a stream that only ends early
+  is never read as a limit. The
+  status line shows the turn's frozen model, budget source and the latest complete
+  request estimate (kept after Stop or finish; not progress or usage).
+- Memory: host-exact writes (panel, chat chip, `记住：`/`/remember`, the
+  composer's remember mode, the editor opened from a candidate), model read-only
+  (`memory_search`/`session_search` through AgentKit's protocol), correction by
+  ID/revision CAS, forgetting through a recomputed preview over the known read
+  graph (iterative, linear) that shows the entry it computed; a selection whose
+  revision changed is refused and a changed confirmation shows the latest entry
+  for a new confirmation. A forget can stop only the primary turn the engine is
+  executing (preparing or running), never a queued primary request or another
+  task. A search plans its page from a snapshot by identity only; one owner
+  transaction then verifies it against the latest history (entry revision/scope,
+  segment digest, eligibility, masks, explicit references, the run's frozen
+  started root), registers exactly what it returns and returns that content; a
+  changed page is `stale_search`, and a failed registration, a replaced run or a
+  wrong root fails the run's commit epoch so no later tool or model request
+  follows (`too_large` returns IDs only). An explicitly referenced window (any
+  scope) is a `session_search` candidate only while it may be quoted (the same
+  `AssistantContext.quotedWindow` check), so one masked before the search is
+  never planned; a mask after planning is still the commit's `stale_search`,
+  and the rebuilt list no longer has it. Remember mode (bookmark in the primary
+  composer) opens the editor with the draft and saves only on 保存, clearing the
+  draft only if unchanged. An explicit "忘掉/删除/更正…记忆" request (verb first plus
+  记忆, or `/forget`) opens a sheet of up to five lexical matches in the current
+  scope; the user picks one for the editor or the forget panel; ordinary sentences
+  are sent. Script phone helpers pass `ScriptPhoneAdmission` (tool, lease, the
+  turn's shared effect gate) for every request.
+- Clear the conversation, keep memory: the drawer's assistant row (swipe or
+  menu) asks with an alert (清空对话，保留记忆 / 取消) that names what goes and
+  what stays. One transaction replaces the primary line with an empty one (new
+  ID, same title, model and project) and tombstones the old line, so a synced
+  or in-flight copy cannot bring it back (an empty line is replaced too: an empty
+  local session is not exported and a same-ID remote copy would refill it). Its
+  summaries go, scope membership is pruned and roots whose source line is gone
+  become unknown even inside a conflict copy. Memory entries, revisions,
+  sources, tombstones and masks, other conversations, providers and pairing
+  stay. Refused in UI and Core while the line prepares, queues, runs or settles
+  steering, has a pending request or a recovery notice; a failed write changes
+  nothing; unreferenced files are collected afterwards.
+- Pending: one detached → promoted request with fair ordinals, Stop epoch,
+  held/needsResume states, explicit same-ID continuation only before the permit,
+  abandon-unstarted, sync deferral and attachment retention. Whenever a primary
+  turn ends, before or after its permit, the controller settles a detached
+  queued request before `finish` gives the line back
+  (`PrimaryTurnSettlement.settle` with `HistoryFile.pendingSettlement`): it
+  stays queued only after a turn that started and completed in the foreground
+  with no Stop since it was accepted; activation then needs
+  `PendingActivation.activate`. A hold first drops the in-memory frozen
+  configuration (the only authority for automatic activation), then writes the
+  hold; if that transaction fails, later successful writes still cannot let it
+  start (activation without a frozen configuration holds it), only an explicit
+  continue re-freezes it. Continuing moves an
+  unauthorized promoted root to the project confirmed now in the same write
+  (reads, ID and masks kept); the permit refuses a run whose frozen scope differs
+  from the root's.
+- Primary recovery (`choosePrimary`, `startNewPrimary`) never changes the role
+  of a session with a job. A job's role is frozen when it is accepted
+  (`ChatJob.primary`: assistant support and memory reads, the forget stop, the
+  pending settlement), so a choice waits while the current primary line or the
+  chosen session has a queued, preparing, running or cancelling turn
+  (`HistoryFile.primaryRecoveryBlocker`: the controller's jobs, repeated by the
+  persisted run state). The recovery card disables those choices and says why;
+  the controller passes its jobs into the transaction, so a stale callback is
+  refused too. A job of another task does not block recovering two idle lines.
+
+Verification scope (2026-10-14; follow-ups 2026-10-15): Core suite (381 tests in 77 suites, mock transports) passes
+on the Mac host, including the commit gates through the pinned AgentRuntime,
+crash points of the pending state machine, 12k-root dependency chains, earlier
+version-1 settings files keeping IDs/origins/default/budgets, the summary
+dispatch checks (a large Chinese previous summary never reaches the producer),
+cross-scope continuation, never-started requests staying out of context, strict
+outside-app counts and preparation effects; the DDI native unit tests (24, host
+`cargo test`) cover graph admission, point ownership and the status-band
+gesture bounds. Release build and IPA inspection pass. On the iPhone 12 mini (dev
+builds over the existing identity) the assistant used the model already
+configured in Settings without setup; with real model calls it answered from
+memory, did not recover a forgotten fact through Chinese memory/history search,
+kept state across relaunch, advanced and held the next request as specified,
+continued an unstarted promoted request in the project chosen afterwards,
+committed real summary folds through the bounded `consume` path, and answered a
+draft resent after a pre-permit failure once. On the fixed builds (code 5250b2d,
+7169080 and the final 2c47dcf, one native library), with the keyboard's paste
+suggestion on screen, observing the primary line and a new empty task succeeded
+with one outside-app element (re-run on the final build); on 5250b2d a Settings
+navigation observed every result; on 7169080 a `tap_point` on the suggestion was
+refused before any touch and reported as not executed, a kill mid-turn and Stop
+during a phone turn left the turn interrupted with no further action, and a new
+request observed fresh. A test task kept calling `wait` until the 600 s turn
+deadline stopped it (7169080: 600.2 s, generic reason; final build: 600.6 s with
+the deadline reason), nothing replayed and below the per-turn caps. Not verified
+on the device: recall after a model change (the configured provider has one model
+and no model catalog address, so the app cannot discover another without a newly
+entered endpoint), the Dynamic Island task-surface gesture (native bounds
+tests only), and coordinate taps on a system overlay hosted by SpringBoard while
+an app is the observed foreground (now refused by the ownership check). Weather's
+first-run welcome appears without a Weather app process: its launch returns
+CoreDevice 10004 (reported unconfirmed) and observation refuses the unidentified
+foreground. Clearing the conversation (code f65aba9) was exercised on the
+12 mini with the real model: Cancel changed no content, clearing was refused
+while the line prepared context and while a held pending request existed, a
+confirmed clear left an empty line with the same model and project, unchanged
+tasks, memory and settings, the cleared marker was not found by the model's
+history search after a relaunch, and memory recall continued. The in-flight
+sync plan, same-ID remote refill, conflict-copy and failed-write boundaries are
+host-tested only. On 2026-10-15 (12 mini, real UI and model) the six follow-ups
+were exercised: a memory saved before midnight was recalled after it (one day
+boundary, not multi-day stability), remember mode, the candidate sheet (five long
+entries with the keyboard up, forget/correct/cancel/send as message, no match,
+an ordinary "我忘记带钥匙" message), recall after a correction, a memory added
+during a run used by the same run, read-only observation, the frozen budget line,
+the host refusal at a 1000-token ceiling (restored afterwards), Stop and restart
+without replay, and clearing the conversation on the final build. An over-budget
+fold was refused on the device at a 4000-token ceiling: the maintenance note was
+shown, no fold read was registered, no summary was written and the main guard
+then refused. At 1000–3000 that earlier planner emitted no fold (every test
+segment exceeded the fold budget), so only the main guard applied; the current
+planner folds safe units before an oversized group and reports the block (Core
+only). A forget during maintenance
+was exercised only with fault injection: the launch argument
+`-PocketAgentHoldMaintenanceDispatch` makes each fold wait 20 s (cancellable)
+after its read registration and before its request; a forget confirmed in that
+wait, with the preview saying the running task stops, stopped the preparing
+turn with no reply and no new summary. It does not exercise a live stream or
+the 150 s limit. With the launch argument `-PocketAgentInjectSlowSummaryStream`
+(a fold sends no request and receives a new summary increment every 3 s) the
+real 150 s maintenance deadline ended the fold at 150.05 s with the note
+"上下文整理超过 150 秒" and no summary written. With
+`-PocketAgentStopAtFirstSummaryText` the fold streaming from the configured
+provider was stopped through the Stop button's path at the first non-empty text:
+the transport ended by cancellation, no summary and no main request followed.
+A real-model `run_script` turn whose helper had made one call was stopped by
+an injected one-shot write failure (`-PocketAgentDirtyAfterFirstScriptCall`):
+storage became dirty, the lease was revoked and the guest killed before any
+second call; flushing restored storage. Forgetting, from the composer, memory
+the running turn had read showed that the task would stop; confirming it
+cancelled the script before its second call (guest processes 0, root masked).
+An isolated provider fixture (`-PocketAgentProviderLimitProbe`) mapped bare SSE
+error objects and strings through the pinned client in the optimized iOS build
+on both paths (the summary path through the `StreamingSummary` producer, not
+the full `SummaryMaintenance` compare-and-swap); it is not a service actually
+rejecting a request, and no real provider overflow was induced. The same fixture
+and an isolated maintenance fixture (`-PocketAgentSummaryMaintenanceProbe`: an
+isolated owner through the production writer to a temporary file, the real
+`SummaryMaintenance.run`, the pinned `consume` over injected responses) passed on
+the df53187 build: two committed folds reloading to a valid tip, a typed summary
+limit, a Stop and a revocation while a fold streams, and a source edit refused by
+the commit's compare-and-swap (injected responses; not a real provider). The
+E build (276b3df) adds a sixth case, which passed on the device with the other
+five (fresh process and nonce): one synthetic 30-group root under a host
+4000-token budget folded over two turns (three folds each), coverage ending at a
+safe cut inside the root, an exact source partition and an equal reload. A real
+summary then main request on the 12 mini covered a root's prompt only and sent
+raw history starting at that root's plain assistant reply, which carries a
+provider item: the summary committed (builder version 2, sources exactly the
+prompt) and the main request completed (planning recomputed on the pulled
+history, committed coverage and completion metadata; not a packet capture).
+Device long
+history (`-PocketAgentLongHistoryBenchmark`, sandbox file, the owner through
+the production writer, three runs): a patched event at 50k messages records in
+p95 0.107–0.109 s (10k: 0.02 s) and the file is exactly the published layout
+image. Whole writes no longer assemble the image: the layout's pieces stream in
+file order through one 4 MiB buffer into an exclusive temporary file confirmed
+as class C, then fsync, checked close and rename (`HistoryStorage.writeWhole`,
+`HistoryLayoutEmitter`); the bytes are those of `image()`, a failure before the
+rename leaves the published file and the writer's baseline as they were, and
+nothing throws after it. They still stay above 0.2 s at 50k (123 MB; dev build
+of 8bccbdd, three runs): a warm whole write after an outside change, or the
+periodic one (benchmark interval 4, production every 512 patches, never run 512
+times on the device), takes 0.27–0.46 s, of which planning 0.07 s, producing
+the pieces 0.013–0.015 s, the 30 write calls 0.14–0.29 s and fsync
+0.013–0.056 s; the first write of a file that cannot be adopted takes
+0.64–0.83 s, of which planning 0.41–0.45 s. Same-layout pairs later in each run
+(Foundation `.atomic` 0.21–0.94 s with 0.023–0.026 s assembling the image,
+the region writer 0.22–0.92 s, the explicit-call floor 0.19–1.15 s) vary with
+the device's write speed and show no consistent difference between the
+strategies; the remaining cost is writing 123 MB, measured for these strategies
+on these runs only. The region writer's explicit buffer is bounded at 4 MiB;
+process memory was not measured. The public swift-foundation source also calls
+plain `fsync` before its rename; the shipped iOS implementation was not
+inspected. Next concrete options, not implemented: fewer whole writes or fewer
+bytes per whole write (for example the 12% capacity spare). After adoption (0.48–0.58 s off the main actor at launch,
+after the 1.9 s strict load) the first write is a 0.10–0.11 s patch; appending a
+session or a later session overflowing patches in about 0.085 s (one run 0.37 s).
+The capacity makes the 50k file 123 MB instead of 110 MB. The real transcript
+view over synthetic 10k/50k histories is timed with
+`-PocketAgentViewportBenchmark` in a read-only controller (no writes, storage
+load-blocked, real history unchanged). Memory search no longer counts single
+characters (unrelated questions 0/4, extra entries 3/31, paraphrase 1/7 on the
+evaluation table); it stays lexical: a general Traditional/Simplified script
+conversion was not adopted (no measurable gain on the all-Simplified table,
+many-to-one ambiguity, search cost and device availability risk), and the table
+runs as a regression. Remaining boundaries (oversized single groups,
+model-change recall) are listed in the plan.
+Transcript paging renders 400 messages per page. A script turn on the 12 mini
+once stayed cancelling for over ten minutes until a relaunch (interrupted,
+nothing replayed); its stalled stage and the bounds added since are under
+"Bounded phone calls and preparation" in the DDI section.
+
+AgentKit dependency: the bounded maintenance API
+(`AgentProviderClient.consume(_:limits:onEvent:)`: 16 MiB transport, 256 KiB
+SSE line, 65,536 events, terminal required, callback in the producer task) is
+published on the fork branch `codex/pocketagent-bounded-consume` and pinned at
+its immutable revision e1c81c9, which also fails a stream on a bare SSE `error`
+frame (published 2026-10-15 as a fast-forward from 22fc575); default
+stream/complete and the loop are otherwise unchanged.
+Summary folds stream through it into the Core collector under one 150-second
+maintenance deadline shared by up to three folds and capped by the turn
+deadline, a 45-second idle limit refreshed only by new real content, coalesced
+real progress and cancellation propagated as cancellation. A system expiry
+during maintenance ends the turn before its permit (draft returned or pending
+request held, nothing dispatched); progress reflects only real increments, so a
+provider that stays silent for about 30 seconds can still be expired by iOS. Host integration
+tests drive the real `consume` through a URL protocol stub; real summary folds
+also ran on the iPhone 12 mini (see the verification scope above).
+
+Confirmed problems found during implementation review and fixed:
+
+- Every event rewrote the whole history file: at 50k messages (110 MB) the
+  12 mini recorded an event in p95 0.48–0.89 s, mostly the atomic whole-file
+  write, with encoding about 0.14 s. The stable layout and clone-and-patch
+  writer above bring a patched event to p95 0.10–0.11 s. Verifying every byte
+  of the clone instead of the identity guard was measured and rejected: reading
+  the fresh clone's cold pages costs at least 0.17 s on the device.
+- Layout capacity first used a floor derived from the whole history for every
+  session: next to a 110 MB primary, 1,000 small tasks would each have received
+  1 MiB of spaces (about 1 GB). Capacity now follows each region's own length;
+  a regression with 400 small and 50 empty tasks next to a large primary checks
+  every region's spare, the bound and the JSON value.
+- JSONEncoder's default key order changes on every encode (200 of 200
+  re-encodes of an unchanged session differed), which made unchanged regions
+  look changed. The layout's shells encode with sorted keys; a regression
+  requires an unchanged file to produce no ranges.
+- Whole writes of the first layout (file fields first) were frequent and slow:
+  any growth of the assistant section past its capacity, any session overflow
+  or session-list change, and the first write after every launch rewrote the
+  whole file (1.2 s cold at 50k). File fields now come last, plans patch from
+  the first moved session, misses encode in parallel, and a verified launched
+  file is adopted. A launched file is adopted only on a byte-for-byte rebuild of
+  its own strict decoding: a file with two keys of one message swapped (same
+  length, same value, all boundaries in place) is refused, which a structural
+  scan or sampled decodes would accept.
+- A running primary turn stopped by a forget reported the phone run's generic
+  "手机助手未完成本轮". A started turn that was revoked now reports the
+  revoked-source reason (`StartedTurnOutcome`; Core regression). On the 12 mini
+  (df53187 build) the acceptance tooling did not open the memory panel while a
+  permitted turn that had read the entry ran `wait` (reported refusals: a child
+  element of another process with the keyboard up, and the press target not
+  being the frame-centre hit element; a screenshot showed the system task banner
+  over the toolbar; the exact cause is not located). The launch-only
+  `-PocketAgentForgetDuringRun <PKATEST_marker>` drives the real path instead:
+  when the turn starts a `wait` call after its real request read exactly the
+  current revision of the one own entry with that marker, and the panel's own
+  preview says the running turn stops, a later main-actor turn rechecks the same
+  guards and calls `commitForget` once (no retry; booleans in the run's log). On
+  the 276b3df build the model proposed eight `wait` calls; at the first one's
+  start all four guards held and the commit returned true; the entry was
+  tombstoned, the root masked, and the detail and UI showed the revoked-source
+  reason. Only that `wait` had started (cancelled); the other seven were refused
+  before dispatch, and no tool start, model request or DDI call followed the
+  commit (no phone connection or script process had been opened). A diagnostic
+  trigger of the real controller, not a manual panel action; it does not show
+  that the `wait` was already sleeping.
+- A Stop while a request's preparation (memory refresh, projections, phone
+  observation) was suspended still handed the request to the provider once the
+  preparation returned (host probe: one provider call after cancellation). The
+  gated model now checks cancellation after each await before dispatch; a
+  regression suspends the preparation, stops, releases it and requires no
+  provider call and no stream trace (the control dispatches once).
+- Cross-review 2026-10-21 (source-confirmed, not reproduced on a device): an
+  explicit reference lost its sources. The quote is a synthetic message and its
+  root was only added to the raw roots, which each request keeps only while a
+  raw message of that root is in the request, so the quoted root was never
+  registered and no ID mapped the quote back. Reachable path: root A of the old
+  primary read or contributed memory E; a diverged sync was resolved with a new
+  empty primary line (old line kept as a task); turn B quoted A. Forgetting E
+  masked A but could not reach B, so B kept running and later requests still
+  carried the quote. Quotes now keep their sources (see Context); Core
+  regressions through the pinned runtime, the gate and the production
+  preparer cover a read and a contributed root and an unknown synchronized
+  window (the forget stops B: one request, the next tool refused), a forget
+  between building the context and the first request (quote dropped, nothing
+  registered), an unrelated forget, and an already masked source.
+  Host review follow-up: that first fix still checked only masks per request.
+  Deleting the old line between building B's context and its first request
+  pruned A (nobody had read it yet) with its memory reads, the next request
+  still sent the cached quote and its registration skipped the missing root,
+  so a later forget of E found no reader and later requests kept carrying the
+  forgotten fact (reproduced in Core through the production delete, now
+  `HistoryFile.deleteSession`); a sync rewriting the quoted reply likewise
+  left the stale text in every request. Each request now rechecks the window's
+  existence, digest and masks; regressions cover deletion and rewrite before
+  the first request for all three sources (quote never sent, nothing
+  registered, the forget does not stop B) and deletion after the quote was sent
+  (not resent, A kept as unknown with its reads, a later forget still stops B).
+- Cross-review 2026-10-21: an ordinary primary send that ended before its permit
+  (maintenance failure, system expiry, startup failure) went through the
+  never-started route and `finish`, which schedules `advancePendingIfReady`;
+  that only checked the queue, foreground and Stop epoch, so another detached
+  request could start without confirmation after a failed turn. The settlement
+  now runs for never-started primary turns too, before `finish`; Core tests drive
+  the controller's `pendingSettlement` and `PendingActivation` for failure and
+  expiry (foreground and background), Stop, failure after the permit and the
+  completed turn that still advances. Host review follow-up: the settlement
+  ignored a failed hold write. The hold is a transaction, so storage stayed
+  ready and the request queued with its frozen configuration; the draft restore
+  and `finish` record then wrote successfully and the advancement `finish`
+  schedules activated the request (reproduced in Core with a single failed
+  write). `PrimaryTurnSettlement.settle` now drops the frozen configuration
+  before writing the hold; the regression runs it on a real `HistoryOwner`
+  whose hold write fails once (and a second hold write too), before and after
+  the permit, and requires no activation until an explicit continue.
+- Fixed-head cross-review of eb80c36 (source-confirmed, not reproduced on a
+  device): the settlement above still depended on the role frozen at
+  acceptance. A synchronized conflict copy S could run an independent turn J
+  while the diverged notice showed (only the primary's sends wait for it); the
+  card's "使用「S」作为主线" had no job check, so S became the primary line
+  during J and accepted a detached next request P; when J failed, before or
+  after its permit, its frozen `primary == false` skipped the settlement and
+  `finish`'s advancement started P on its own. Choosing a new empty line during
+  a primary turn likewise left a running assistant turn that a forget could no
+  longer stop. Recovery now waits while the current primary line or the chosen
+  session has a job (see Pending); roles, contexts and running work are not
+  changed, rerouted or replayed. Core regressions (`PrimaryRecoveryTests`, the
+  controller's transactions on a real `HistoryOwner`): promoting a session with
+  a queued, running or cancelling job (refused by the job or the persisted
+  state alone, nothing written), switching away from or keeping a busy primary
+  and a new line while it works, another task's job not blocking, and the
+  reported sequence ending with nothing to activate (the unguarded state as the
+  control activates P).
+- The same review: an explicit reference selected before its source was
+  forgotten stayed a `session_search` candidate (the reference branch checked
+  the session, bounds and digest, not masks). The builder rightly dropped the
+  quote, but each search planned the masked window, refused the whole page as
+  `stale_search` and rebuilt the same candidate, so the empty-query listing,
+  which puts it first, never worked and matching keywords lost legitimate
+  segments. Candidates now pass `AssistantContext.quotedWindow`; the commit's
+  revalidation is unchanged. Core regressions (`MaskedReferenceSearchTests`) for
+  a read and a contributed root and an unknown synchronized window: a valid
+  reference still listed, found and registered; masked before the search, the
+  listing and a keyword search return only the legitimate segment on every
+  repeat and register nothing of the window; masked after planning, the page is
+  stale with nothing registered and the next search recovers.
+
+- The incremental writer located the messages array by the first
+  `"messages":[]` in a session's bytes. A session whose attachments map had a
+  key named `messages` produced, depending on JSONEncoder's per-process key
+  order, a file that decoded with `keyNotFound` (reproduced in 10 of 20
+  processes). Splicing now uses a per-write sentinel pair that must occur
+  exactly once (else a full re-encode); regressions cover nested same-named
+  keys, conflict copies and a nested-key-first byte layout.
+- A later event written successfully after a failed write cleared the dirty
+  state by itself. Only an explicit flush clears it now; failed epochs stay failed.
+- Pruning removed roots whose source history was deleted even when another root
+  still read them, losing transitive forget edges. Such roots now keep identity
+  and edges (unverified); decoding validates edges and rejects cycles.
+- Per-request memory relevance used the last user message, which on phone turns
+  is the appended screenshot caption. It now uses the latest recorded real user
+  message.
+- Portable messages and sessions still omitted nullable keys (tool call ID/name,
+  model text, attribution, selection, conflict parent) and defaulted missing
+  attachments, preserving pre-assistant-v1 canonical bytes. They are now strict:
+  explicit nulls, required keys, attachments always present; canonical bytes and
+  the derived conflict-copy IDs are pinned (independently recomputed).
+- Repeated, alternating or empty summary snapshots counted as maintenance
+  progress and refreshed the idle timer; only new non-empty content counts now,
+  deduplicated across the whole response rather than a recent window.
 
 ## Device Hub backend feasibility
 
@@ -515,6 +1040,53 @@ concurrent successful-read and no-escape assertions, adds actual-swap/error
 witnesses and checks the normal read before and after the attack. Production
 file confinement is unchanged.
 
+Four Core tests of the assistant branch then failed on the macos-15/Xcode 26.2
+runner (406 of 410 passed) while each production path did what it is designed to
+do in the time it got. The first fold of the two shared-deadline tests
+(`StreamingSummaryTests`, `ConsumeIntegrationTests`) needed 0.7–0.9 s of sleeps or
+chunks inside a 1–1.2 s budget and ended with "上下文整理超过 150 秒";
+`ScriptPhoneGateTests` exceeded its 8 s total over four python3 helper calls
+(9.3 s) with correct statuses, refusals and masks; `endlessBodyIsCancelledAtTheLimit`
+met the loader's 15 s idle timeout (-1001) before its stub had sent 20 MB. On the
+Mac, keeping every cooperative thread CPU-busy (yielding every 300 ms; a temporary
+probe, not kept) reproduced two of them with the previous test code in three runs:
+the first fold failed with the same message, and the stub, which produced on
+`DispatchQueue.global()`, had sent 0 bytes when -1001 came after 16 s; the fixed
+tests passed beside it. That the runner was starved the same way is inferred, not
+observed. The tests assert no total duration; what remains are fixture bounds,
+and starvation past one fails a test instead of passing it. Deadlines use
+`MaintenanceDeadline(now:)` with the production 150 s total started 145 s
+earlier: a fold that finishes in time succeeds, the next fold gets what is left
+and streams until that end stops it with the exact message and a cancelled
+producer, and a fold of the spent budget is refused before its producer starts.
+The consume test streams such a fold through the pinned `consume`, and the next
+fold of that budget sends no request. The script gate requires the
+helper's refusal status 4 (its own timeout gives 3) instead of a total time; a
+helper still running at the fixture's 15 s bound is killed and fails the test,
+where reading `terminationStatus` of a running process raised an uncaught
+NSException that ended the whole test process (shown with the old fixture). The
+image stub produces on its own thread and pauses after the first chunk past
+20 MB until the client cancels (at most 10 s, then the rest of 200 MiB); the
+loader's limit and 15/60 s timeouts apply unchanged.
+
+Review of these test fixes found they proved less than stated; production was
+correct. The consume test passed a transfer that never started as interrupted
+and took each load's label from one global script a later fold overwrote; each
+request now carries its script's label in its URL, and the started load must be
+interrupted after handing over content. Producers of 30 s let a stop about 10 s
+past the deadline pass; they now stream for about 3 s past the deadline they are
+given (8 s for 5 s left, 6 s for a 3 s turn bound, replacing 1 s and 0.5 s
+windows to start), so a per-fold reset or a stop that late lets them finish.
+The image stub's 21 MiB is where it paused, not what the loader accepted, and a
+halved limit still passed; a chunked body of exactly 20 MiB must now load whole.
+A cancelled or throwing helper call skipped its cleanup, leaving the real
+python3 helper to its own 10 s wait; cleanup now covers every exit after launch,
+and a cancelled call must leave no helper running. Temporarily resetting the
+budget per fold, stopping 10 s late, not cancelling or never starting the
+producer, halving the image limit, leaving refusals unanswered or skipping the
+helper cleanup makes the matching test fail. Production code is unchanged; host
+runs only, the runner rerun is separate.
+
 ## DDI phone backend (2026-10-12)
 
 Status: implemented on the devicehub-control branch; selected-device acceptance
@@ -574,7 +1146,20 @@ FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
 new managed checkout instead of reapplying a new patch to the old patched tree;
 unknown edits are refused and preserved. Corresponding-source packaging resolves
 that same checkout for upstream sources and crate vendoring. AX keyed archives remain data, with size, depth, cycle, reference
-expansion and message limits. One semantic request is outstanding at a time; a
+expansion and message limits. The AXChildren graph keeps 512 nodes, depth 32 and
+no repeated element as hard limits, each with its own reason. A child hosted by
+another process (the keyboard's system paste suggestion appears after a send or
+any pasteboard write) is counted, at most 32, and skipped: never read, traversed
+or returned as a node; the observation reports `outside_app_elements` with a note.
+Coordinate effects (tap, hold, drag) are bound to the last successful snapshot of
+the same DDI session, which is cleared when a snapshot starts and consumed by
+every screen effect: the observed app must still be foreground and own the
+element at the point, and a point without an AX element passes only when that
+snapshot read the whole screen. These refusals happen before any touch and are
+reported as not executed (`target_covered`). The executor's own status-band swipe
+that compacts the task surface on Dynamic Island layouts uses a separate internal
+operation bounded to a short leftward swipe in the top 5% of the display; no
+model tool reaches it and ordinary drags keep the ownership check. One semantic request is outstanding at a time; a
 failed AX socket is closed before fresh read-only recovery. Cancellation has a
 separate atomic handle. Touch/button releases and empty key reports precede queue
 release; the turn owns its virtual keyboard until cancellation or finalization,
@@ -596,7 +1181,11 @@ without additionalProperties or uniqueItems; AgentKit's registered runtime schem
 and the executor's sequence, duplicate-modifier and clipboard validation remain
 unchanged. The other provider schemas retain their original declarations.
 
-Confirmed integration fixes: decoding AX UID zero as an empty string changed the
+Confirmed integration fixes: observing PocketAgent's own chat page failed with a
+combined AX graph limit whenever the keyboard showed the system paste suggestion,
+a control of another process listed among the app's children; the same page read
+completely with the keyboard dismissed. Out-of-process children are now skipped
+and counted as above. Decoding AX UID zero as an empty string changed the
 translation token's null fields and the device refused its attributes request.
 Null references now remain null and a regression covers that wire shape. The
 initial all-app inventory setup timed out; the streaming inventory completed
@@ -662,9 +1251,11 @@ acknowledgement. The model
 confirms focus or uses node-bound press_keys before submission. Callback and
 empty-value compatibility limits, and completed selected-device acceptance, are recorded in
 [devicehub-control.md](devicehub-control.md#ax-final-text-route). Real search also exposed a fractional-frame
-round-trip counterexample that can falsely trip AX's strict frame check, and a
-unreadable App Store/Safari foreground after submission. These are recorded as
-compatibility/observation limits; submitted errors require a fresh read, never replay.
+round-trip counterexample that could falsely trip AX's strict frame check (now
+parsed bit-exactly with serde_json `float_roundtrip`; see "Review fixes
+(2026-10-21)" below), and a unreadable App Store/Safari foreground after
+submission. The latter is recorded as an observation limit; submitted errors
+require a fresh read, never replay.
 A later Mac-side UniversalHID bench check confirmed
 ASCII with an English layout and Chinese via existing Pinyin candidates plus
 Space, with exact AX and independent UIKit callback confirmation and no clipboard
@@ -732,6 +1323,207 @@ requested an App restart; the kernel/count failure cause is unestablished. This
 is separate from DDI keyboard input and must not be described as successful
 script-runtime reuse. No script safeguard is bypassed.
 
+### Bounded phone calls and preparation (2026-10-15)
+
+Confirmed stall stage. The 12 mini's own metadata run log of the stalled script
+turn (843f252 build) shows the turn start, one tool call, local network
+authorization and `rp_tunnel_connected`, then no event for 9 m 53 s with the app
+active, then `deadline_exceeded` at 600 s and nothing after: no tool, script,
+terminal or finish event. Every other run logs `ddi_ready` right after the
+tunnel. The only work between those log points is the developer disk image
+check (`hasDDI` → `cryptexd_installed_ddi` → cryptexd connect and
+`copy_installed`), which had no timeout, so the log places the stall in the
+wait for that check; why cryptexd or the tunnel did not answer, and where in the
+native call it waited, are unknown. The script helper's phone request was
+inside that uncancellable call, so the script stop path waited on it
+(`serving.value`) and neither Stop nor the deadline could finish the tool. The
+earlier description (a screen read after `wait`) was not supported by the log;
+the 4 s/35 s DDI call limits existed in that source but never applied to this
+stage.
+
+The image check, a missing image's mount and the app inventory read now get a
+wall-clock expiry fixed in Swift before the worker thread starts and cut by the
+turn's end; native code measures the window inside the runtime future (handoff
+delay deducted, passed expiry refused before connecting). Opening the DDI
+session (`pocket_ddi_open`) keeps its own native 30 s setup deadline; Stop is
+checked before and after it, not while it runs, so that bounded setup may finish
+before Stop settles. Image check 15 s (`pocket_ddi_installed`; a failed
+or timed-out check is an error, never "not installed"); a missing image's
+downloads and mount share 180 s (`DDIImagePreparation`), downloads race a
+cancellable URLSession task group against the turn's stop check and are
+committed only while the preparation stands, the mount gets at most 120 s
+(`pocket_ddi_mount`; a timeout leaves the outcome unknown, nothing retries, the
+next action checks the real state); the app inventory read, which now precedes
+`openDDI`, is bounded at 15 s (`pocket_installed_apps`, same InstallationProxy
+records and free as before). Stop, the deadline, a revoked script lease and storage gates
+are rechecked between steps. The bounds hold while the native code polls
+cooperatively; synchronous work (loading image assets) is not preempted.
+
+DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
+screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
+at most 35 s, checked natively before every stage and physical effect.
+Confirmed defect fixed with it: CoreDevice replies are not matched to requests,
+so a request dropped by a deadline left its reply to answer the next request on
+that client. Each request/reply client is marked before an exchange and replaced
+after a completed handshake before its next use; a desynchronised client never
+confirms a release, and held input is never moved to a new connection. Reads,
+setup and reconnects end on Stop; effects, input releases, AX close and the
+final `return` are time-only, so cleanup runs after Stop. An unconfirmed input
+release is a typed outcome that latches the app instance against all further
+input until relaunch (observation stays available); nothing claims the phone
+released it. The serial action queue lets a cancelled waiter leave without
+acting. Opt-in metadata diagnostics (`-PocketAgentDiagnosticLogs`) record native
+stage and heartbeat progress, call entry/exit, the queue, the script stop path,
+preparation and finish steps; local fault-injection launch arguments stall one
+stage once per session, lower the call cap, or drop the confirmation of an
+already-sent touch release. Native host tests cover the real primitives with
+fake services (not a real unanswered cryptexd); Core tests cover the budgets and
+the queue.
+
+12 mini acceptance (dev build of 698b4fa, opt-in diagnostics, synthetic primary
+and test project only; injected cases labelled as such):
+
+| Case | Observed |
+|---|---|
+| Stop during an injected AX-read stall | Native call returned `cancelled` 34 ms after the cancel request (raw log); 157 ms from Stop to the session closed, of which the finish steps (stop observing, return, close) 41 ms; turn interrupted; no later action |
+| Injected stall, default and lowered call cap | Call ended at 35.006 s and, with a 5 s cap, 5.005 s as `budget`; the model's next observation succeeded |
+| Injected stall in the geometry request and in the screenshot | Next call on the same native session reconnected that client once and succeeded |
+| Dropped confirmation after a real touch release | `cleanup_input` reported unconfirmed, the app latched; next turn on a new connection without relaunch: observation worked, `open_app` and `press_home` refused before dispatch (no native call) |
+| Stop during a script (sleeping, and while its helper's observation stalled) | Lease revoked, guests 0 (3 terminated), `serving.value` settled in 0 ms, terminal 0.24–0.34 s after Stop, no second helper call |
+| Ordinary turns | Image check 9–19 ms on every turn; no stall reproduced |
+
+The original stall was not reproduced; these runs prove the bounds and the stop
+path, not why cryptexd did not answer. One run ended on the provider's
+"Upstream response stream was interrupted" (cause unknown, nothing retried).
+
+Refusals before dispatch, stream metadata and Stop wording. A phone call refused
+before it reaches the device (too little of the turn left for the call and its
+cleanup, or native entry refusing a passed expiry, matched by its exact error) is
+typed `PhoneCallNotDispatched`: the result says 动作未执行 and the action flag is
+restored only when no native call of that operation was dispatched (a composite
+primitive whose first call acted stays reported; a timeout or cancellation never
+rolls back). With opt-in diagnostics each main request and summary fold logs
+`model_stream` metadata: event kinds and counts, first-event and end times, outcome,
+terminal reason and a failure category (cancelled, URL error code, HTTP status,
+provider response, allowlisted provider code, context limit, other), never
+content; events delivered late go to their own run's log with origin time and a
+per-run sequence. A Stop before the startup permit says
+"已在准备阶段停止：本轮主请求未开始，不会再有新的手机操作。" without claiming no
+summary request was sent; routing is unchanged. 12 mini (df53187 dev build, real UI
+and model, injection labelled): a real `tap` refused by
+`-PocketAgentRefuseNextDDIDispatch tap` returned an error result with the
+insufficient-time reason and no native entry for it; a Stop during the 20 s
+pre-dispatch hold and one at the first real summary text (20 text events
+received, transfer cancelled, no terminal) both left the turn unpermitted, with no
+main request and no summary, the draft restored exactly and the new wording in
+the detail and the UI; real main and summary requests logged only the allowlisted
+fields. The provider interruption's cause stays unknown; timeouts, HTTP/2 and
+retries are unchanged.
+
+### Review fixes (2026-10-21)
+
+A three-model cross-review of 879358c, arbitrated against the source, confirmed
+these DDI/input/build defects (the assistant-side ones are in the long-lived
+section below). PR #1 (devicehub-control), now on main, fixed the same defects
+independently; the rebase onto it kept these implementations inside this
+branch's bounded calls, watcher, Stop and cleanup, with one `DDIOperationFailure`
+(in PR #1's file) and PR #1's regressions beside these. PR #1's Gemini wire-schema
+projection (`ProviderToolSchema`) lived in a model wrapper this branch replaced; it
+now runs last in the commit-gated per-request preparation, after phone and memory
+preparation, so the budget estimate still sees the strict schema.
+
+- Refusals before any effect disabled the turn's input. Native code poisoned the
+  session after any failed non-read operation, so a target/foreground/frame
+  check or an unavailable clipboard service refused before touching the phone
+  still blocked every later input of the turn; Swift marked the action as
+  possibly sent unless the error was one of a few recognized strings. Each
+  `pocket_ddi_call` now records whether its request started a physical effect
+  (`effect_started`, set right before the first touch, button, key or owned
+  keyboard, launch, clipboard write or AX setter) and, once admitted, returns
+  a result object instead of an error: `ok`, `action_issued`, `replay_allowed`
+  false, and for failures `code` (`ddi_preflight_refused`,
+  `ddi_observation_failed`, `ddi_effect_unconfirmed`, `ddi_session_poisoned`,
+  `ddi_cleanup_unconfirmed`), `message` and `requires_new_turn`. Only a started
+  effect or an unconfirmed release disables input for the session; reads stay
+  available. A refused expiry at entry stays the typed not-dispatched error.
+  `DDIOperationFailure` decodes the metadata strictly (JSON booleans, every
+  field, replay never allowed); `DDIControl` records each call in
+  `NativeEffectReports` (an effect reported or not ruled out, or a refusal
+  reporting none) and maps refusals to the existing typed issues. The executor
+  restores the action flag only when every native call of that operation
+  reported no started effect; earlier effects of the call, a sent status-band
+  gesture (unreported only when its own call proved nothing was sent),
+  uncertain effects, unconfirmed releases and the app-wide release latch are
+  kept. Results say `requires_new_turn` or `requires_replan` and attach a fresh
+  read-only observation; nothing is replayed.
+- Default paste confirmed a placeholder. With nonempty expected text equal to
+  the field's placeholder, a field still reporting its placeholder as value was
+  `input_verified`. Nonempty text now needs value == text and value !=
+  placeholder (the AX route already did); clear-only keeps empty-or-placeholder.
+- `type_text` with `method: null` was refused. The pinned AgentKit strict
+  schema makes the optional field required and nullable and its validator
+  passes null through as omission, so the host now treats null exactly as an
+  omitted method (default paste, clipboard denial unchanged); other types are
+  still refused (Core test through the pinned runtime's validation).
+- Fractional AX frames drifted by one ULP through serde_json's default float
+  parser; `Native/idevice.patch` enables `float_roundtrip` (see
+  devicehub-control.md); the comparison stays exact.
+- A failed app catalog read left an open DDI session that the next tool of the
+  same turn took as ready, so `find_apps` could report an empty catalog and
+  name/bundle opening refused real apps. `DDIServiceReadiness` now reads the
+  catalog before opening the session and treats a connection as ready only with
+  both (the catalog flag lives on the connection); a failure is an error and the
+  next preparation reads the catalog again. Stop, lease, deadline and expiry
+  checks run before each step.
+- An existing build checkout with the previous patch applied could not take an
+  upgraded patch (the reverse check failed on the new hunk, the forward check on
+  the shared applied one). Bootstrap now keeps idevice checkouts under
+  `.deps/idevice-pocketagent/<revision>-<patch digest>`: objects come from a
+  bare cache (seeded read-only from a legacy checkout at the pin), the patched
+  tree is built in staging and published by one rename, interrupted staging is
+  discarded, and a checkout whose HEAD, state or tree (ignoring the copied
+  `Native/ddi` and generated header) differs is refused with its changed paths,
+  never reset. The legacy `.deps/idevice` is left untouched. The tree check
+  first excluded the generated paths with negative pathspecs on `git add .`,
+  which fails once the ignored `ffi/idevice.h` exists, so every bootstrap after
+  the first build stopped (reproduced by the fixture with that header ignored).
+  It now lists tracked and non-ignored paths (NUL-separated), drops the
+  generated ones and force-adds exactly those, as literal pathspecs, to a
+  separate empty index; the checkout's own index and ignored files are not
+  touched.
+- Preparing empty text was recorded as an effect: the DDI paste route wrapped
+  the no-op clipboard preparation for `text=""` in the effect bracket, so a
+  later node refusal reported a possible action. Only a nonempty paste
+  preparation (a clipboard write) is an effect now.
+- Fixed-head review of eb80c36 (source-confirmed; ranked a conservative false
+  positive): a status-band gesture refused before dispatch stayed reported.
+  `compactTaskSurface` marks the gesture sent first, and its settlement only
+  accepted native "not started" metadata; a call with no budget left (or whose
+  passed expiry native entry refused, uncounted again) throws the typed
+  not-dispatched refusal with no native report, so the tool said an action may
+  have happened although no input reached the phone. The gesture's settlement
+  now takes its operation's dispatch count like an action's and shares its
+  proof (`PhoneCallEffects.sentNothing`): a typed refusal with nothing
+  dispatched, or native reports that nothing started. An earlier gesture or
+  action, a dispatched call that acted or may have, an error without metadata,
+  cancellation and timeouts stay reported; no replay, budget, cleanup or
+  release-latch behaviour changes. Core matrix in `DDIOperationFailureTests`
+  (with the action settlement agreeing case by case). The Dynamic Island
+  gesture itself is not exercised on a device (the 12 mini has no such layout).
+
+Verification boundary: the Core suite (402 tests in 81 suites after the host
+review follow-ups; the new and changed suites also under Release), the
+distribution tests (29, including the bootstrap fixtures with an ignored
+generated header) and the DDI native unit tests (42, host, through a scratch
+crate outside Git that compiles this `Native/ddi` against the pinned idevice
+sources and lock with the patched serde_json features) pass; reverting each
+Core or native fix (preparer quote handling and its per-request window check,
+settlement and its frozen-configuration drop, effect reports, placeholder
+check, null method, catalog order, empty-text predicate, `float_roundtrip`,
+the enumerated tree check) makes its regression fail. The App-target wiring
+was not compiled in those runs; the iOS build, the IPA and device behaviour of
+these changes are not verified here.
+
 The previous errSecInternalComponent development-signing failure no longer
 reproduces on a disposable test binary; its cause remains unresolved. Current
 candidates can be signed and installed. Private logs, pairing, signing and
@@ -791,10 +1583,10 @@ container path is resolved at use time. A project frozen by a queued or running
 turn cannot be deleted (the store asks the chat controller), nor can files
 be deleted from it in the file browser (a running script's run folder would
 vanish under it; model file tools and editing stay available), and the queue
-rechecks the frozen root before starting a turn instead of substituting another. `ChatSession.workspaceID` is an optional
-local field (decoded if present, so current history keeps every ID, message,
-draft, selection and attribution); portable sync never carries it and applying a
-synchronized snapshot keeps it. `send` freezes a `WorkspaceSnapshot` into the
+rechecks the frozen root before starting a turn instead of substituting another. `ChatSession.workspaceID` is a
+required nullable local field of the assistant-v1 record; portable sync never
+carries it and applying a synchronized snapshot keeps it. The project also sets
+the work scope of each accepted request (general without a project). `send` freezes a `WorkspaceSnapshot` into the
 job beside the model configuration; a deleted project stops the send with an
 explicit notice instead of falling back. External folders are copied in through
 the system picker; export writes a copy. AgentKit scratch is not used.
@@ -1094,8 +1886,11 @@ because this introduces no glasses-device contract or algorithm change.
 ## Delivery and rejected alternatives
 
 Owner: Codex integrator and Opus 5.5 app developer.
-Verify migrations, session isolation, provider selection capture, sync deletion
-and concurrent history conflicts, build/install and actual model/tool execution.
+For the assistant release, empty initialization, strict current-format
+roundtrips/rejection, restart recovery, session isolation, provider selection
+capture, sync generation isolation, deletion and concurrent history conflicts
+are covered by Core tests; build/install on the reference phone and actual
+model/tool execution remain release gates (status in the section above).
 IPA/source and repository scans precede GitHub push. Success-only evidence stays
 in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.

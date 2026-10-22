@@ -4,8 +4,8 @@
     "revision": "3854a5df4a5a6dee71ffce4d8befc2ea356a8065"
   },
   "AgentKit": {
-    "url": "https://github.com/AkinoKaede/AgentKit.git",
-    "revision": "8108c9bb87c546860cfc1769571e115af919fe8a"
+    "url": "https://github.com/Borealin/AgentKit.git",
+    "revision": "e1c81c911564c39d5f78ccec6808ba96c1acd2e8"
   },
   "WebDriverAgent": {
     "url": "https://github.com/appium/WebDriverAgent.git",

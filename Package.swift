@@ -8,8 +8,8 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v26)],
     products: [.library(name: "PocketAgentCore", targets: ["PocketAgentCore"])],
     dependencies: [
-        .package(url: "https://github.com/AkinoKaede/AgentKit.git",
-                 revision: "8108c9bb87c546860cfc1769571e115af919fe8a"),
+        .package(url: "https://github.com/Borealin/AgentKit.git",
+                 revision: "e1c81c911564c39d5f78ccec6808ba96c1acd2e8"),
     ],
     targets: [
         .target(

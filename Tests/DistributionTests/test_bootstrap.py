@@ -20,6 +20,7 @@ ISOLATED_GIT = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
                 'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
                 'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
 LIB = 'pub fn upstream() {}\npub fn tunnel() -> u8 { 0 }\npub fn tail() {}\n'
+CARGO = '[package]\nname = "idevice-ffi"\n[dependencies]\nserde_json = { version = "1" }\n'
 
 
 def git(repo, *args):
@@ -28,6 +29,12 @@ def git(repo, *args):
 
 
 class IdeviceCheckoutTests(unittest.TestCase):
+    """Review finding R7: a checkout that already carries the previous
+    Native/idevice.patch must not block an upgraded patch that keeps those
+    hunks and adds new ones (here the serde_json feature): the in-place
+    reverse check fails on the new hunk and the forward check on the shared,
+    already applied one."""
+
     def setUp(self):
         environment = patch.dict(os.environ, ISOLATED_GIT)
         environment.start()
@@ -39,7 +46,7 @@ class IdeviceCheckoutTests(unittest.TestCase):
         self.root = base / 'pocketagent'
         self.missing = str(base / 'missing-remote')
         self.write(self.upstream / 'ffi/src/lib.rs', LIB)
-        self.write(self.upstream / 'ffi/Cargo.toml', '[package]\nname = "idevice-ffi"\n')
+        self.write(self.upstream / 'ffi/Cargo.toml', CARGO)
         self.write(self.upstream / 'README.md', 'idevice\n')
         self.write(self.upstream / '.gitignore', 'ffi/idevice.h\n')
         git(base, 'init', '-q', self.upstream)
@@ -47,10 +54,12 @@ class IdeviceCheckoutTests(unittest.TestCase):
         git(self.upstream, 'add', '-A')
         git(self.upstream, 'commit', '-q', '-m', 'pin')
         self.revision = git(self.upstream, 'rev-parse', 'HEAD').strip()
-        # The main branch's patch, already applied in existing checkouts.
-        self.old_patch = self.diff({'ffi/src/lib.rs': LIB.replace('{ 0 }', '{ 1 }')})
-        self.new_patch = self.diff({'ffi/src/lib.rs': LIB.replace('{ 0 }', '{ 2 }'),
-                                    'ffi/Cargo.toml': '[package]\nname = "idevice-ffi"\n[features]\nddi = []\n'})
+        self.patched_lib = LIB.replace('{ 0 }', '{ 1 }')
+        self.patched_cargo = CARGO.replace('{ version = "1" }', '{ version = "1", features = ["float_roundtrip"] }')
+        # The previous patch, already applied in existing checkouts, and the
+        # upgrade that keeps its hunk and adds another.
+        self.old_patch = self.diff({'ffi/src/lib.rs': self.patched_lib})
+        self.new_patch = self.diff({'ffi/src/lib.rs': self.patched_lib, 'ffi/Cargo.toml': self.patched_cargo})
         self.next_patch = self.diff({'ffi/src/lib.rs': LIB.replace('{ 0 }', '{ 3 }')})
         # Later upstream history: the pin is fetched by revision, not branch tip.
         self.write(self.upstream / 'README.md', 'later\n')
@@ -123,7 +132,7 @@ class IdeviceCheckoutTests(unittest.TestCase):
     def state(self, path):
         return (path / '.git' / bootstrap.STATE).read_text()
 
-    def test_old_patch_checkout_is_left_untouched_and_current_patch_gets_new_checkout(self):
+    def test_old_patch_checkout_is_left_untouched_and_upgraded_patch_gets_new_checkout(self):
         legacy = self.legacy_checkout()
         current = self.root / 'Native/idevice.patch'
         # The previous in-place upgrade could neither recognize nor apply the new patch.
@@ -140,8 +149,8 @@ class IdeviceCheckoutTests(unittest.TestCase):
         self.assertIn('left untouched', output)
         self.assertEqual(path, bootstrap.idevice_checkout_path(self.root, self.spec))
         self.assertEqual(git(path, 'rev-parse', 'HEAD').strip(), self.revision)
-        self.assertEqual((path / 'ffi/src/lib.rs').read_text(), LIB.replace('{ 0 }', '{ 2 }'))
-        self.assertIn('ddi = []', (path / 'ffi/Cargo.toml').read_text())
+        self.assertEqual((path / 'ffi/src/lib.rs').read_text(), self.patched_lib)
+        self.assertEqual((path / 'ffi/Cargo.toml').read_text(), self.patched_cargo)
         self.assertEqual((path / 'README.md').read_text(), 'idevice\n')
         self.assertEqual((path / 'ffi/src/pocket_ddi/mod.rs').read_text(), 'pub fn ddi() {}\n')
 
@@ -171,9 +180,9 @@ class IdeviceCheckoutTests(unittest.TestCase):
         second, _ = self.prepare()
         self.assertNotEqual(second, first)
         self.assertEqual((second / 'ffi/src/lib.rs').read_text(), LIB.replace('{ 0 }', '{ 3 }'))
-        self.assertNotIn('ddi = []', (second / 'ffi/Cargo.toml').read_text())
+        self.assertEqual((second / 'ffi/Cargo.toml').read_text(), CARGO)
         # The superseded checkout is retained exactly; returning to its patch reuses it.
-        self.assertEqual((first / 'ffi/src/lib.rs').read_text(), LIB.replace('{ 0 }', '{ 2 }'))
+        self.assertEqual((first / 'ffi/src/lib.rs').read_text(), self.patched_lib)
         self.assertEqual(self.state(first), recorded)
         self.write(self.root / 'Native/idevice.patch', self.new_patch)
         again, _ = self.prepare()
@@ -215,12 +224,22 @@ class IdeviceCheckoutTests(unittest.TestCase):
         self.write(self.parent / '.staging-killed/ffi/src/lib.rs', 'partial\n')
         path, _ = self.prepare()
         self.assertEqual(sorted(p.name for p in self.parent.iterdir()), ['.lock', path.name, 'objects.git'])
-        self.assertEqual((path / 'ffi/src/lib.rs').read_text(), LIB.replace('{ 0 }', '{ 2 }'))
+        self.assertEqual((path / 'ffi/src/lib.rs').read_text(), self.patched_lib)
         # A run stopped after publication but before the DDI copy recovers too.
         shutil.rmtree(path / 'ffi/src/pocket_ddi')
         again, _ = self.prepare()
         self.assertEqual(again, path)
         self.assertTrue((path / 'ffi/src/pocket_ddi/mod.rs').is_file())
+
+    def test_repository_patch_is_one_well_formed_unified_diff_per_file(self):
+        """The tracked patch parses as Git patch input (each hunk's counts
+        match its lines); applying it to the real pin is the build's check."""
+        tracked = MODULE.parents[1] / 'Native/idevice.patch'
+        result = subprocess.run(['git', 'apply', '--numstat', str(tracked)], capture_output=True, text=True,
+                                cwd=self.temp.name)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('ffi/Cargo.toml', result.stdout)
+        self.assertIn('float_roundtrip', tracked.read_text())
 
 
 if __name__ == '__main__':

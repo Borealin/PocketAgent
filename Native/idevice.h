@@ -1184,6 +1184,18 @@ typedef struct WdaBridgeEndpointsC {
   uint16_t device_mjpeg;
 } WdaBridgeEndpointsC;
 
+typedef struct PocketDDIProgress {
+  uint64_t seq;
+  bool in_call;
+  uint32_t stage;
+  uint32_t detail;
+  uint64_t stage_age_ms;
+  uint64_t beats;
+  uint64_t beat_age_ms;
+  uint32_t reconnects;
+  bool input_unconfirmed;
+} PocketDDIProgress;
+
 /**
  * Creates a new Idevice connection
  *
@@ -9854,6 +9866,45 @@ void wda_bridge_free(struct WdaBridgeHandle *handle);
 
 /**
  * # Safety
+ * Borrowed adapter/handshake and output pointers must be valid; the caller
+ * serializes them with every other tunnel use. `expires_at_ms` is the
+ * wall-clock expiry the app fixed before the handoff (at most 15 s is used);
+ * a passed expiry checks nothing. `installed` receives whether the developer
+ * disk image is mounted; a timeout or failure is an error, never "not installed".
+ */
+struct IdeviceFfiError *pocket_ddi_installed(struct AdapterHandle *a,
+                                             struct RsdHandshakeHandle *h,
+                                             uint64_t expires_at_ms,
+                                             bool *installed);
+
+/**
+ * # Safety
+ * As `pocket_ddi_installed` (at most 120 s of the expiry is used; a passed
+ * expiry mounts nothing); `assets` comes from `cryptex1_assets_load` and stays
+ * owned by the caller. Installs (mounts) the developer disk image; after a
+ * timeout the outcome is unknown.
+ */
+struct IdeviceFfiError *pocket_ddi_mount(struct AdapterHandle *a,
+                                         struct RsdHandshakeHandle *h,
+                                         struct Cryptex1AssetsHandle *assets,
+                                         uint64_t expires_at_ms);
+
+/**
+ * # Safety
+ * As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
+ * expiry reads nothing). The installed applications' InstallationProxy
+ * records, unfiltered, as the plist array `installation_proxy_get_apps`
+ * returns; free it with `installation_proxy_free_apps(out, len)`. One fresh
+ * InstallationProxy connection, closed when the limit ends the read.
+ */
+struct IdeviceFfiError *pocket_installed_apps(struct AdapterHandle *a,
+                                              struct RsdHandshakeHandle *h,
+                                              uint64_t expires_at_ms,
+                                              void **out_result,
+                                              size_t *out_result_len);
+
+/**
+ * # Safety
  * Borrowed adapter/handshake and output pointers must be valid. The caller
  * serializes all operations and frees the DDI session before tunnel handles.
  */
@@ -9877,8 +9928,23 @@ void pocket_ddi_reset_cancel(struct PocketDDICancellation *cancel);
 
 /**
  * # Safety
+ * `cancel` is a live cancellation from pocket_ddi_open that pocket_ddi_close
+ * has not consumed. Reads atomics only and never touches the session, so it
+ * may run while a call is in flight.
+ */
+bool pocket_ddi_progress(const struct PocketDDICancellation *cancel, struct PocketDDIProgress *out);
+
+/**
+ * # Safety
  * A single caller owns the session. Request is a bounded NUL-terminated JSON
  * string; output is released with idevice_string_free. No request/result logs.
+ * Every operation except the finalization ops `stop_observing` and `return`
+ * requires `expires_at_ms` (wall-clock Unix ms, fixed by the app before the
+ * handoff); a missing or passed expiry dispatches nothing and is an error.
+ * Once admitted, the output is a JSON object with `ok`, `action_issued`
+ * (whether this request started a physical effect) and `replay_allowed`
+ * false; a failure adds `code`, `message` and `requires_new_turn` (input
+ * stays disabled for this session) instead of returning an error.
  */
 struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
                                         const char *request,
@@ -9887,9 +9953,14 @@ struct IdeviceFfiError *pocket_ddi_call(struct PocketDDISession *handle,
 /**
  * # Safety
  * Session is valid, no other call in flight. Buffer is freed with
- * pocket_ddi_bytes_free using its exact returned length.
+ * pocket_ddi_bytes_free using its exact returned length. `expires_at_ms`
+ * (wall-clock Unix ms, fixed by the app before the handoff) bounds the call; a
+ * missing or passed expiry dispatches nothing. `diagnostic_stall` is 0, or 1
+ * (local acceptance only) to stall the capture once per session.
  */
 struct IdeviceFfiError *pocket_ddi_screenshot(struct PocketDDISession *handle,
+                                              uint64_t expires_at_ms,
+                                              uint32_t diagnostic_stall,
                                               uint8_t **out,
                                               uintptr_t *len);
 
@@ -9902,9 +9973,13 @@ void pocket_ddi_bytes_free(uint8_t *data, uintptr_t len);
 /**
  * # Safety
  * No call in flight. Consumes both handles even when cleanup is unconfirmed.
+ * `input_unconfirmed` (nullable) receives whether releasing held input was
+ * left unconfirmed at any point in this session, close included; an AX
+ * unsubscribe failure is reported only through the returned error.
  */
 struct IdeviceFfiError *pocket_ddi_close(struct PocketDDISession *handle,
-                                         struct PocketDDICancellation *cancel);
+                                         struct PocketDDICancellation *cancel,
+                                         bool *input_unconfirmed);
 
 #endif  /* IDEVICE_H */
 

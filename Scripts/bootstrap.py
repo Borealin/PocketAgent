@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Patched idevice checkouts are keyed by pinned revision and patch digest. A
 # key directory appears, by rename, only after its patch applied completely;
 # a changed patch gets a new directory. Existing checkouts, including the
-# legacy .deps/idevice, are never reset, rewritten or deleted.
+# legacy in-place .deps/idevice, are never reset, rewritten or deleted.
 MANAGED = 'idevice-pocketagent'
 STATE = 'pocketagent-bootstrap.json'
 # Bootstrap-owned copy of Native/ddi and the header written by the FFI build.

@@ -17,6 +17,10 @@ nonisolated enum ExecutionPhase: Hashable, Sendable {
     case network
     /// A script is running; its own phone requests show as phoneAction.
     case script
+    /// Read-only memory or history search.
+    case memoryTool
+    /// Primary-line context maintenance before the first request (summary).
+    case preparingContext
     case retrying(attempt: Int, maximum: Int)
     /// Only for a requirement AgentKit actually surfaced.
     case needsUser
@@ -54,12 +58,35 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     /// Human description of the running or last phone action.
     var currentAction: String?
     var failure: String?
+    /// Context maintenance outcome of the primary line (for example no summary this turn).
+    var contextNote: String?
+    /// The primary line's context budget, frozen with the turn (nil for other turns).
+    let budget: ContextBudgetPolicy?
+    /// Estimate of the latest complete model request (after phone preparation,
+    /// images, the current memory block and old-observation projection); kept
+    /// after the turn ends. Not provider usage.
+    var requestEstimate: Int?
     private var terminalState: AgentRunState?
     /// Visible labels of nodes in the latest observation, for action text.
     private var elements: [Int: String] = [:]
 
-    init(modelLabel: String = "", phase: ExecutionPhase = .connecting) {
-        self.modelLabel = modelLabel; self.phase = phase
+    init(modelLabel: String = "", phase: ExecutionPhase = .connecting, budget: ContextBudgetPolicy? = nil) {
+        self.modelLabel = modelLabel; self.phase = phase; self.budget = budget
+    }
+
+    /// The turn's frozen model, its frozen budget and the latest request
+    /// estimate (the composer may already show another model for the next
+    /// turn). An unknown window is shown as a soft maintenance target, never
+    /// as the model's limit.
+    var contextLabel: String? {
+        guard let budget else { return nil }
+        let limit = switch budget.source {
+        case .knownWindow(let window): "输入上限 \(budget.hardCeiling ?? budget.target) token（已确认窗口 \(window)）"
+        case .explicitCeiling(let ceiling): "本机输入上限 \(ceiling) token"
+        case .unknown: "窗口未知：按约 \(budget.target) token 软目标整理，不是模型上限"
+        }
+        let figures = [requestEstimate.map { "请求估计约 \($0) token" }, limit].compactMap { $0 }.joined(separator: " · ")
+        return (modelLabel.isEmpty ? "本轮" : "本轮 \(modelLabel)") + "：" + figures
     }
 
     mutating func apply(_ event: AgentEvent, now: Date = Date()) {
@@ -112,6 +139,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         case .file, .context: .workspaceTool
         case .network: .network
         case .script: .script
+        case .memory: .memoryTool
         case .phone, nil: .phoneAction
         }
     }
@@ -182,6 +210,8 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         case .workspaceTool: "正在读写项目文件"
         case .network: "正在请求网络"
         case .script: scriptPhoneActions > 0 ? "脚本运行中（已操作手机 \(scriptPhoneActions) 步）" : "脚本运行中"
+        case .memoryTool: "正在检索记忆或历史"
+        case .preparingContext: "正在整理较早的对话"
         case .retrying(let attempt, let maximum): "连接中断，正在重试（\(attempt)/\(maximum)）"
         case .needsUser: "需要你的处理"
         case .finishing: "正在返回 App 并结束自动化"
@@ -194,7 +224,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     /// Current app / action line, empty when nothing real is known.
     var activity: String {
         var parts: [String] = []
-        if [.phoneAction, .workspaceTool, .network].contains(phase), let currentAction { parts.append(currentAction) }
+        if [.phoneAction, .workspaceTool, .network, .memoryTool].contains(phase), let currentAction { parts.append(currentAction) }
         if let currentApp, !currentApp.isEmpty { parts.append(ToolLabels.appName(currentApp)) }
         return parts.joined(separator: " · ")
     }
@@ -220,7 +250,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     /// Show the active action once; keep the full phase/app/step detail in chat.
     /// A completed action must not linger while the model chooses its next step.
     var systemTaskTitle: String {
-        if [.phoneAction, .workspaceTool, .network].contains(phase),
+        if [.phoneAction, .workspaceTool, .network, .memoryTool].contains(phase),
            let action = currentAction?.trimmingCharacters(in: .whitespacesAndNewlines), !action.isEmpty {
             return action
         }
@@ -232,6 +262,8 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
         case .workspaceTool: "处理项目文件"
         case .network: "请求网络"
         case .script: "运行脚本"
+        case .memoryTool: "检索记忆"
+        case .preparingContext: "整理上下文"
         case .retrying(let attempt, let maximum): "重试连接（\(attempt)/\(maximum)）"
         case .needsUser: "等待你的处理"
         case .finishing: "结束自动化"
@@ -280,6 +312,8 @@ nonisolated enum ToolLabels {
         case "read_skill": "读取技能"
         case "http_request": "网络请求"
         case "run_script": "运行脚本"
+        case "memory_search": "检索记忆"
+        case "session_search": "检索历史"
         default: tool
         }
     }
@@ -311,6 +345,8 @@ nonisolated enum ToolLabels {
             return name(call.name) + " " + (args["path"]?.stringValue ?? ".")
         case "search_files": return "搜索「\((args["pattern"]?.stringValue ?? "").prefix(20))」"
         case "read_skill": return "读取技能 " + (args["name"]?.stringValue ?? "")
+        case "memory_search": return "检索记忆「\((args["query"]?.stringValue ?? "").prefix(20))」"
+        case "session_search": return "检索历史「\((args["query"]?.stringValue ?? "").prefix(20))」"
         case "http_request":
             let url = URL(string: args["url"]?.stringValue ?? "")
             return (args["method"]?.stringValue ?? "GET").uppercased() + " " + (url?.host ?? "")

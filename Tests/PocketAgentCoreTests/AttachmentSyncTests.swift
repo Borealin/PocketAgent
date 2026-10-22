@@ -34,16 +34,50 @@ private func sampleImage(width: Int, height: Int, type: UTType = .jpeg, alpha: B
     return output as Data
 }
 
-/// Canonical bytes of attachment-free messages must not change: existing
-/// conflict-copy and deleted-edit IDs derive from them.
+/// assistant-v1 portable records: every key present, nullable values as
+/// explicit null and attachments always present. Canonical bytes (and the
+/// conflict-copy IDs derived from them) are pinned for this format.
 struct PortableCanonicalPinTests {
-    @Test func attachmentFreeMessageHashesAreUnchanged() throws {
+    @Test func canonicalBytesUseExplicitNullsAndPinnedConflictIDs() throws {
         let portable = PortableMessage(fixedMessage, attribution: nil)
-        #expect(StableHash.digest(StableHash.canonical(portable)) == "ab457097187a5ec95cf87767e2caecfc")
-        #expect(PortableMerge.conflictID(of: fixedMessage.id, branch: [portable]).uuidString
-                == "672775DF-29E7-8C3E-9498-BBCB93D2A27A")
         let json = String(decoding: StableHash.canonical(portable), as: UTF8.self)
-        #expect(!json.contains("attachments"))
+        for key in ["\"toolCallID\":null", "\"toolName\":null", "\"modelText\":null", "\"attribution\":null", "\"attachments\":[]"] {
+            #expect(json.contains(key))
+        }
+        let digest = StableHash.digest(StableHash.canonical(portable))
+        let conflict = PortableMerge.conflictID(of: fixedMessage.id, branch: [portable]).uuidString
+        #expect(digest == PortableFixed.digest)
+        #expect(conflict == PortableFixed.conflictID)
+        // Round trip keeps the value and therefore the derived ID.
+        let decoded = try JSONDecoder().decode(PortableMessage.self, from: StableHash.canonical(portable))
+        #expect(decoded == portable)
+        #expect(PortableMerge.conflictID(of: fixedMessage.id, branch: [decoded]).uuidString == conflict)
+    }
+
+    @Test func missingNullableKeysOrAttachmentsAreRejected() throws {
+        let session = PortableSession(id: UUID(), title: "t", selection: nil, metadataUpdatedMs: 0,
+                                      messages: [PortableMessage(fixedMessage, attribution: nil)], conflictOf: nil)
+        let snapshot = PortableSnapshot(sessions: [session])
+        let data = try PortableCodec.encode(snapshot)
+        #expect(try PortableCodec.decode(data) == PortableMerge.canonical(snapshot))
+        let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        func rejects(_ change: (inout [String: Any]) -> Void) throws {
+            var copy = root
+            change(&copy)
+            let changed = try JSONSerialization.data(withJSONObject: copy)
+            #expect(throws: SyncError.self) { try PortableCodec.decode(changed) }
+        }
+        for key in ["selection", "conflictOf"] {
+            try rejects { r in var sessions = r["sessions"] as! [[String: Any]]; sessions[0][key] = nil; r["sessions"] = sessions }
+        }
+        for key in ["toolCallID", "toolName", "modelText", "attribution", "attachments"] {
+            try rejects { r in
+                var sessions = r["sessions"] as! [[String: Any]]
+                var messages = sessions[0]["messages"] as! [[String: Any]]
+                messages[0][key] = nil
+                sessions[0]["messages"] = messages; r["sessions"] = sessions
+            }
+        }
     }
 
     @Test func attachmentMetadataRoundTripsWithoutBytesOrPaths() throws {
@@ -241,32 +275,34 @@ struct AttachmentHydrationTests {
     }
 }
 
-/// The installed store has no attachment fields; one upgrade keeps everything.
-struct CurrentStoreUpgradeTests {
-    @Test func storeWithoutAttachmentFieldsKeepsRecordsAndRoundTrips() throws {
-        var session = ChatSession(selection: ModelSelection(providerID: UUID(), modelID: "m"))
+/// assistant-v1 sessions carry attachment fields explicitly; files without them are rejected, not upgraded.
+struct CurrentStoreAttachmentTests {
+    @Test func attachmentFieldsRoundTripAndAreRequired() throws {
+        var file = HistoryFile.initial(selection: ModelSelection(providerID: UUID(), modelID: "m"))
         let reply = AgentTranscriptMessage(role: .assistant, text: "回复")
-        session.messages = [fixedMessage, reply]
-        session.draft = "未发送"
-        session.attributions = [reply.id.uuidString: "P · m"]
-        let tombstone = Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 5))
-        var root = try JSONSerialization.jsonObject(with: HistoryMigration.encode(
-            HistoryFile(selectedID: session.id, sessions: [session], deletedSessions: [tombstone]))) as! [String: Any]
+        file.sessions[0].messages = [fixedMessage, reply]
+        file.sessions[0].draft = "未发送"
+        file.sessions[0].attributions = [reply.id.uuidString: "P · m"]
+        file.sessions[0].attachments[fixedMessage.id.uuidString] = [attachment()]
+        file.sessions[0].draftAttachments = [attachment(3)]
+        file.deletedSessions = [Tombstone(id: UUID(), deletedAt: Date(timeIntervalSince1970: 5))]
+        let data = try HistoryCodec.encode(file)
+        let again = try HistoryCodec.decode(data)
+        #expect(again.sessions[0].attachments == file.sessions[0].attachments)
+        #expect(again.sessions[0].draftAttachments == file.sessions[0].draftAttachments)
+        #expect(again.sessions[0].messages == file.sessions[0].messages && again.deletedSessions == file.deletedSessions)
+        var root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         var rows = root["sessions"] as! [[String: Any]]
         rows[0]["attachments"] = nil; rows[0]["draftAttachments"] = nil
         root["sessions"] = rows
-        let file = try HistoryMigration.decode(JSONSerialization.data(withJSONObject: root), legacySelection: nil)
-        let upgraded = file.sessions[0]
-        #expect(upgraded.id == session.id && upgraded.messages == session.messages)
-        #expect(upgraded.draft == "未发送" && upgraded.selection == session.selection)
-        #expect(upgraded.attributions == session.attributions && file.deletedSessions == [tombstone])
-        #expect(upgraded.attachments.isEmpty && upgraded.draftAttachments.isEmpty)
-        var withPhoto = upgraded
-        withPhoto.attachments[fixedMessage.id.uuidString] = [attachment()]
-        withPhoto.draftAttachments = [attachment(3)]
-        let again = try HistoryMigration.decode(HistoryMigration.encode(
-            HistoryFile(selectedID: nil, sessions: [withPhoto], deletedSessions: [])), legacySelection: nil)
-        #expect(again.sessions[0].attachments == withPhoto.attachments)
-        #expect(again.sessions[0].draftAttachments == withPhoto.draftAttachments)
+        #expect(throws: (any Error).self) { try HistoryCodec.decode(JSONSerialization.data(withJSONObject: root)) }
     }
+}
+
+/// Values computed from the v1 portable canonical encoding and reproduced
+/// independently (sorted-key JSON + the FNV-1a digest/UUID construction of
+/// `StableHash` outside Swift).
+enum PortableFixed {
+    static let digest = "4426c2fa3ccca390a827c5bd57fdbfef"
+    static let conflictID = "A86B2AC6-6C23-8EDD-8752-C6BA983460F3"
 }

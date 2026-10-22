@@ -37,7 +37,10 @@ by the device, with explicit ambiguity handling and no guessed bundle IDs.
 Phone tools support observed search fields, ordinary scrolling and coordinate
 swipes for nested lists or edge-back gestures. Changed foreground apps and stale
 nodes return a fresh observation when possible; interrupted actions are never
-replayed. System search uses the same observed taps, swipes and text input as other pages. The advanced endpoint hint
+replayed. Screen parts drawn by another system process, such as the keyboard's
+paste suggestion, are reported as present but not read; a tap that would land on
+them, or on a point whose app cannot be confirmed, is refused before touching.
+System search uses the same observed taps, swipes and text input as other pages. The advanced endpoint hint
 always shows the embedded default even when an override is saved.
 
 On the tested iPhone 15 Pro, initial developer TCP connections are refused when
@@ -130,12 +133,58 @@ changes discard it. An expired phone operation is never replayed automatically.
 The default path label can show unavailable while the local VPN still works.
 
 
+## Your assistant, tasks and memory
+
+The app opens on **你的助理**, one continuing conversation that you come back to
+across topics, model changes and days. Earlier work stays in its original
+messages; the assistant sends a bounded context (recent same-project history,
+a checked summary of older finished work and the memory you saved) instead of
+the whole history. Independent conversations live under **任务 / 历史** in the
+list (new task, rename, delete); they keep their own history and model.
+
+Memory is only what you explicitly save: type `记住：<内容>` (or
+`/remember <内容>`) to save the exact text without starting a turn, turn on the
+bookmark (记住) next to the photo buttons so that sending opens the memory editor
+with your text and saves only when you tap 保存, tap **存为记忆** on a message, or
+use the brain icon (记忆) to add, correct or forget entries. Writing
+`忘掉关于…的记忆`, `删除记忆：…` or `把…的记忆改成…` lists the matching entries of
+the current project in a sheet; you pick one and confirm in the editor or the
+forget panel, nothing changes otherwise (an ordinary sentence such as
+“我忘记带钥匙” is sent as a message). Corrections apply from the next model
+request. Forgetting shows the entry and how many related conversations will be
+excluded from the assistant's context before you confirm; the original messages
+stay visible on this device. The assistant can search saved memory and
+same-project history but cannot write memory itself. Memory, summaries and the
+assistant's scope data stay on this device. While the assistant works, the status
+line names the turn's model, its context limit (or the soft target when the
+window is unknown) and the size estimate of its latest request.
+
+While the assistant is working, the input queues one **下一件事** that starts
+after the current turn completes in the foreground; switch the picker to
+**追加到本轮** to steer the running turn instead. After Stop, a failure or an app
+restart, the waiting request shows **继续 / 移回草稿 / 放弃** and never starts by
+itself. A request that fails before it starts returns its text to the input;
+the original stays visible, marked as not started, and the assistant does not
+read it as context. In a task conversation, **引用到你的助理** (long press a
+message) lets the assistant read that exact finished part of history once.
+To start over without losing memory, swipe or long-press **你的助理** in the
+list and choose **清空对话，保留记忆**: the assistant's conversation, draft,
+references, summaries and its images are deleted (also on synced devices);
+saved memory, forget records, the current model and project, model services
+and other tasks stay. It is unavailable while the assistant is working or a
+waiting request needs a decision.
+
+This release stores conversation history in a new `assistant-v1` format: it
+starts with an empty assistant and does not read or convert earlier
+conversations, which stay untouched on the device. Model services, API keys,
+pairing and phone settings are kept: the assistant uses the models already
+configured in Settings, and starts with the default model when it has none.
+
 ## Conversations and providers
 
-Use the list icon to open conversations and Settings. Tap the chat title to
-rename it, or use the conversation's menu in the list. The top-right icon starts
-a new conversation. The model chip above the input chooses this conversation's
-provider and model.
+Use the list icon to open the assistant, memory, tasks and Settings. Tap a task
+title to rename it, or use its menu in the list. The model chip above the input
+chooses the current conversation's provider and model.
 The concrete model name appears first; the picker shows API information beneath it.
 Settings → 外观 chooses 跟随系统, 浅色 or 深色; the choice stays on this device.
 
@@ -172,6 +221,15 @@ by your key's group. Common routes use `/v1`; Antigravity uses explicit
 preset starts with Responses; change the protocol if your group requires it.
 Existing addresses and keys stay unchanged. Advanced custom addresses remain
 available for services with different inference and catalog routes.
+
+Each model has an optional local **本机上下文预算** in the provider editor: a
+confirmed context window or an input ceiling becomes a hard limit for the
+assistant's requests; without one the assistant only keeps to a soft target of
+about 24k estimated tokens. Older finished work is summarized as a streamed,
+size-bounded maintenance step of at most 150 seconds per turn. A summary request
+whose estimate exceeds that limit is not sent; if summarizing does not finish,
+that turn continues without a new summary. Forgetting something the turn is
+reading, or a storage failure, stops the turn instead.
 
 Choose a provider and model for each conversation. Accepted turns capture
 their selection and credential before joining the serial phone action queue.
@@ -230,8 +288,12 @@ selects an exact folder without creating another child. Choose the same
 provider configuration. Local folders do not sync across devices. Each device
 needs its own API keys, pairing record, runner settings and folder permission.
 
-Portable snapshots contain conversation text, tool calls/results, model
-selection, image-presence metadata and nonsecret provider settings. Image bytes,
+Portable snapshots (in an `assistant-v1` subfolder of the chosen location;
+earlier sync files beside it are left alone) contain conversation text, tool
+calls/results, model selection, image-presence metadata and nonsecret provider
+settings. Memory, summaries, the pending request and local budgets are not
+synchronized; if another device deletes or diverges the assistant's
+conversation, the app asks which conversation to continue instead of choosing. Image bytes,
 screenshots, keys, pairing records, drafts and running jobs are kept local.
 An image synced from another device appears unavailable unless its bytes are
 already on this device. A synced conversation
@@ -340,8 +402,7 @@ env -u SDKROOT python3 Scripts/build.py --development /path/to/local-signing.jso
 ```
 
 The file contains `identity`, `team`, `profile`, `bundleID` and `runnerBundleID`.
-`legacyKeychainService` is an optional migration override for an existing local
-installation. Use a development profile covering the bundle IDs you install.
+Use a development profile covering the bundle IDs you install.
 Development artifacts go to `build/development/` and are never used to generate
 the public source.
 
@@ -360,7 +421,9 @@ download without a GitHub account.
 ## Development
 
 Read [AGENTS.md](AGENTS.md) and [the engineering design](docs/engineering.md).
-Core tests cover migrations, frozen model selection and portable merge rules;
+Core tests cover the strict assistant-v1 format, commit gates, memory and
+forgetting, context building, the pending state machine, frozen model selection
+and portable merge rules;
 distribution tests cover feed updates. Real-device checks are required for phone
 automation and actual iCloud folder access. Build or unit-test success alone does
 not establish those behaviors.

@@ -41,6 +41,137 @@ enum DeviceSettings {
     static var saveScreenshots: Bool { UserDefaults.standard.bool(forKey: screenshotsKey) }
     /// Off by default: no run log or native idevice log file is written.
     static var saveDiagnosticLogs: Bool { UserDefaults.standard.bool(forKey: logsKey) }
+    /// Acceptance-only fault injection: when the app is launched with this
+    /// argument, system task submission fails before any dispatch permit.
+    /// Absent by default; it cannot be enabled from the app UI.
+    static var injectStartFailure: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentInjectStartFailure") }
+    /// Local launch argument only (not reachable from the UI): measure the long-
+    /// history write path on a synthetic file in a temporary directory and write
+    /// `Documents/long-history-benchmark.json`. The real history is not touched.
+    static var longHistoryBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentLongHistoryBenchmark") }
+    /// Local launch argument only: the real transcript view over synthetic long
+    /// histories in a read-only controller (`ViewportBenchmarkRoot`).
+    static var viewportBenchmark: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentViewportBenchmark") }
+    /// Local acceptance launch argument only (fault injection, not reachable
+    /// from the UI): each context-maintenance fold waits 20 s after its checks
+    /// and read registration, before its provider request, so a forget can be
+    /// confirmed while the turn prepares. The wait is cancellable; nothing is
+    /// sent or shown during it.
+    static var maintenanceDispatchHold: Duration? {
+        ProcessInfo.processInfo.arguments.contains("-PocketAgentHoldMaintenanceDispatch") ? .seconds(20) : nil
+    }
+    /// Local acceptance launch arguments only (not reachable from the UI):
+    /// record the kinds, sizes and timing of each maintenance fold's stream
+    /// events, no content, in `Documents/maintenance-stream-*.json`.
+    static var recordMaintenanceStream: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentRecordMaintenanceStream") }
+    /// Fault injection: a fold sends no provider request and receives a new
+    /// summary text increment every 3 s instead, so the real 150 s
+    /// maintenance deadline (not the 45 s idle limit) ends it.
+    static var injectSlowSummaryStream: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentInjectSlowSummaryStream") }
+    /// At the first summary text received from the provider, request the same
+    /// stop as the Stop button for the primary line.
+    static var stopAtFirstSummaryText: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentStopAtFirstSummaryText") }
+    static let diagnosticStop = Notification.Name("PocketAgent.diagnosticStop")
+    /// After a run's first script phone call, the next history write fails
+    /// once (fault injection) on a run event, so storage becomes dirty while
+    /// the script still runs.
+    static var dirtyAfterFirstScriptCall: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentDirtyAfterFirstScriptCall") }
+    static let diagnosticDirty = Notification.Name("PocketAgent.diagnosticDirty")
+    /// Provider error shapes through the pinned client on the device (`ProviderLimitProbe`).
+    static var providerLimitProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentProviderLimitProbe") }
+    /// The script helper gate on the device (`ScriptGateProbe`).
+    static var scriptGateProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentScriptGateProbe") }
+    /// Context maintenance end to end on isolated data (`SummaryMaintenanceProbe`).
+    static var summaryMaintenanceProbe: Bool { ProcessInfo.processInfo.arguments.contains("-PocketAgentSummaryMaintenanceProbe") }
+    /// Metadata diagnostics (run log and native log) for this launch only,
+    /// without changing the saved setting.
+    static var diagnosticsEnabled: Bool {
+        saveDiagnosticLogs || ProcessInfo.processInfo.arguments.contains("-PocketAgentDiagnosticLogs")
+    }
+    private static func argument(after name: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+    /// Lowers the cap of one native DDI call (seconds); the expiry is computed
+    /// and enforced exactly as in production.
+    static var ddiCallBudgetCap: TimeInterval {
+        argument(after: "-PocketAgentDDICallBudgetCap").flatMap(TimeInterval.init).map { max(1, $0) } ?? DDICallBudget.cap
+    }
+    /// Fault injection: one DDI stage (`ax_read`, `geometry` or `screenshot`)
+    /// stalls once per native session until Stop or the call's expiry ends it.
+    static var injectDDIStall: String? {
+        argument(after: "-PocketAgentInjectDDIStall").flatMap { ["ax_read", "geometry", "screenshot"].contains($0) ? $0 : nil }
+    }
+    /// Fault injection: the next native call of this operation (for example
+    /// `tap`) is refused before dispatch, as when too little of the turn is
+    /// left; once per phone control.
+    static var refuseNextDDIDispatch: String? { argument(after: "-PocketAgentRefuseNextDDIDispatch") }
+    /// Fault injection: the first touch release of a native session is sent,
+    /// then its confirmation is treated as lost, so the real unconfirmed-release
+    /// path runs. No input is left held.
+    static var dropInputReleaseConfirmation: Bool {
+        ProcessInfo.processInfo.arguments.contains("-PocketAgentDropInputReleaseConfirmation")
+    }
+    /// Local acceptance launch argument only (not reachable from the UI): the
+    /// `PKATEST_` marker of one own memory entry that a running primary turn,
+    /// after reading it, forgets once through the panel's own preview and
+    /// commit (`ChatController.diagnosticForgetDuringRun`).
+    static var forgetDuringRunMarker: String? {
+        argument(after: "-PocketAgentForgetDuringRun").flatMap { $0.hasPrefix("PKATEST_") ? $0 : nil }
+    }
+
+    /// Writes `Documents/summary-maintenance-probe.json`: the probe's cases
+    /// with a fresh run nonce, start and end time, process and build.
+    @MainActor
+    private static func runSummaryMaintenanceProbe() async {
+        try? await Task.sleep(for: .seconds(2))
+        let started = Date()
+        var report = await SummaryMaintenanceProbe.report()
+        #if DEBUG
+        let configuration = "Debug"
+        #else
+        let configuration = "Release"
+        #endif
+        let info = Bundle.main.infoDictionary ?? [:]
+        report["configuration"] = "device \(configuration) \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
+        report["runNonce"] = UUID().uuidString
+        report["pid"] = Int(ProcessInfo.processInfo.processIdentifier)
+        let format = ISO8601DateFormatter()
+        report["startedAt"] = format.string(from: started)
+        report["endedAt"] = format.string(from: Date())
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("summary-maintenance-probe.json")
+        try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+    }
+
+    @MainActor
+    static func runLongHistoryBenchmarkIfRequested() async {
+        if scriptGateProbe { await ScriptGateProbe.runAndReport(); return }
+        if providerLimitProbe { await ProviderLimitProbe.runAndReport(); return }
+        if summaryMaintenanceProbe { await runSummaryMaintenanceProbe(); return }
+        guard longHistoryBenchmark else { return }
+        // Let launch finish first; the run yields between samples.
+        try? await Task.sleep(for: .seconds(3))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pa-bench-\(UUID().uuidString)")
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let output = documents.appendingPathComponent("long-history-benchmark.json")
+        #if DEBUG
+        let configuration = "Debug"
+        #else
+        let configuration = "Release"
+        #endif
+        let info = Bundle.main.infoDictionary ?? [:]
+        let label = "device \(configuration) \(info["CFBundleShortVersionString"] as? String ?? "?")"
+            + " (\(info["CFBundleVersion"] as? String ?? "?"))"
+        do {
+            try await LongHistoryBenchmark.report(sizes: [10_000, 50_000], directory: directory, label: label)
+                .write(to: output, options: .atomic)
+        } catch {
+            let failure = ["configuration": label, "error": error.localizedDescription]
+            try? JSONSerialization.data(withJSONObject: failure, options: [.sortedKeys]).write(to: output, options: .atomic)
+        }
+    }
 
     static func tunnelEndpoint() throws -> (host: String, port: UInt16) {
         try parseEndpoint(tunnelEndpointText)

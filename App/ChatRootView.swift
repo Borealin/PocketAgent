@@ -20,6 +20,8 @@ struct ChatRootView: View {
     @State private var showProviders = false
     @State private var renaming: UUID?
     @State private var newTitle = ""
+    @State private var showMemory = false
+    @State private var memoryPrefill: MemoryDraft?
     @FocusState private var inputFocused: Bool
     @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
 
@@ -38,7 +40,8 @@ struct ChatRootView: View {
                         .accessibilityIdentifier("closeSessions")
                 }
                 SessionDrawer(chat: chat, providers: providers, close: closeDrawer,
-                              rename: startRename, openSettings: { closeDrawer(); showSettings = true })
+                              rename: startRename, openSettings: { closeDrawer(); showSettings = true },
+                              openMemory: { closeDrawer(); memoryPrefill = nil; showMemory = true })
                     .frame(width: width)
                     .offset(x: offset)
                     .gesture(closeGesture(width: width))
@@ -58,6 +61,9 @@ struct ChatRootView: View {
             Button("取消", role: .cancel) {}
         }
         .alert(item: $chat.imageWarning) { warning in imageAlert(warning) }
+        .sheet(isPresented: $showMemory) {
+            MemoryPanelView(chat: chat, workspaces: workspaces, prefill: memoryPrefill)
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(engine: engine, providers: providers, sync: sync, device: device, workspaces: workspaces) { showSettings = false }
         }
@@ -98,13 +104,15 @@ struct ChatRootView: View {
 
     private var main: some View {
         VStack(spacing: 0) {
-            if !chat.storageError.isEmpty { banner(chat.storageError, color: .red) }
+            StorageBanner(chat: chat)
             if !providers.storageError.isEmpty { banner(providers.storageError, color: .red) }
             if !providers.notice.isEmpty { banner(providers.notice, color: .orange) }
             if providers.isConfigured {
                 // One transcript identity per conversation: switching recreates
                 // its scroll position and lazy layout state, starting at the bottom.
-                ChatTranscriptView(chat: chat, dismissKeyboard: { inputFocused = false })
+                if chat.isPrimary(chat.selectedID) || chat.assistant.primaryNotice != nil { PrimaryNoticeCard(chat: chat) }
+                ChatTranscriptView(chat: chat, dismissKeyboard: { inputFocused = false },
+                                   saveAsMemory: { draft in memoryPrefill = draft; showMemory = true })
                     .id(chat.selectedID)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if let selected = chat.selected {
@@ -126,16 +134,22 @@ struct ChatRootView: View {
                     .accessibilityLabel("会话列表").accessibilityIdentifier("sessions")
             }
             ToolbarItem(placement: .principal) {
-                Text(chat.selected?.title ?? "手机助手").font(.headline).lineLimit(1)
+                Text(chat.isPrimary(chat.selectedID) ? ChatSession.primaryTitle : (chat.selected?.title ?? "手机助手"))
+                    .font(.headline).lineLimit(1)
                     .padding(.horizontal, 8).contentShape(Rectangle())
-                    .onTapGesture { if let id = chat.selectedID { startRename(id) } }
-                    .onLongPressGesture { if let id = chat.selectedID { startRename(id) } }
+                    .onTapGesture { if let id = chat.selectedID, !chat.isPrimary(id) { startRename(id) } }
+                    .onLongPressGesture { if let id = chat.selectedID, !chat.isPrimary(id) { startRename(id) } }
                     .accessibilityAddTraits(.isButton).accessibilityHint("轻点以重命名")
                     .accessibilityIdentifier("renameSession")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { inputFocused = false; chat.newSession() } label: { Image(systemName: "square.and.pencil") }
-                    .accessibilityLabel("新会话").accessibilityIdentifier("newSession")
+                if chat.isPrimary(chat.selectedID) {
+                    Button { inputFocused = false; memoryPrefill = nil; showMemory = true } label: { Image(systemName: "brain") }
+                        .accessibilityLabel("记忆").accessibilityIdentifier("openMemory")
+                } else {
+                    Button { inputFocused = false; chat.selectPrimary() } label: { Image(systemName: "person.crop.circle") }
+                        .accessibilityLabel("回到你的助理").accessibilityIdentifier("backToAssistant")
+                }
             }
         }
     }
@@ -201,51 +215,80 @@ struct ChatRootView: View {
     }
 }
 
-/// Slide-over session list: selection, rename, delete, new conversation and Settings.
+/// Slide-over list: the assistant entry, memory, independent tasks/history
+/// (select, rename, delete, new task) and Settings.
 private struct SessionDrawer: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var providers: ProviderStore
     let close: () -> Void
     let rename: (UUID) -> Void
     let openSettings: () -> Void
+    let openMemory: () -> Void
     @State private var pendingDelete: ChatSession?
+    @State private var confirmClear = false
+    @State private var clearBlocked: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("会话").font(.title2.bold())
-                Spacer()
-                Button { chat.newSession(); close() } label: { Image(systemName: "square.and.pencil").font(.title3) }
-                    .accessibilityLabel("新会话").accessibilityIdentifier("createSession")
-            }.padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
             List {
-                ForEach(chat.sessions.sorted { $0.updatedAt > $1.updatedAt }) { session in
-                    Button { chat.select(session.id); close() } label: { row(session) }
-                        .listRowBackground(session.id == chat.selectedID ? Color.accentColor.opacity(0.14) : Color.clear)
-                        .accessibilityIdentifier("session-\(session.id.uuidString)")
-                        .swipeActions(allowsFullSwipe: false) {
-                            if !chat.isRunning(session.id) {
-                                // This only requests confirmation. A destructive
-                                // swipe role animates removal before confirmation.
-                                Button("删除", systemImage: "trash") { pendingDelete = session }
-                                    .tint(.red)
-                            }
-                            Button("重命名") { rename(session.id) }.tint(.indigo)
-                        }
-                        .contextMenu {
-                            Button("重命名", systemImage: "pencil") { rename(session.id) }
-                            if !chat.isRunning(session.id) {
-                                Button("删除", systemImage: "trash", role: .destructive) { pendingDelete = session }
+                Section {
+                    Button { chat.selectPrimary(); close() } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle.fill").font(.title2).foregroundStyle(Color.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ChatSession.primaryTitle).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                                Text(primarySubtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
+                    }
+                    .listRowBackground(chat.isPrimary(chat.selectedID) ? Color.accentColor.opacity(0.14) : Color.clear)
+                    .accessibilityIdentifier("assistantEntry")
+                    .swipeActions(allowsFullSwipe: false) {
+                        Button("清空", systemImage: "eraser") { requestClear() }.tint(.orange)
+                    }
+                    .contextMenu {
+                        Button("清空对话，保留记忆…", systemImage: "eraser", role: .destructive) { requestClear() }
+                            .accessibilityIdentifier("clearAssistantConversation")
+                    }
+                    Button(action: openMemory) { Label("记忆 · \(chat.assistant.memory.active.count)", systemImage: "brain") }
+                        .accessibilityIdentifier("drawerMemory")
                 }
-            }.listStyle(.plain)
+                Section {
+                    ForEach(chat.taskSessions) { session in
+                        Button { chat.select(session.id); close() } label: { row(session) }
+                            .listRowBackground(session.id == chat.selectedID ? Color.accentColor.opacity(0.14) : Color.clear)
+                            .accessibilityIdentifier("session-\(session.id.uuidString)")
+                            .swipeActions(allowsFullSwipe: false) {
+                                if chat.canDelete(session.id) {
+                                    // This only requests confirmation. A destructive
+                                    // swipe role animates removal before confirmation.
+                                    Button("删除", systemImage: "trash") { pendingDelete = session }
+                                        .tint(.red)
+                                }
+                                Button("重命名") { rename(session.id) }.tint(.indigo)
+                            }
+                            .contextMenu {
+                                Button("重命名", systemImage: "pencil") { rename(session.id) }
+                                if chat.canDelete(session.id) {
+                                    Button("删除", systemImage: "trash", role: .destructive) { pendingDelete = session }
+                                }
+                            }
+                    }
+                } header: {
+                    HStack {
+                        Text("任务 / 历史")
+                        Spacer()
+                        Button { chat.newSession(); close() } label: { Image(systemName: "square.and.pencil") }
+                            .accessibilityLabel("新任务").accessibilityIdentifier("createSession")
+                    }
+                }
+            }.listStyle(.insetGrouped)
             Divider()
             Button(action: openSettings) {
                 Label("设置", systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
             }.padding().accessibilityIdentifier("settings")
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .confirmationDialog("删除会话？", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible, presenting: pendingDelete) { session in
             Button("删除「\(session.title)」", role: .destructive) {
@@ -253,6 +296,30 @@ private struct SessionDrawer: View {
             }
             Button("取消", role: .cancel) { pendingDelete = nil }
         } message: { _ in Text("会话及其本机图片将从这台设备删除；已开启同步时其他设备也会删除。") }
+        // An alert keeps both choices visible (a popover dialog hides Cancel).
+        .alert("清空“你的助理”的对话？", isPresented: $confirmClear) {
+            Button("清空对话，保留记忆", role: .destructive) { withAnimation { chat.clearPrimaryConversation() } }
+                .accessibilityIdentifier("confirmClearAssistant")
+            Button("取消", role: .cancel) {}
+                .accessibilityIdentifier("cancelClearAssistant")
+        } message: {
+            Text("将删除助理主线的全部对话、草稿、引用、对话摘要和只属于这些对话的图片，不能撤销；已开启同步时其他设备也会删除。"
+                 + "已保存的记忆、遗忘记录、当前模型与项目、模型服务和其他任务都会保留。")
+        }
+        .alert("暂时不能清空", isPresented: Binding(get: { clearBlocked != nil }, set: { if !$0 { clearBlocked = nil } })) {
+            Button("好", role: .cancel) { clearBlocked = nil }
+        } message: { Text(clearBlocked ?? "") }
+    }
+
+    /// Asks for confirmation, or explains what has to be stopped or handled first.
+    private func requestClear() {
+        if let blocker = chat.clearPrimaryBlocker { clearBlocked = blocker } else { confirmClear = true }
+    }
+
+    private var primarySubtitle: String {
+        guard let primary = chat.file.primary else { return "需要恢复主线" }
+        let state = chat.status(for: primary.id).map(\.phaseLabel) ?? primary.state.label
+        return "\(state) · \(providers.describe(primary.selection).label)"
     }
 
     private func row(_ session: ChatSession) -> some View {

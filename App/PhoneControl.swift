@@ -7,6 +7,17 @@ import UIKit
 @MainActor
 protocol PhoneControl: AnyObject {
     var cancellationCheck: (() throws -> Void)? { get set }
+    /// Seconds the next native call may take, or nil when the turn cannot
+    /// afford one (DDI only; set beside `cancellationCheck`).
+    var budget: (() -> TimeInterval?)? { get set }
+    /// The end of the turn, which bounds phone preparation (set beside `cancellationCheck`).
+    var turnEnd: Date? { get set }
+    /// Native calls handed to the device so far (DDI); an effect or preparation
+    /// gesture whose failure is a refusal before dispatch is reported unsent
+    /// only if this did not move.
+    var dispatchedCalls: Int { get }
+    /// What native calls reported about effects so far (DDI; WDA reports none).
+    var nativeEffects: NativeEffectReports { get }
     func prepare() async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
@@ -14,6 +25,9 @@ protocol PhoneControl: AnyObject {
     func activate(_ bundle: String) async throws
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws
+    /// Executor-internal swipe in the status band that compacts the system
+    /// task surface; never reachable from a model tool.
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws
     func input(_ node: [String: String]) async throws -> PhoneInput
     func click(_ input: PhoneInput) async throws
     func clear(_ input: PhoneInput) async throws
@@ -35,8 +49,17 @@ final class WDAControl: PhoneControl {
     let model: Model
     var base: String?
     var cancellationCheck: (() throws -> Void)?
+    var budget: (() -> TimeInterval?)?
+    var turnEnd: Date?
+    var dispatchedCalls: Int { 0 }
+    var nativeEffects: NativeEffectReports { NativeEffectReports() }
     init(_ model: Model) { self.model = model }
-    func prepare() async throws { if base == nil { base = try await model.prepareWDA() } }
+    func prepare() async throws {
+        guard let turnEnd else { throw PhonePreparationStopped() }
+        if base == nil { base = try await model.prepareWDA(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true } }
+    }
+    /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
+    private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
     private var session: String { base ?? "" }
     func activeApp() async throws -> String {
         (try await model.request("GET", "\(session)/wda/activeAppInfo")["value"] as? [String: Any])?["bundleId"] as? String ?? ""
@@ -52,7 +75,9 @@ final class WDAControl: PhoneControl {
         guard let data = Data(base64Encoded: text) else { throw failure("截屏失败。") }; return data
     }
     private func effect(_ path: String, _ body: [String: Any]) async throws {
-        try cancellationCheck?(); _ = try await model.request("POST", path, body)
+        try cancellationCheck?()
+        if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
+        _ = try await model.request("POST", path, body)
     }
     func activate(_ bundle: String) async throws { try await effect("\(session)/wda/apps/activate", ["bundleId": bundle]) }
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws {
@@ -62,6 +87,9 @@ final class WDAControl: PhoneControl {
     }
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws {
         try await effect("\(session)/wda/dragfromtoforduration", ["fromX": x, "fromY": y, "toX": toX, "toY": toY, "duration": seconds])
+    }
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws {
+        try await drag(fromX, y, toX, y, seconds: seconds)
     }
     func input(_ a: [String: String]) async throws -> PhoneInput {
         let name = a["name"].map { "@name=\(PhoneExecutor.xpathLiteral($0)) and " } ?? ""
@@ -84,67 +112,186 @@ final class WDAControl: PhoneControl {
     func home() async throws { try await effect("/wda/homescreen", [:]) }
 }
 
+/// Phone preparation ended by Stop, the turn deadline, a revoked script lease
+/// or a storage gate, before anything was sent.
+struct PhonePreparationStopped: LocalizedError {
+    var errorDescription: String? { "手机准备已停止；未执行手机操作。" }
+}
+
+/// Releasing input held on the phone (touch, home, keyboard) could not be
+/// confirmed earlier in this app run; no input is sent until PocketAgent is
+/// relaunched. Raised before anything is sent.
+struct InputReleaseUnconfirmed: LocalizedError {
+    var errorDescription: String? {
+        "此前一次手机输入的释放未能确认；为安全起见，本次运行中不再向手机发送输入（观察仍可用）。请先检查手机上没有被按住的触摸或按键，然后重新打开 PocketAgent。"
+    }
+}
+
 @MainActor
 final class DDIControl: PhoneControl {
     let model: Model
     var cancellationCheck: (() throws -> Void)?
+    var budget: (() -> TimeInterval?)?
+    var turnEnd: Date?
     private var observedFrame: CGRect?
     private var observedApp: String?
     private var preparedText: String?
+    /// Local acceptance launch arguments (fault injection).
+    private let stall = DeviceSettings.injectDDIStall
+    private let dropReleaseConfirmation = DeviceSettings.dropInputReleaseConfirmation
+    private var refuseNextDispatch = DeviceSettings.refuseNextDDIDispatch
+    private(set) var dispatchedCalls = 0
+    private(set) var nativeEffects = NativeEffectReports()
+    /// Native entry's refusal of a passed expiry, exactly as `check` reports
+    /// it (`ffi_err!`: code 16 `InternalError`, debug-formatted): nothing ran.
+    static let nativeNotDispatched = #"idevice 16/0: InternalError("DDI call budget missing or exhausted; not dispatched")"#
+    /// Operations that send input to the phone.
+    static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
+                                               "ax_replace", "home"]
     init(_ model: Model) { self.model = model }
-    func prepare() async throws { try await model.prepareDDI() }
-    private func call(_ object: [String: Any]) async throws -> [String: Any] {
+    func prepare() async throws {
+        guard let turnEnd else { throw PhonePreparationStopped() }
+        try await model.prepareDDI(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true }
+    }
+    /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
+    private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
+    /// One native call on the turn's session. The expiry is fixed on the wall
+    /// clock before the worker thread starts, so the handoff delay counts. The
+    /// worker is always awaited to its end, cleanup included: there is no
+    /// Swift-side timeout, and the connection outlives the call.
+    private func native<T>(_ op: String, encode: (UInt64) throws -> String,
+                           run: @escaping (OpaquePointer, String, UInt64) throws -> T) async throws -> T {
         guard let device = model.connection, let handle = device.ddi, let cancel = device.ddiCancellation else { throw failure("DDI 连接尚未准备。") }
         try cancellationCheck?()
+        if Self.inputOperations.contains(op), model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
+        // Local acceptance: this one operation finds no budget, as near the turn's end.
+        let refused = refuseNextDispatch == op
+        if refused { refuseNextDispatch = nil }
+        guard !refused, let seconds = budget?() else { throw PhoneCallNotDispatched.insufficientTime }
+        let expiresAt = DDICallBudget.expiry(now: Date(), seconds: seconds)
+        let request = try encode(expiresAt)
+        let seq = model.nextDDICallSequence()
+        let started = ContinuousClock.now
+        func elapsed() -> Int { Int((ContinuousClock.now - started) / .milliseconds(1)) }
         pocket_ddi_reset_cancel(cancel)
+        model.log("ddi_call_enter", ["seq": seq, "op": op, "budgetMs": Int(seconds * 1000)])
         // Lease revocation/Stop is observed during a native await as well as
-        // between primitives. Await the worker and its input cleanup fully.
+        // between primitives; progress is logged while the call is outstanding.
         let watcher = Task { @MainActor in
+            var signalled = false, ticks = 0
             while !Task.isCancelled {
-                do { try cancellationCheck?() }
-                catch { pocket_ddi_cancel(cancel); return }
+                if !signalled {
+                    do { try cancellationCheck?() } catch {
+                        pocket_ddi_cancel(cancel); signalled = true
+                        model.log("ddi_cancel_signalled", ["seq": seq, "ms": elapsed()])
+                    }
+                }
+                ticks += 1
+                if ticks % 250 == 0 { model.log("ddi_call_outstanding", Self.progressFields(cancel, seq: seq, op: op, ms: elapsed())) }
                 do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
             }
         }
         defer { watcher.cancel() }
+        // Counted as handed over before the worker starts; a refusal of the
+        // expiry at native entry is typed and uncounted (nothing was sent).
+        dispatchedCalls += 1
+        var outcome: Result<T, any Error>
+        do { outcome = .success(try await model.ffi { try run(handle, request, expiresAt) }) }
+        catch { outcome = .failure(error) }
+        if case .failure(let error) = outcome, (error as NSError).domain == "PocketAgent",
+           error.localizedDescription == Self.nativeNotDispatched {
+            dispatchedCalls -= 1
+            outcome = .failure(PhoneCallNotDispatched(reason: "手机操作的期限在交给设备前已过；未执行。"))
+        }
+        var progress = PocketDDIProgress()
+        _ = pocket_ddi_progress(cancel, &progress)
+        if progress.input_unconfirmed { model.latchInputReleaseUnconfirmed(op: op) }
+        var fields = Self.progressFields(cancel, seq: seq, op: op, ms: elapsed())
+        switch outcome {
+        case .success: fields["outcome"] = "ok"
+        case .failure(let error):
+            let text = error.localizedDescription
+            fields["outcome"] = text.contains("DDI action cancelled") ? "cancelled"
+                : text.contains("DDI call budget") ? "budget" : "error"
+        }
+        model.log("ddi_call_exit", fields)
+        // The connection, and with it the native session and cancellation,
+        // stays alive until the worker has returned.
+        withExtendedLifetime(device) {}
+        return try outcome.get()
+    }
+    private static func progressFields(_ cancel: OpaquePointer, seq: Int, op: String, ms: Int) -> [String: Any] {
+        var p = PocketDDIProgress()
+        guard pocket_ddi_progress(cancel, &p) else { return ["seq": seq, "op": op, "ms": ms] }
+        return ["seq": seq, "op": op, "ms": ms, "nativeSeq": p.seq, "inCall": p.in_call, "stage": p.stage, "detail": p.detail,
+                "stageAgeMs": p.stage_age_ms, "beats": p.beats, "beatAgeMs": p.beat_age_ms, "reconnects": p.reconnects,
+                "inputUnconfirmed": p.input_unconfirmed]
+    }
+    private func call(_ object: [String: Any]) async throws -> [String: Any] {
+        let op = object["op"] as? String ?? "request"
         var requestObject = object
-        if ["tap", "hold", "drag", "clear", "paste", "key", "keys", "ax_replace"].contains(object["op"] as? String ?? "") {
+        if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(op) {
             if let observedApp { requestObject["expected_app"] = observedApp }
             if let frame = observedFrame { requestObject["expected_frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height] }
         }
-        let data = try JSONSerialization.data(withJSONObject: requestObject)
-        let request = String(decoding: data, as: UTF8.self)
+        if let stall, stall != "screenshot" { requestObject["diagnostic_stall"] = stall }
+        if dropReleaseConfirmation { requestObject["diagnostic_release_unconfirmed"] = true }
         let result: Data
-        do { result = try await model.ffi {
+        let dispatchedBefore = dispatchedCalls
+        do { result = try await native(op, encode: { expiresAt in
+            requestObject["expires_at_ms"] = expiresAt
+            return String(decoding: try JSONSerialization.data(withJSONObject: requestObject), as: UTF8.self)
+        }) { handle, request, _ in
             var result: UnsafeMutablePointer<CChar>?
             try request.withCString { try check(pocket_ddi_call(handle, $0, &result)) }
             guard let result else { throw failure("DDI 返回为空。") }
             defer { idevice_string_free(result) }
-            return Data(String(cString: result).utf8)
-        } } catch {
+            let data = Data(String(cString: result).utf8)
+            // A failure after native admission is a result carrying whether
+            // this request started an effect (thrown here, so the call log
+            // records its outcome).
+            if let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let failure = try DDIOperationFailure.decode(object) { throw failure }
+            return data
+        } } catch let refused as InputReleaseUnconfirmed { throw refused }
+        catch let refused as PhoneCallNotDispatched { throw refused }
+        catch let failure as DDIOperationFailure {
+            nativeEffects.record(failure)
+            // An effect that started is uncertain: never mapped to a refusal.
+            if failure.actionIssued { throw failure }
+            throw Self.refusal(failure, op: op)
+        } catch {
+            // No native metadata: once handed over, an effect cannot be ruled out.
+            if dispatchedCalls > dispatchedBefore { nativeEffects.possible += 1 }
             if error.localizedDescription.contains("AX foreground or root changed") { throw PhoneObservationIssue.foregroundChanged }
-            // The device can refuse attributes with error 8 during a UI transition.
-            // The executor retries only observation, after the old AX socket closes.
-            if ["snapshot", "foreground"].contains(object["op"] as? String ?? ""),
-               error.localizedDescription.contains("AX request type"),
-               error.localizedDescription.contains("refused: 8") { throw PhoneObservationIssue.foregroundChanged }
             if error.localizedDescription.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
-            let operation = object["op"] as? String ?? "request"
-            throw failure("DDI \(operation)：\(error.localizedDescription)")
+            if error.localizedDescription.contains("; not tapped") { throw PhoneObservationIssue.targetCovered }
+            throw failure("DDI \(op)：\(error.localizedDescription)")
         }
+        guard let object = try? JSONSerialization.jsonObject(with: result) as? [String: Any] else {
+            nativeEffects.possible += 1
+            throw failure("DDI 返回格式无效。")
+        }
+        _ = try nativeEffects.record(result: object)
         try cancellationCheck?()
-        guard let object = try JSONSerialization.jsonObject(with: result) as? [String: Any] else { throw failure("DDI 返回格式无效。") }
-        if let failure = try DDIOperationFailure.decode(object) {
-            if ["snapshot", "foreground"].contains(requestObject["op"] as? String ?? ""),
-               failure.message.contains("AX foreground or root changed") ||
-               (failure.message.contains("AX request type") && failure.message.contains("refused: 8")) {
-                throw PhoneObservationIssue.foregroundChanged
-            }
-            if ["snapshot", "foreground"].contains(requestObject["op"] as? String ?? ""),
-               failure.message.contains("DDI display changed") { throw PhoneObservationIssue.geometryChanged }
-            throw failure
-        }
         return object
+    }
+
+    /// A native refusal before any effect of its request, as the executor's
+    /// typed issues where one applies (observation retries, fresh recovery,
+    /// "not executed"); otherwise the failure itself with its metadata.
+    private static func refusal(_ failure: DDIOperationFailure, op: String) -> any Error {
+        let text = failure.message
+        if text.contains("AX foreground or root changed") { return PhoneObservationIssue.foregroundChanged }
+        // The device can refuse attributes with error 8 during a UI transition.
+        // The executor retries only observation, after the old AX socket closes.
+        if ["snapshot", "foreground"].contains(op), text.contains("AX request type"), text.contains("refused: 8") {
+            return PhoneObservationIssue.foregroundChanged
+        }
+        if text.contains("DDI display changed") { return PhoneObservationIssue.geometryChanged }
+        // Native coordinate-effect refusals happen before any touch.
+        if text.contains("; not tapped") { return PhoneObservationIssue.targetCovered }
+        return failure
     }
     func activeApp() async throws -> String { try await call(["op": "foreground"])["app"] as? String ?? "" }
     func readTree() async throws -> PhoneTree {
@@ -154,16 +301,16 @@ final class DDIControl: PhoneControl {
         tree.bundleID = result["app"] as? String
         tree.frame = CGRect(x: frame["x"] ?? 0, y: frame["y"] ?? 0, width: frame["width"] ?? 0, height: frame["height"] ?? 0)
         tree.nodes = try raw.compactMap { try DDINodeMapping.attributes($0) }
+        tree.outsideAppElements = try DDINodeMapping.outsideAppElements(result)
         observedFrame = tree.frame; observedApp = tree.bundleID
         guard tree.frame.width > 0, tree.frame.height > 0 else { throw failure("DDI 屏幕尺寸无效。") }
         return tree
     }
     func screenshot() async throws -> Data {
-        guard let device = model.connection, let handle = device.ddi else { throw failure("DDI 连接尚未准备。") }
-        try cancellationCheck?()
-        let result: Data = try await model.ffi {
+        let stall: UInt32 = self.stall == "screenshot" ? 1 : 0
+        let result: Data = try await native("screenshot", encode: { _ in "" }) { handle, _, expiresAt in
             var bytes: UnsafeMutablePointer<UInt8>?, count: UInt = 0
-            try check(pocket_ddi_screenshot(handle, &bytes, &count))
+            try check(pocket_ddi_screenshot(handle, expiresAt, stall, &bytes, &count))
             guard let bytes, count > 0 else { throw failure("DDI 截图为空。") }
             defer { pocket_ddi_bytes_free(bytes, count) }
             return Data(bytes: bytes, count: Int(count))
@@ -174,6 +321,9 @@ final class DDIControl: PhoneControl {
     func tap(_ x: Double, _ y: Double, seconds: Double?) async throws { _ = try await call(["op": seconds == nil ? "tap" : "hold", "x": x, "y": y, "seconds": seconds ?? 0.05]) }
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws {
         _ = try await call(["op": "drag", "x": x, "y": y, "to_x": toX, "to_y": toY, "seconds": seconds])
+    }
+    func compactSurface(fromX: Double, toX: Double, y: Double, seconds: Double) async throws {
+        _ = try await call(["op": "surface_drag", "x": fromX, "to_x": toX, "y": y, "seconds": seconds])
     }
     func input(_ node: [String: String]) async throws -> PhoneInput {
         guard let identity = node["ddi_identity"] else { throw PhoneObservationIssue.nodeChanged }

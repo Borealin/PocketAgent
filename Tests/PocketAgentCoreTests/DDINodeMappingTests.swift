@@ -25,6 +25,24 @@ struct DDINodeMappingTests {
         let absent = try #require(try DDINodeMapping.attributes(node(["45": 2]).filter { $0.key != "27" }))
         #expect(absent["enabled"] == nil)
     }
+    /// Elements of another process are counted by the native graph, never
+    /// mapped to nodes; the count must be a present integer within the bound.
+    @Test func outsideAppCountIsRequiredAndStrictlyValidated() throws {
+        func decoded(_ json: String) throws -> [String: Any] {
+            try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        }
+        for valid in [0, 1, 32] {
+            #expect(try DDINodeMapping.outsideAppElements(decoded(#"{"outside_app_elements":\#(valid)}"#)) == valid)
+        }
+        for invalid in [#"{}"#, #"{"outside_app_elements":false}"#, #"{"outside_app_elements":true}"#,
+                        #"{"outside_app_elements":0.5}"#, #"{"outside_app_elements":-1}"#, #"{"outside_app_elements":33}"#,
+                        #"{"outside_app_elements":"1"}"#, #"{"outside_app_elements":null}"#] {
+            #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(decoded(invalid)) }
+        }
+        #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(["outside_app_elements": Double.nan]) }
+        #expect(throws: DDIResultError.outsideCount) { try DDINodeMapping.outsideAppElements(["outside_app_elements": false]) }
+        #expect(PhoneObservationIssue.targetCovered.code == "target_covered")
+    }
     @Test func rejectsInvisibleUnavailableAndNonfiniteFrames() throws {
         #expect(try DDINodeMapping.attributes(node(["32": false])) == nil)
         #expect(try DDINodeMapping.attributes(["21": ["unavailable": "CGRectNull"]]) == nil)
@@ -55,18 +73,50 @@ struct DDINodeMappingTests {
         #expect(DDINodeMapping.confirmsInput(["value": "Search", "placeholder": "Search"], text: ""))
         #expect(DDINodeMapping.confirmsInput(["value": "你好🌟"], text: "你好🌟"))
     }
-    @Test func placeholderValueNeverConfirmsNonemptyInput() throws {
-        // Counterexample: a refused paste leaves the empty search field
-        // reporting its placeholder as AX value. Requested text equal to that
-        // placeholder must remain unconfirmed.
-        let refused = try #require(try DDINodeMapping.attributes(node(["45": 15, "51": 1, "42": "Search", "53": "Search"])))
-        #expect(refused["value"] == "Search" && refused["placeholder"] == "Search")
-        #expect(!DDINodeMapping.confirmsInput(refused, text: "Search"))
-        #expect(!TextInputRequest.confirmsAXInput(refused, text: "Search"))
-        #expect(DDINodeMapping.confirmsInput(refused, text: "")) // Clear-only behavior is retained.
+    /// Review finding R3: an empty field can report its placeholder as its
+    /// AX value after a paste that did not land. Requested text equal to the
+    /// placeholder must stay unconfirmed on the default paste route as it
+    /// already did on the AX route; clear-only keeps its meaning.
+    @Test func aPlaceholderValueNeverConfirmsNonemptyInput() throws {
+        let unchanged = try #require(try DDINodeMapping.attributes(node(["45": 15, "51": 1, "42": "Search", "53": "Search"])))
+        #expect(unchanged["value"] == "Search" && unchanged["placeholder"] == "Search")
+        #expect(!DDINodeMapping.confirmsInput(unchanged, text: "Search"))
+        #expect(!TextInputRequest.confirmsAXInput(unchanged, text: "Search"))
+        #expect(DDINodeMapping.confirmsInput(unchanged, text: ""))
         let typed = try #require(try DDINodeMapping.attributes(node(["45": 15, "51": 1, "42": "Search", "53": "Search shoes"])))
         #expect(DDINodeMapping.confirmsInput(typed, text: "Search shoes"))
-        #expect(!DDINodeMapping.confirmsInput(["value": "Search", "placeholder": "Search"], text: "Search"))
+        #expect(!DDINodeMapping.confirmsInput(typed, text: ""))
+        // Without a placeholder the exact value still confirms; empty clears stay empty.
+        #expect(DDINodeMapping.confirmsInput(["value": "Search"], text: "Search"))
         #expect(DDINodeMapping.confirmsInput(["value": "", "placeholder": "Search"], text: ""))
+        #expect(DDINodeMapping.confirmsInput(["value": ""], text: ""))
+        #expect(!DDINodeMapping.confirmsInput(["value": "old"], text: ""))
+    }
+}
+
+/// What a phone call reports as sent: a refused touch is not an action, but an
+/// executor preparation gesture that was sent stays reported.
+struct PhoneCallEffectsTests {
+    @Test func refusedTouchRestoresOnlyTheActionFlag() {
+        var plain = PhoneCallEffects()
+        let before = plain.beginAction()
+        plain.refusedBeforeTouch(restoring: before)
+        #expect(!plain.issued)
+        // The task-surface swipe was sent while observing for the tap.
+        var prepared = PhoneCallEffects()
+        prepared.preparationSent()
+        let previous = prepared.beginAction()
+        prepared.refusedBeforeTouch(restoring: previous)
+        #expect(prepared.issued && !prepared.action && prepared.preparation)
+        // A second effect after a sent one keeps the earlier action reported.
+        var chain = PhoneCallEffects()
+        _ = chain.beginAction()
+        let second = chain.beginAction()
+        chain.refusedBeforeTouch(restoring: second)
+        #expect(chain.issued && chain.action)
+        // Preparation alone (e.g. cancelled or failed observation) is reported.
+        var onlyPreparation = PhoneCallEffects()
+        onlyPreparation.preparationSent()
+        #expect(onlyPreparation.issued)
     }
 }

@@ -16,44 +16,11 @@ extension ChatState {
     }
 }
 
+/// The assistant-v1 namespace. Earlier history, provider and attachment
+/// locations are not read, converted or cleaned.
+let assistantNamespace = AssistantNamespace(applicationSupport: applicationSupport)
 /// Local protected image files; excluded from backup and portable sync.
-let attachmentFiles = AttachmentFiles(directory: applicationSupport.appendingPathComponent("Attachments", isDirectory: true))
-
-@MainActor
-private final class ChatJob {
-    let sessionID: UUID
-    let prompt: AgentTranscriptMessage
-    let promptAttachments: [ChatAttachment]
-    /// History and its attachment metadata frozen at enqueue; later messages
-    /// (including this prompt) are never part of the prior context.
-    let prior: [AgentTranscriptMessage]
-    let priorAttachments: [String: [ChatAttachment]]
-    /// Frozen at enqueue; later provider or selection edits do not reach it.
-    let config: RunConfiguration
-    let phoneBackend = DeviceSettings.phoneBackend
-    let clipboardAllowed = DeviceSettings.clipboardAllowed
-    /// Project directory frozen at enqueue, like the model configuration.
-    let workspace: WorkspaceSnapshot?
-    /// Composer content this turn consumed; returned only if it never starts.
-    let draft: DraftSnapshot
-    /// AgentKit emitted runStarted; from then on nothing is restored or replayed.
-    var started = false
-    var partial: AgentTranscriptMessage?
-    var pendingSteering: Set<UUID> = []
-    var ready = false
-    var steeringInFlight = false
-    var cancelled = false
-    var terminal = false
-    init(session: ChatSession, prompt: AgentTranscriptMessage, attachments: [ChatAttachment], config: RunConfiguration,
-         workspace: WorkspaceSnapshot?, revision: Int) {
-        sessionID = session.id; self.prompt = prompt; promptAttachments = attachments
-        prior = session.messages; priorAttachments = session.attachments; self.config = config; self.workspace = workspace
-        draft = DraftSnapshot(text: session.draft, attachments: session.draftAttachments, revision: revision)
-    }
-    var referencedAttachmentIDs: Set<UUID> {
-        Set(promptAttachments.map(\.id) + priorAttachments.values.joined().map(\.id))
-    }
-}
+let attachmentFiles = AttachmentFiles(directory: assistantNamespace.attachments)
 
 /// Draft capacity held for images being read or prepared for one session.
 struct ImportTicket: Hashable {
@@ -70,67 +37,198 @@ struct ImageWarning: Identifiable {
     let verdict: ImageCapability.Verdict
 }
 
+/// MainActor owner of the single assistant-v1 history file. Every change goes
+/// through `HistoryOwner`; views read its published state.
 @MainActor
 final class ChatController: ObservableObject {
-    @Published var sessions: [ChatSession] = []
-    @Published var selectedID: UUID?
-    @Published var storageError = ""
+    /// Bumped after every owner change so SwiftUI re-reads derived state.
+    @Published private(set) var revision = 0
     /// Local, transient problem (image import, steering refusal) shown by the composer.
     @Published var notice = ""
+    /// Local receipt of the last explicit memory operation (no content).
+    @Published var memoryNotice = ""
+    /// Primary composer's remember mode: plain text opens the prefilled memory editor.
+    @Published var rememberMode = false
+    /// The editor opened from remember mode, if any.
+    @Published var rememberRequest: ComposerDraft?
+    /// A recognised natural-language edit/forget waiting for the user's pick.
+    @Published var memoryIntent: MemoryIntentRequest?
     @Published var imageWarning: ImageWarning?
-    @Published private(set) var deletedSessions: [Tombstone] = []
     /// Outstanding image imports by ticket ID; reads and preparation both count.
-    @Published private var imports: [UUID: ImportTicket] = [:]
-    @Published private var live: [UUID: AgentTranscriptMessage] = [:]
-    @Published private var jobs: [UUID: ChatJob] = [:]
+    @Published var imports: [UUID: ImportTicket] = [:]
+    @Published var live: [UUID: AgentTranscriptMessage] = [:]
+    @Published var jobs: [UUID: ChatJob] = [:]
     /// Semantic status per session from the engine's single reducer; kept
     /// after a turn ends so the final result stays visible this launch.
-    @Published private var statuses: [UUID: ExecutionStatus] = [:]
-    @Published private var queuedPhone: [ChatJob] = []
-    @Published private var foreground = false
+    @Published var statuses: [UUID: ExecutionStatus] = [:]
+    @Published var queuedPhone: [ChatJob] = []
+    @Published var foreground = false
+    /// Primary-line input target while a turn is active: next request (default) or steer.
+    @Published var steerPrimary = false
+    /// Messages shown per transcript page; grows with "显示更早".
+    @Published var visibleLimit: [UUID: Int] = [:]
     let engine: Model
     let providers: ProviderStore
     let workspaces: WorkspaceStore
+    let owner: HistoryOwner
+    let storage: HistoryStorage
+    /// The production writer (nil in the read-only viewer); held only for
+    /// the local acceptance fault injection.
+    private var historyWriter: PatchingHistoryWriter?
     /// Called once when the last active job finishes (deferred sync rounds).
     var onIdle: (() -> Void)?
-    private let file = documents.appendingPathComponent("chat-sessions.json")
-    private var phoneSessionID: UUID?
+    var phoneSessionID: UUID?
+    /// The job the engine is executing; late callbacks from any other job are ignored.
+    var runningJob: ChatJob?
     /// Transient per-session count of user edits to the composer (text,
     /// image removal, chosen images). Not persisted; programmatic clearing on
     /// enqueue does not count. Decides whether a never-started turn may
     /// restore its draft.
-    private var draftRevisions: [UUID: Int] = [:]
-    private func noteDraftEdit(_ id: UUID) { draftRevisions[id, default: 0] += 1 }
+    var draftRevisions: [UUID: Int] = [:]
+    func noteDraftEdit(_ id: UUID) { draftRevisions[id, default: 0] += 1 }
+    /// The acceptance forget during a run has been attempted (one-shot).
+    var diagnosticForgetConsumed = false
     private var draftWrite: Task<Void, Never>?
+    /// Draft text changed in memory but not yet written.
+    private var draftDirty = false
     /// Attachment files written but not yet recorded; cleanup never removes them.
-    private var pendingAttachmentIDs: Set<UUID> = []
+    var pendingAttachmentIDs: Set<UUID> = []
+    /// Process-wide fair order of accepted jobs and the pending request.
+    var nextOrdinal: UInt64 = 0
+    var nextEpoch: UInt64 = 0
+    /// Stop increments this before cancelling; a pending request only advances
+    /// automatically when it is unchanged since the finishing turn started.
+    var stopEpoch: UInt64 = 0
+    /// In-memory frozen configuration of the pending request (never persisted).
+    var pendingFrozen: FrozenTurn?
+    /// Stop epoch when the pending request was accepted or resumed.
+    var pendingStopEpoch: UInt64 = 0
+    /// Steering calls not yet answered by the runtime; activation waits for them.
+    var settlingSteers = 0
+    /// Explicit history references chosen for the next send, per session (UI only).
+    @Published var referenceDrafts: [UUID: [HistoryReference]] = [:]
+    /// Launch recovery that could not be saved yet.
+    private var unsavedRecovery: HistoryFile?
+    /// Storage reset is offered only after a load failure.
+    var canResetStorage: Bool { if case .loadBlocked = owner.health { true } else { false } }
+
     init(engine: Model, providers: ProviderStore, workspaces: WorkspaceStore) {
         self.engine = engine
         self.providers = providers
         self.workspaces = workspaces
+        let storage = HistoryStorage(url: assistantNamespace.history)
+        self.storage = storage
+        // One writer for the process: it alone knows the file it last published.
+        let store = PatchingHistoryWriter(storage: storage)
+        historyWriter = store
+        var recovery: HistoryFile?
+        var launchSource: HistoryLoadSource?
+        let created: HistoryOwner
         do {
-            if FileManager.default.fileExists(atPath: file.path) {
-                let stored = try HistoryMigration.decode(Data(contentsOf: file), legacySelection: providers.legacySelection)
-                sessions = stored.sessions
-                selectedID = stored.selectedID
-                deletedSessions = stored.deletedSessions
+            let (loadedState, source) = try storage.loadForAdoption()
+            switch loadedState {
+            case .absent:
+                // One atomic initialization of the empty primary line.
+                let initial = HistoryFile.initial(selection: providers.defaultSelection)
+                let fresh = HistoryOwner(file: initial, store: store)
+                do { try fresh.reset(to: initial); created = fresh } catch {
+                    created = HistoryOwner(file: initial, health: .saveDirty(error.localizedDescription), store: store)
+                }
+            case .loaded(let file):
+                var recovered = file
+                recovered.recoverAfterLaunch()
+                let loaded = HistoryOwner(file: file, store: store)
+                if recovered == file { created = loaded; launchSource = source } else {
+                    // Interrupted/needsResume states are published only once saved.
+                    do { try loaded.transact { $0 = recovered }; created = loaded } catch {
+                        recovery = recovered
+                        created = HistoryOwner(file: file, health: .saveDirty("启动恢复状态未保存：\(error.localizedDescription)"),
+                                               store: store)
+                    }
+                }
             }
-            if sessions.isEmpty { sessions = [ChatSession(selection: providers.defaultSelection)] }
-            if !sessions.contains(where: { $0.id == selectedID }) { selectedID = sessions.first?.id }
-            persist()
-            cleanupAttachments()
-        } catch { storageError = "历史读取失败，原文件已保留：\(error.localizedDescription)" }
+        } catch {
+            created = HistoryOwner(file: .initial(selection: nil), health: .loadBlocked(error.localizedDescription), store: store)
+        }
+        owner = created
+        unsavedRecovery = recovery
+        if let launchSource {
+            // Off the main actor: prove the launched file is this writer's
+            // image of what was loaded, so the first write can patch it.
+            Task { @MainActor in
+                let hydration = await Task.detached(priority: .utility) { HistoryHydration.make(launchSource) }.value
+                if let hydration { created.adopt(hydration) }
+            }
+        }
+        owner.onChange = { [weak self] in self?.revision &+= 1 }
+        owner.onStorageFailure = { [weak self] error in self?.storageFailed(error) }
+        if DeviceSettings.dirtyAfterFirstScriptCall {
+            // Local acceptance only: one failing write of an unchanged run event,
+            // through the real owner (dirty, every gate fails, jobs stop).
+            NotificationCenter.default.addObserver(forName: DeviceSettings.diagnosticDirty, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let job = self.runningJob else { return }
+                    self.historyWriter?.failNextWrite = CocoaError(.fileWriteOutOfSpace)
+                    self.owner.record { try $0.editSession(job.sessionID, touch: false) { _ in } }
+                }
+            }
+        }
+        if DeviceSettings.stopAtFirstSummaryText {
+            // Local acceptance only: the Stop button's own path for the primary line.
+            NotificationCenter.default.addObserver(forName: DeviceSettings.diagnosticStop, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { guard let self else { return }; self.cancel(self.owner.file.assistant.primarySessionID) }
+            }
+        }
         workspaces.inUse = { [weak self] id in self?.workspaceInUse(id) ?? false }
+        providers.onDefaultSelection = { [weak self] in self?.adoptDefaultSelection() }
+        if owner.health.isReady { cleanupAttachments() }
+        adoptDefaultSelection()
     }
-    var selected: ChatSession? { sessions.first { $0.id == selectedID } }
+
+    /// Read-only viewer over a synthetic history, for the local viewport
+    /// benchmark only (`-PocketAgentViewportBenchmark`): the file lives in this
+    /// owner's memory with storage load-blocked, so transactions, run-event
+    /// records and drafts are refused before any change (and the writer, which
+    /// would fail, counts any call); no attachment cleanup,
+    /// default-model adoption or provider/workspace callbacks; the storage path
+    /// is an unused temporary file. The app's own controller, history and sync
+    /// are not involved.
+    init(viewing file: HistoryFile, engine: Model, providers: ProviderStore, workspaces: WorkspaceStore,
+         writerCalls: @escaping () -> Void) {
+        self.engine = engine
+        self.providers = providers
+        self.workspaces = workspaces
+        storage = HistoryStorage(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("pocketagent-viewport-\(UUID().uuidString).json"))
+        owner = HistoryOwner(file: file, health: .loadBlocked("只读量测视图，不写入"),
+                             writer: { _ in writerCalls(); throw CocoaError(.featureUnsupported) })
+        unsavedRecovery = nil
+        owner.onChange = { [weak self] in self?.revision &+= 1 }
+    }
+
+    /// The primary line without a model uses the Settings default model;
+    /// an existing selection is kept.
+    func adoptDefaultSelection() {
+        guard owner.health.isReady, owner.file.primary?.selection == nil, providers.defaultSelection != nil else { return }
+        transact { try $0.adoptDefaultSelection(self.providers.defaultSelection) }
+    }
+
+    // MARK: Derived state
+
+    var file: HistoryFile { owner.file }
+    var sessions: [ChatSession] { owner.file.sessions }
+    var selectedID: UUID? { owner.file.selectedID }
+    var deletedSessions: [Tombstone] { owner.file.deletedSessions }
+    var assistant: AssistantState { owner.file.assistant }
+    var primaryID: UUID { owner.file.assistant.primarySessionID }
+    var storageError: String { owner.health.message ?? "" }
+    var storageReady: Bool { owner.health.isReady }
+    func isPrimary(_ id: UUID?) -> Bool { id != nil && id == primaryID && owner.file.primary != nil }
+    var selected: ChatSession? { selectedID.flatMap { id in sessions.first { $0.id == id } } }
     var active: Bool { selectedID.map { jobs[$0] != nil } ?? false }
     var activeSessionIDs: Set<UUID> { Set(jobs.keys) }
-    var canSend: Bool {
-        guard storageError.isEmpty, let selected, !isImporting(selected.id),
-              !selected.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selected.draftAttachments.isEmpty
-        else { return false }
-        return jobs[selected.id].map { $0.ready && !$0.steeringInFlight && !$0.cancelled && !$0.terminal } ?? true
-    }
+    var taskSessions: [ChatSession] { sessions.filter { $0.id != primaryID }.sorted { $0.updatedAt > $1.updatedAt } }
+
     var displayedMessages: [AgentTranscriptMessage] {
         guard let selected else { return [] }
         var messages = selected.messages
@@ -141,6 +239,7 @@ final class ChatController: ObservableObject {
         }
         return messages
     }
+
     /// The provider and model that actually produced a message.
     func author(of message: AgentTranscriptMessage) -> String {
         switch message.role {
@@ -162,10 +261,11 @@ final class ChatController: ObservableObject {
         if let job = jobs[id], let index = queuedPhone.firstIndex(where: { $0 === job }) {
             return ExecutionStatus(modelLabel: job.config.label,
                                    phase: .queued(rank: index + 1,
-                                                  waitingForForeground: !foreground && phoneSessionID == nil && index == 0))
+                                                  waitingForForeground: !foreground && phoneSessionID == nil && index == 0),
+                                   budget: job.statusBudget)
         }
         if let job = jobs[id], statuses[id] == nil || statuses[id]?.phase.isTerminal == true {
-            return ExecutionStatus(modelLabel: job.config.label)
+            return ExecutionStatus(modelLabel: job.config.label, budget: job.statusBudget)
         }
         return statuses[id]
     }
@@ -173,84 +273,135 @@ final class ChatController: ObservableObject {
     /// Image capability that applies to the next send from this session: the
     /// running turn's frozen model, else the current selection.
     func acceptsImages(_ id: UUID) -> Bool? {
-        if let job = jobs[id] { return job.config.supportsImages }
+        if let job = jobs[id], !(isPrimary(id) && !steerPrimary) { return job.config.supportsImages }
         guard let selection = sessions.first(where: { $0.id == id })?.selection else { return nil }
         return providers.provider(selection.providerID)?.model(selection.modelID)?.supportsImages
     }
 
-    func foregroundChanged(_ active: Bool) { foreground = active; if active { drainPhone() } }
+    func foregroundChanged(_ active: Bool) {
+        foreground = active
+        if active { drainPhone(); advancePendingIfReady() }
+    }
+
+    // MARK: Storage
+
+    /// Writes staged draft text. A failure keeps the text and reports it.
     func persist() {
-        guard storageError.isEmpty else { return }
+        draftWrite?.cancel(); draftWrite = nil
+        guard draftDirty, storageReady else { return }
+        draftDirty = false
+        owner.record { _ in }
+    }
+
+    /// Explicit retry after a save failure; storage only, never the stopped run.
+    func retryStorage() {
         do {
-            let data = try HistoryMigration.encode(HistoryFile(selectedID: selectedID, sessions: sessions, deletedSessions: deletedSessions))
-            try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch { storageError = "历史保存失败：\(error.localizedDescription)" }
+            if let recovered = unsavedRecovery {
+                try owner.flushReplacing(recovered)
+                unsavedRecovery = nil
+            } else {
+                try owner.flush()
+            }
+            notice = ""
+            cleanupAttachments()
+        } catch { notice = "仍无法保存：\(error.localizedDescription)" }
     }
-    func edit(_ id: UUID, _ change: (inout ChatSession) -> Void) {
-        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
-        change(&sessions[index]); sessions[index].updatedAt = Date()
+
+    /// Explicit reset of an unreadable assistant-v1 file: the file is moved
+    /// aside (kept) and a fresh empty primary line starts. Other namespaces
+    /// and device settings are untouched.
+    func resetUnreadableStorage() {
+        guard canResetStorage else { return }
+        do {
+            _ = try storage.quarantine()
+            try owner.reset(to: .initial(selection: providers.defaultSelection))
+            notice = "无法读取的历史文件已移到同一目录保留；已开始新的助理数据。"
+        } catch { notice = "重置失败：\(error.localizedDescription)" }
     }
+
+    /// Storage became dirty: stop every active turn at its next boundary.
+    /// Already issued effects keep their real or unknown results; nothing resumes on its own.
+    private func storageFailed(_ error: StorageCommitError) {
+        for job in jobs.values where !job.cancelled {
+            job.cancelled = true; job.ready = false
+        }
+        if engine.busy { engine.cancel() }
+        notice = error.localizedDescription
+    }
+
+    /// One transactional user edit; reports a failure instead of publishing.
+    @discardableResult
+    func transact(_ edit: (inout HistoryFile) throws -> Void) -> Bool {
+        do { try owner.transact(edit); return true }
+        catch { notice = error.localizedDescription; return false }
+    }
+
+    // MARK: Sessions
+
     func setDraft(_ text: String) {
-        guard let id = selectedID else { return }
+        guard let id = selectedID, storageReady else { return }
         if sessions.first(where: { $0.id == id })?.draft != text { noteDraftEdit(id) }
-        edit(id) { $0.draft = text }
+        owner.stage { try? $0.editSession(id) { $0.draft = text } }
+        draftDirty = true
         draftWrite?.cancel()
         draftWrite = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             self?.persist()
         }
     }
+
+    /// A new independent task conversation.
     func newSession() {
-        guard storageError.isEmpty else { return }
         let session = ChatSession(selection: providers.defaultSelection)
-        sessions.insert(session, at: 0); selectedID = session.id; notice = ""; persist()
+        if transact({ $0.sessions.insert(session, at: 0); $0.selectedID = session.id }) { notice = "" }
     }
-    func select(_ id: UUID) { selectedID = id; notice = ""; persist() }
+
+    func selectPrimary() { if let primary = owner.file.primary { select(primary.id) } }
+
+    func select(_ id: UUID) {
+        persist()
+        if transact({ $0.selectedID = id }) { notice = "" }
+    }
+
     func rename(_ id: UUID, to title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        edit(id) { $0.title = String(title.prefix(60)); $0.metadataUpdatedAt = Date() }; persist()
+        transact { try $0.editSession(id) { $0.title = String(title.prefix(60)); $0.metadataUpdatedAt = Date() } }
     }
+
     /// Affects only turns enqueued afterwards.
     func setSelection(_ selection: ModelSelection, for id: UUID) {
-        edit(id) {
-            $0.selection = selection; $0.metadataUpdatedAt = Date()
-            if $0.state == .failed { $0.detail = "" }
+        transact {
+            try $0.editSession(id) {
+                $0.selection = selection; $0.metadataUpdatedAt = Date()
+                if $0.state == .failed { $0.detail = "" }
+            }
         }
-        persist()
     }
+
     /// Affects only turns enqueued afterwards.
     func setWorkspace(_ workspace: UUID?, for id: UUID) {
-        edit(id) { $0.workspaceID = workspace; if $0.state == .failed { $0.detail = "" } }
-        persist()
+        transact { try $0.editSession(id) { $0.workspaceID = workspace; if $0.state == .failed { $0.detail = "" } } }
     }
-    /// Whether a queued or running turn froze this project.
-    func workspaceInUse(_ id: UUID) -> Bool { jobs.values.contains { $0.workspace?.id == id } }
+
+    /// Whether a queued or running turn, or the pending request, froze this project.
+    func workspaceInUse(_ id: UUID) -> Bool {
+        jobs.values.contains { $0.workspace?.id == id } || pendingFrozen?.workspace?.id == id
+            || owner.file.assistant.pendingNext?.workspaceID == id
+    }
+
+    /// The primary line and sessions with jobs or the pending request cannot be deleted.
+    func canDelete(_ id: UUID) -> Bool {
+        id != primaryID && jobs[id] == nil && owner.file.assistant.pendingNext?.sessionID != id
+    }
 
     func delete(_ id: UUID) {
-        guard jobs[id] == nil, storageError.isEmpty else { return }
-        sessions.removeAll { $0.id == id }
-        deletedSessions.removeAll { $0.id == id }
-        deletedSessions.append(Tombstone(id: id, deletedAt: Date()))
+        guard canDelete(id), storageReady else { return }
+        let ok = transact { try $0.deleteSession(id) }
+        guard ok else { return }
         statuses[id] = nil
         imports = imports.filter { $0.value.sessionID != id }
-        if sessions.isEmpty { sessions = [ChatSession(selection: providers.defaultSelection)] }
-        if selectedID == id { selectedID = sessions.first?.id }
-        persist()
         cleanupAttachments()
-    }
-    /// Applies a merged sync snapshot; returns how many sessions were deferred.
-    func applySync(merged: PortableSnapshot, base: PortableSnapshot, deferred: Set<UUID>) -> Int {
-        guard storageError.isEmpty else { return 0 }
-        let result = SyncApplication.sessions(sessions, tombstones: deletedSessions, merged: merged, base: base, deferred: deferred)
-        sessions = result.sessions
-        deletedSessions = result.tombstones
-        if let id = selectedID, let replacement = result.replaced[id] { selectedID = replacement }
-        if sessions.isEmpty { sessions = [ChatSession(selection: providers.defaultSelection)] }
-        if !sessions.contains(where: { $0.id == selectedID }) { selectedID = sessions.first?.id }
-        persist()
-        cleanupAttachments()
-        return result.deferred
     }
 
     // MARK: Attachments
@@ -265,7 +416,7 @@ final class ChatController: ObservableObject {
     /// Reserves draft capacity before any image is read, so send stays
     /// disabled and concurrent imports cannot exceed the per-message limit.
     func reserveImport(_ requested: Int, into id: UUID) -> ImportTicket? {
-        guard storageError.isEmpty, requested > 0, sessions.contains(where: { $0.id == id }) else { return nil }
+        guard storageReady, requested > 0, sessions.contains(where: { $0.id == id }) else { return nil }
         let room = importRoom(id)
         guard room > 0 else { notice = AttachmentError.tooMany.localizedDescription; return nil }
         notice = requested > room ? AttachmentError.tooMany.localizedDescription : ""
@@ -313,13 +464,12 @@ final class ChatController: ObservableObject {
 
     private func finishImport(_ ticket: ImportTicket, stored: [ChatAttachment], errors: [String], ids: [UUID]) {
         let active = imports.removeValue(forKey: ticket.id) != nil
-        pendingAttachmentIDs.subtract(ids)
         if active, let session = sessions.first(where: { $0.id == ticket.sessionID }) {
             let keep = AttachmentCapacity.accepted(incoming: stored.count, committed: session.draftAttachments.count)
-            edit(ticket.sessionID) { $0.draftAttachments += stored.prefix(keep) }
-            persist()
+            transact { try $0.editSession(ticket.sessionID) { $0.draftAttachments += stored.prefix(keep) } }
             if keep < stored.count { notice = AttachmentError.tooMany.localizedDescription }
         }
+        pendingAttachmentIDs.subtract(ids)
         if active, let first = errors.first { notice = errors.count > 1 ? "\(errors.count) 张图片未添加：\(first)" : first }
         cleanupAttachments() // removes files of cancelled, overflowing or orphaned imports
     }
@@ -329,235 +479,49 @@ final class ChatController: ObservableObject {
     func removeDraftAttachment(_ attachmentID: UUID) {
         guard let id = selectedID else { return }
         noteDraftEdit(id)
-        edit(id) { $0.draftAttachments.removeAll { $0.id == attachmentID } }
-        persist()
+        transact { try $0.editSession(id) { $0.draftAttachments.removeAll { $0.id == attachmentID } } }
         cleanupAttachments()
     }
 
-    /// Deletes files nothing references: no message, draft, accepted turn or
-    /// in-progress import. Conflict copies share IDs, so their images stay.
+    /// Deletes files nothing references now: no message, draft, pending
+    /// request, accepted turn, steering lease or in-progress import. Always
+    /// recomputed from current state, never from an older snapshot.
     func cleanupAttachments() {
-        guard storageError.isEmpty else { return }
-        var keep = pendingAttachmentIDs
-        for session in sessions { keep.formUnion(session.referencedAttachmentIDs) }
+        guard storageReady else { return }
+        var keep = pendingAttachmentIDs.union(owner.file.referencedAttachmentIDs)
         for job in jobs.values { keep.formUnion(job.referencedAttachmentIDs) }
         attachmentFiles.removeUnreferenced(keeping: keep)
     }
 
-    // MARK: Turns
+    // MARK: Sync
 
-    // Event order is authoritative. A tool event is consumed after a later
-    // assistant may already have its timestamp; sorting dates breaks call/result adjacency.
-    private func append(_ message: AgentTranscriptMessage, to id: UUID, before pending: Set<UUID> = [], attribution: String? = nil) {
-        let message = ChatSession.forHistory(message)
-        edit(id) { session in
-            if let index = session.messages.firstIndex(where: { $0.id == message.id }) { session.messages[index] = message }
-            else {
-                let index = session.messages.firstIndex { pending.contains($0.id) } ?? session.messages.endIndex
-                session.messages.insert(message, at: index)
-            }
-            if let attribution { session.attributions[message.id.uuidString] = attribution }
-        }
-        persist()
+    /// Sessions that must not be overwritten by a sync round right now.
+    var syncDeferred: Set<UUID> {
+        var ids = Set(jobs.keys)
+        if let pending = owner.file.assistant.pendingNext { ids.insert(pending.sessionID) }
+        return ids
     }
 
-    /// `textOnly` is the user's explicit choice after a text-only model
-    /// warning: the text is sent and the images stay in the draft.
-    func send(textOnly: Bool = false) {
-        guard canSend, let session = selected else { return }
-        let text = session.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = textOnly ? [] : session.draftAttachments
-        if textOnly, text.isEmpty { return }
-        notice = ""
-        if let job = jobs[session.id] { steer(job, session: session, text: text, images: images); return }
-        // Capture provider, endpoint, format, model, capability and key now.
-        let config: RunConfiguration
-        do { config = try providers.configuration(for: session.selection) }
-        catch { edit(session.id) { $0.detail = error.localizedDescription }; persist(); return }
-        switch ImageCapability.check(supportsImages: config.supportsImages, hasText: !text.isEmpty, imageCount: images.count) {
-        case .ok: break
-        case .warnDropImages, .blockImageOnly:
-            imageWarning = ImageWarning(sessionID: session.id, modelLabel: config.label,
-                                        verdict: ImageCapability.check(supportsImages: false, hasText: !text.isEmpty,
-                                                                       imageCount: images.count))
-            return
+    /// Applies a merged sync snapshot from the latest complete local file;
+    /// returns how many sessions were deferred. The deferred set is checked
+    /// again here, so work accepted while the round was in flight is kept.
+    func applySync(merged: PortableSnapshot, base: PortableSnapshot, deferred: Set<UUID>) -> Int {
+        guard storageReady else { return 0 }
+        let deferred = deferred.union(syncDeferred)
+        var skipped = 0
+        let ok = transact { file in
+            skipped = try file.applyPortable(merged: merged, base: base, deferred: deferred)
         }
-        guard images.allSatisfy(attachmentFiles.exists) else { notice = AttachmentError.missingFile.localizedDescription; return }
-        // A selected project that no longer exists is an explicit problem, never a silent fallback.
-        var workspace: WorkspaceSnapshot?
-        if let id = session.workspaceID {
-            guard let snapshot = workspaces.snapshot(id) else {
-                notice = "本会话选择的项目已不存在；请重新选择项目或选择“不使用项目”。"; return
-            }
-            workspace = snapshot
-        }
-        let message = AgentTranscriptMessage(role: .user, text: text)
-        let job = ChatJob(session: session, prompt: message, attachments: images, config: config, workspace: workspace,
-                          revision: draftRevisions[session.id, default: 0])
-        // `session.draft` is the raw text, restored verbatim if the turn never starts.
-        jobs[session.id] = job
-        statuses[session.id] = nil
-        if !images.isEmpty { edit(session.id) { $0.attachments[message.id.uuidString] = images } }
-        append(message, to: session.id)
-        edit(session.id) {
-            $0.draft = ""; $0.detail = ""; $0.state = .queued
-            if !textOnly { $0.draftAttachments = [] }
-            if $0.title == ChatSession.defaultTitle { $0.title = text.isEmpty ? "图片" : String(text.prefix(20)) }
-        }
-        persist()
-        queuedPhone.append(job); drainPhone()
-    }
-
-    private func steer(_ job: ChatJob, session: ChatSession, text: String, images: [ChatAttachment]) {
-        guard let runtime = engine.activeAgentRuntime else { return }
-        if !images.isEmpty, !job.config.supportsImages {
-            notice = "本轮模型 \(job.config.label) 不接收图片；图片保留在草稿中，可移除后追加文字，或在本轮结束后换用支持图片的模型。"
-            return
-        }
-        let hydrated: [AgentImageAttachment]
-        do { hydrated = try AttachmentHydration.images(images, load: attachmentFiles.data) }
-        catch { notice = error.localizedDescription; return }
-        let message = AgentTranscriptMessage(role: .user, text: text, images: hydrated)
-        job.steeringInFlight = true
-        edit(session.id) { $0.detail = "正在追加指令。" }
-        Task {
-            defer { job.steeringInFlight = false; objectWillChange.send() }
-            if await runtime.steer(message) {
-                if !images.isEmpty { edit(session.id) { $0.attachments[message.id.uuidString] = images } }
-                // A delivered event may arrive before steer returns. Keep its delivery timestamp.
-                if !sessions.contains(where: { $0.id == session.id && $0.messages.contains(where: { $0.id == message.id }) }) {
-                    job.pendingSteering.insert(message.id)
-                    append(message, to: session.id)
-                }
-                let sent = Set(images.map(\.id))
-                edit(session.id) {
-                    if $0.draft == session.draft { $0.draft = "" }
-                    $0.draftAttachments.removeAll { sent.contains($0.id) }
-                    $0.detail = "追加指令将在下一轮进入模型上下文。"
-                }
-                persist()
-            } else {
-                // The run crossed its final boundary; keep the draft for a new turn.
-                edit(session.id) { $0.detail = "本轮已结束，请再次发送以开始下一轮。" }; persist()
-            }
-        }
-    }
-
-    func cancel(_ id: UUID) {
-        guard let job = jobs[id] else { return }
-        job.cancelled = true; job.ready = false
-        edit(id) { $0.state = .cancelling }; persist()
-        if queuedPhone.contains(where: { $0 === job }) {
-            queuedPhone.removeAll { $0 === job }
-            let restored = restoreDraft(job)
-            var status = ExecutionStatus(modelLabel: job.config.label)
-            status.finish(successful: false, cancelled: true)
-            statuses[id] = status
-            finish(job, state: .interrupted, detail: "已取消排队任务。" + DraftRestore.note(restored: restored))
-        } else { engine.cancel() }
-    }
-    private func drainPhone() {
-        guard foreground, !engine.busy, phoneSessionID == nil, !queuedPhone.isEmpty else { return }
-        let job = queuedPhone.removeFirst()
-        guard !job.cancelled else { drainPhone(); return }
-        func fail(_ message: String) {
-            var status = ExecutionStatus(modelLabel: job.config.label)
-            status.finish(successful: false, cancelled: false)
-            statuses[job.sessionID] = status
-            let restored = restoreDraft(job)
-            finish(job, state: .failed, detail: message + DraftRestore.note(restored: restored))
-            drainPhone()
-        }
-        // The frozen project must still exist; it is never swapped for another.
-        if let workspace = job.workspace, workspaces.snapshot(workspace.id)?.root != workspace.root {
-            fail("本轮选择的项目已不存在，任务未开始。"); return
-        }
-        // Image bytes are read only now, from the frozen references.
-        let promptImages: [AgentImageAttachment]
-        do { promptImages = try AttachmentHydration.images(job.promptAttachments, load: attachmentFiles.data) }
-        catch { fail(error.localizedDescription); return }
-        let prior = AttachmentHydration.context(job.prior, attachments: job.priorAttachments,
-                                                supportsImages: job.config.supportsImages, load: attachmentFiles.data)
-        phoneSessionID = job.sessionID
-        statuses[job.sessionID] = ExecutionStatus(modelLabel: job.config.label)
-        edit(job.sessionID) { $0.state = .running; $0.detail = "" }; persist()
-        engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, workspace: job.workspace, backend: job.phoneBackend,
-            clipboardAllowed: job.clipboardAllowed,
-            conversationID: job.sessionID, promptID: job.prompt.id, priorMessages: prior,
-            onEvent: { [weak self, weak job] event, status in
-                guard let self, let job else { return }; handle(event, status: status, job: job)
-            }, onStatus: { [weak self, weak job] status in
-                // Script phone actions update progress only; they add no transcript message.
-                guard let self, let job, jobs[job.sessionID] === job else { return }
-                statuses[job.sessionID] = status
-            }, onFinished: { [weak self, weak job] successful, cleanupWarning, status in
-                guard let self, let job else { return }
-                phoneSessionID = nil
-                if jobs[job.sessionID] === job { statuses[job.sessionID] = status }
-                // A turn that failed before AgentKit started gets its draft back.
-                let restored = !successful && jobs[job.sessionID] === job && restoreDraft(job)
-                let reason = ((status.failure.map { "原因：\($0)" } ?? "") + DraftRestore.note(restored: restored))
-                    .trimmingCharacters(in: .whitespaces)
-                finish(job, state: successful ? .completed : (job.cancelled ? .interrupted : .failed),
-                    detail: ([successful ? "" : (job.cancelled ? "已取消。" : "本轮未完成，请重试。"),
-                              successful || job.cancelled ? "" : reason, cleanupWarning].filter { !$0.isEmpty }).joined(separator: " "))
-                // The previous runner and BG task have completed before draining.
-                Task { @MainActor [weak self] in self?.drainPhone() }
-            })
-    }
-    private func handle(_ event: AgentEvent, status: ExecutionStatus, job: ChatJob) {
-        guard jobs[job.sessionID] === job else { return }
-        statuses[job.sessionID] = status
-        switch event {
-        case .runStarted: job.ready = true; job.started = true
-        case .messageStarted(let message): job.partial = message; live[job.sessionID] = message
-        case .messageDelta(let id, let text):
-            if job.partial?.id == id { job.partial?.text += text; live[job.sessionID] = job.partial }
-        case .reasoningDelta(let id, let text):
-            // Provider-supplied reasoning only; nothing is synthesized locally.
-            if var partial = job.partial, partial.id == id {
-                if partial.reasoning.isEmpty { partial.reasoning = [AgentReasoningBlock(text: "")] }
-                partial.reasoning[partial.reasoning.count - 1].text += text
-                job.partial = partial; live[job.sessionID] = partial
-            }
-        case .messageFinished(let message):
-            append(message, to: job.sessionID, before: job.pendingSteering,
-                   attribution: message.role == .assistant ? job.config.label : nil)
-            job.partial = nil; live[job.sessionID] = nil
-        case .steeringDelivered(let message):
-            job.pendingSteering.remove(message.id)
-            edit(job.sessionID) { $0.messages.removeAll { $0.id == message.id } }
-            append(message, to: job.sessionID, before: job.pendingSteering)
-        case .modelRetryScheduled:
-            // Discard the abandoned attempt's transient text and reasoning.
-            job.partial = nil; live[job.sessionID] = nil
-        case .toolFinished(let invocation, let result):
-            if !result.isProviderNative {
-                append(AgentTranscriptMessage(id: AgentTranscriptMessage.toolResultID(runID: invocation.runID, callID: result.callID),
-                    role: .tool, text: result.content, toolCallID: result.callID,
-                    toolName: invocation.call.name, isError: result.isError, modelText: result.modelContent),
-                    to: job.sessionID, before: job.pendingSteering)
-            }
-        case .runFinished:
-            job.terminal = true; job.ready = false
-        default: break
-        }
-    }
-    /// True only when the untouched composer actually got its draft back.
-    private func restoreDraft(_ job: ChatJob) -> Bool {
-        guard var session = sessions.first(where: { $0.id == job.sessionID }),
-              DraftRestore.apply(job.draft, to: &session, started: job.started,
-                                 currentRevision: draftRevisions[job.sessionID, default: 0]) else { return false }
-        edit(job.sessionID) { $0.draft = session.draft; $0.draftAttachments = session.draftAttachments }
-        persist()
-        return true
-    }
-
-    private func finish(_ job: ChatJob, state: ChatState, detail: String) {
-        guard jobs[job.sessionID] === job else { return }
-        jobs[job.sessionID] = nil; live[job.sessionID] = nil
-        edit(job.sessionID) { $0.state = state; $0.detail = String(detail.prefix(600)) }; persist()
+        guard ok else { return 0 }
         cleanupAttachments()
-        if jobs.isEmpty, let onIdle { self.onIdle = nil; onIdle() }
+        return skipped
+    }
+}
+
+extension HistoryOwner {
+    /// Draft keystrokes: applied in memory and written by the next record or
+    /// transaction (debounced). Not used for run events or user operations.
+    func stage(_ edit: (inout HistoryFile) -> Void) {
+        replaceInMemory { edit(&$0) }
     }
 }

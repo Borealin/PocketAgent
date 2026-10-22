@@ -1,12 +1,12 @@
 {
-  "originHash" : "ba3f707825e34f41431e00c8913431c92e3ef1eb3d790ae380dcfbef1f42b9ac",
+  "originHash" : "d1a2bae55c88a0e6481884468465133aae82f8d93e8513df3b1f63f22bc1f191",
   "pins" : [
     {
       "identity" : "agentkit",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/AkinoKaede/AgentKit.git",
+      "location" : "https://github.com/Borealin/AgentKit.git",
       "state" : {
-        "revision" : "8108c9bb87c546860cfc1769571e115af919fe8a"
+        "revision" : "e1c81c911564c39d5f78ccec6808ba96c1acd2e8"
       }
     },
     {

@@ -36,8 +36,8 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         self.attachments = attachments
     }
 
-    // Omits `attachments` when empty so attachment-free messages keep their
-    // canonical bytes and therefore their derived conflict-copy IDs.
+    // assistant-v1 portable message: every key is required; nullable values
+    // are written as explicit null and `attachments` is always present.
     private enum CodingKeys: String, CodingKey {
         case id, role, text, toolCalls, toolCallID, toolName, isError, modelText, createdAtMs, attribution, attachments
     }
@@ -47,13 +47,13 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         role = try c.decode(AgentTranscriptRole.self, forKey: .role)
         text = try c.decode(String.self, forKey: .text)
         toolCalls = try c.decode([PortableToolCall].self, forKey: .toolCalls)
-        toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
-        toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+        toolCallID = try c.nullable(String.self, .toolCallID)
+        toolName = try c.nullable(String.self, .toolName)
         isError = try c.decode(Bool.self, forKey: .isError)
-        modelText = try c.decodeIfPresent(String.self, forKey: .modelText)
+        modelText = try c.nullable(String.self, .modelText)
         createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
-        attribution = try c.decodeIfPresent(String.self, forKey: .attribution)
-        attachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
+        attribution = try c.nullable(String.self, .attribution)
+        attachments = try c.decode([ChatAttachment].self, forKey: .attachments)
     }
     func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -61,13 +61,13 @@ nonisolated struct PortableMessage: Hashable, Codable, Sendable {
         try c.encode(role, forKey: .role)
         try c.encode(text, forKey: .text)
         try c.encode(toolCalls, forKey: .toolCalls)
-        try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
-        try c.encodeIfPresent(toolName, forKey: .toolName)
+        try c.encode(toolCallID, forKey: .toolCallID)
+        try c.encode(toolName, forKey: .toolName)
         try c.encode(isError, forKey: .isError)
-        try c.encodeIfPresent(modelText, forKey: .modelText)
+        try c.encode(modelText, forKey: .modelText)
         try c.encode(createdAtMs, forKey: .createdAtMs)
-        try c.encodeIfPresent(attribution, forKey: .attribution)
-        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
+        try c.encode(attribution, forKey: .attribution)
+        try c.encode(attachments, forKey: .attachments)
     }
 
     var transcript: AgentTranscriptMessage {
@@ -104,6 +104,24 @@ nonisolated struct PortableSession: Hashable, Codable, Sendable, Identifiable {
         self.id = id; self.title = title; self.selection = selection
         self.metadataUpdatedMs = metadataUpdatedMs; self.messages = messages; self.conflictOf = conflictOf
     }
+
+    // Required keys; `selection` and `conflictOf` are explicit nulls when absent.
+    private enum CodingKeys: String, CodingKey { case id, title, selection, metadataUpdatedMs, messages, conflictOf }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        selection = try c.nullable(ModelSelection.self, .selection)
+        metadataUpdatedMs = try c.decode(Int64.self, forKey: .metadataUpdatedMs)
+        messages = try c.decode([PortableMessage].self, forKey: .messages)
+        conflictOf = try c.nullable(UUID.self, .conflictOf)
+    }
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(title, forKey: .title); try c.encode(selection, forKey: .selection)
+        try c.encode(metadataUpdatedMs, forKey: .metadataUpdatedMs); try c.encode(messages, forKey: .messages)
+        try c.encode(conflictOf, forKey: .conflictOf)
+    }
 }
 
 nonisolated struct PortableProvider: Hashable, Codable, Sendable, Identifiable {
@@ -136,7 +154,10 @@ nonisolated struct PortableTombstone: Hashable, Codable, Sendable {
 }
 
 nonisolated struct PortableSnapshot: Hashable, Codable, Sendable {
+    /// assistant-v1 envelope: other generations are reported, never converted or merged.
+    static let generationTag = HistoryFile.generationTag
     static let currentSchema = 1
+    var generation = PortableSnapshot.generationTag
     var schemaVersion = PortableSnapshot.currentSchema
     var sessions: [PortableSession] = []
     var providers: [PortableProvider] = []
@@ -168,12 +189,14 @@ nonisolated enum PortableTime {
 nonisolated enum SyncError: LocalizedError, Equatable {
     case unreadable(String)
     case newerVersion(Int)
+    case unsupportedGeneration(String)
     case invalidContent(String)
     case notDownloaded
     var errorDescription: String? {
         switch self {
         case .unreadable(let detail): "同步文件无法读取，未覆盖：\(detail)"
         case .newerVersion(let version): "同步文件版本 \(version) 较新，请先更新 App；未覆盖。"
+        case .unsupportedGeneration(let generation): "同步文件格式 \(generation) 不受本版本支持；未合并、未覆盖。"
         case .invalidContent(let detail): "同步文件内容无效，未覆盖：\(detail)"
         case .notDownloaded: "同步文件尚未从 iCloud 下载完成，请稍后重试；未覆盖。"
         }
@@ -187,6 +210,8 @@ nonisolated enum PortableCodec {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw SyncError.unreadable("不是 JSON 对象")
         }
+        guard let generation = root["generation"] as? String else { throw SyncError.unsupportedGeneration("缺少 generation") }
+        guard generation == PortableSnapshot.generationTag else { throw SyncError.unsupportedGeneration(generation) }
         guard let version = root["schemaVersion"] as? Int else { throw SyncError.unreadable("缺少 schemaVersion") }
         guard version <= PortableSnapshot.currentSchema else { throw SyncError.newerVersion(version) }
         guard version == PortableSnapshot.currentSchema else { throw SyncError.unreadable("未知版本 \(version)") }

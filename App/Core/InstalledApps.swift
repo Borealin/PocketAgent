@@ -73,12 +73,17 @@ nonisolated enum InstalledApps {
 /// Read-only recovery can replace a stale screen; it must never replay an action.
 nonisolated enum PhoneObservationIssue: Error, LocalizedError {
     case foregroundChanged, staleSnapshot, nodeChanged, geometryChanged
+    /// Refused before any touch: the point is not confirmed to belong to the
+    /// app of the snapshot observed for it (no current snapshot, another
+    /// foreground, or UI of another process at or around the point).
+    case targetCovered
     var code: String {
         switch self {
         case .foregroundChanged: "foreground_changed"
         case .staleSnapshot: "stale_snapshot"
         case .nodeChanged: "node_changed"
         case .geometryChanged: "geometry_changed"
+        case .targetCovered: "target_covered"
         }
     }
     var errorDescription: String? {
@@ -87,6 +92,7 @@ nonisolated enum PhoneObservationIssue: Error, LocalizedError {
         case .staleSnapshot: "屏幕引用已过期。"
         case .nodeChanged: "目标元素已移动、消失或不可用。"
         case .geometryChanged: "屏幕方向或尺寸已变化。"
+        case .targetCovered: "目标位置无法确认属于刚观察的 App（可能被其他进程的界面覆盖，如键盘建议栏），未点击。"
         }
     }
 }

@@ -4,6 +4,8 @@ import Foundation
 /// What a tool touches; drives progress display and policy.
 nonisolated enum ToolKind: String, Hashable, Sendable {
     case phone, file, context, network, script
+    /// Read-only memory/history search of the primary line; never a phone action.
+    case memory
 }
 
 /// Capabilities actually available to one accepted turn.
@@ -16,6 +18,8 @@ nonisolated struct ToolCapabilities: Hashable, Sendable {
     var skills = false
     var phoneBackend = PhoneBackendKind.ddi
     var clipboardAllowed = true
+    /// Primary line: read-only memory_search/session_search are registered.
+    var memory = false
 }
 
 nonisolated enum ToolDecision: Equatable, Sendable {
@@ -113,7 +117,17 @@ nonisolated enum ToolCatalog {
                      "args": .object(["type": .string("array"), "items": string]), "cwd": string, "timeout_seconds": number],
         required: ["language"])
 
-    static let all: [ToolSpec] = phoneTools + fileTools + [skillTool, httpTool, scriptTool]
+    /// Policy and progress entries for AgentKit's native read-only memory
+    /// tools. Their executable definitions come from AgentKit
+    /// (MemorySearchTool/SessionSearchTool); the write tool is never registered.
+    static let memoryTools: [ToolSpec] = [
+        ToolSpec(name: "memory_search", kind: .memory, summary: "Search memories the user explicitly saved.",
+                 properties: ["query": string], required: ["query"]),
+        ToolSpec(name: "session_search", kind: .memory, summary: "Search same-scope history or user-referenced history.",
+                 properties: ["query": string], required: []),
+    ]
+
+    static let all: [ToolSpec] = phoneTools + fileTools + [skillTool, httpTool, scriptTool] + memoryTools
 
     static func spec(_ name: String) -> ToolSpec? { all.first { $0.name == name } }
     static func kind(of name: String) -> ToolKind? { spec(name)?.kind }
@@ -131,6 +145,7 @@ nonisolated enum ToolCatalog {
         case .phone, .network: return .allow
         case .file: return capabilities.workspace ? .allow : .deny("本会话未选择项目目录。")
         case .context: return capabilities.skills ? .allow : .deny("没有可用技能。")
+        case .memory: return capabilities.memory ? .allow : .deny("记忆检索只在“你的助理”中可用。")
         case .script:
             guard capabilities.workspace else { return .deny("运行脚本需要先为会话选择项目目录。") }
             return capabilities.scripts ? .allow : .deny("此版本未包含脚本运行环境。")
@@ -171,6 +186,9 @@ nonisolated enum ToolCatalog {
             """)
         }
         if capabilities.skills { lines.append("- 技能：read_skill 读取下方列出的技能全文。") }
+        if capabilities.memory {
+            lines.append("- 记忆与历史（只读）：memory_search 检索用户明确保存的记忆；session_search 检索当前范围内已结束的对话或用户明确引用的历史。你不能写入、修改或删除记忆；用户想保存时，请提示使用“记住：”命令或记忆面板。")
+        }
         return lines.joined(separator: "\n")
     }
 }
@@ -214,10 +232,12 @@ nonisolated enum AgentInstructions {
         """
     }
 
+    /// `memorySlot` sits after the capability section and before user rules;
+    /// the primary line replaces it with fresh reference memory per request.
     static func systemPrompt(assistantBundleID: String, capabilities: ToolCapabilities,
-                             workspaceName: String?, rules: RulesContext) -> String {
+                             workspaceName: String?, rules: RulesContext, memorySlot: String? = nil) -> String {
         [phone(assistantBundleID: assistantBundleID), ToolCatalog.prompt(capabilities, workspaceName: workspaceName),
-         rules.prompt(workspaceName: workspaceName)].filter { !$0.isEmpty }.joined(separator: "\n\n")
+         memorySlot ?? "", rules.prompt(workspaceName: workspaceName)].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 }
 

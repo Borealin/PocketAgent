@@ -1,9 +1,103 @@
 import Foundation
 
-nonisolated enum PhoneBackendKind: String, CaseIterable, Sendable {
+nonisolated enum PhoneBackendKind: String, CaseIterable, Codable, Sendable {
     case ddi, wda
     static let defaultBackend = PhoneBackendKind.ddi
     var label: String { self == .ddi ? "DDI" : "WDA" }
+}
+
+/// Effects of one phone tool call: the requested action and any executor
+/// preparation gesture sent while observing for it (the task-surface swipe on
+/// Dynamic Island layouts). A refusal before the requested touch restores only
+/// the action flag; a preparation gesture stays reported in every outcome,
+/// including cancellation and failed observation, unless its own operation
+/// provably sent nothing.
+nonisolated struct PhoneCallEffects: Equatable, Sendable {
+    private(set) var action = false
+    private(set) var preparation = false
+    var issued: Bool { action || preparation }
+
+    /// Marks the requested action as sent; returns the previous action flag.
+    mutating func beginAction() -> Bool {
+        defer { action = true }
+        return action
+    }
+    mutating func refusedBeforeTouch(restoring previous: Bool) { action = previous }
+    /// Called before the gesture is sent: a failed send may still have touched.
+    mutating func preparationSent() { preparation = true }
+
+    /// An effect operation failed. Only a refusal proven to precede anything
+    /// it could have sent restores the action flag: a native refusal before
+    /// any touch, or a failure `sentNothing` accepts. Preparation stays
+    /// reported either way.
+    mutating func settle(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int,
+                         native: NativeEffectReports = NativeEffectReports()) {
+        if case PhoneObservationIssue.targetCovered = error { action = previous; return }
+        if Self.sentNothing(error, dispatchedDuringOperation: dispatchedDuringOperation, native: native) { action = previous }
+    }
+
+    /// The preparation gesture's own operation failed: it is unreported only
+    /// when `sentNothing` accepts the failure, as for an action. An earlier
+    /// sent preparation (`previous`) and the action flag stay reported.
+    mutating func settlePreparation(after error: any Error, restoring previous: Bool, dispatchedDuringOperation: Int,
+                                    native: NativeEffectReports) {
+        if Self.sentNothing(error, dispatchedDuringOperation: dispatchedDuringOperation, native: native) { preparation = previous }
+    }
+
+    /// A failed operation provably sent nothing: a typed refusal before
+    /// dispatch when no native call of the operation was dispatched at all, or
+    /// a DDI refusal whose native calls in the operation all reported that no
+    /// effect had started (`native`, the reports of this operation only). A
+    /// composite operation whose earlier call acted, a timeout, a cancellation
+    /// or any failure without such proof may follow a sent effect.
+    private static func sentNothing(_ error: any Error, dispatchedDuringOperation: Int, native: NativeEffectReports) -> Bool {
+        (error is PhoneCallNotDispatched && dispatchedDuringOperation == 0) || native.provenUnsent
+    }
+}
+
+/// What DDI native calls reported about effects, counted per call (WDA reports
+/// nothing). `possible`: calls in which an effect started, or could not be
+/// ruled out (an error without metadata, a malformed result). `refused`:
+/// failed calls whose native metadata says no effect had started.
+nonisolated struct NativeEffectReports: Equatable, Sendable {
+    var possible = 0
+    var refused = 0
+
+    /// A refusal, and no call that could have acted.
+    var provenUnsent: Bool { refused > 0 && possible == 0 }
+
+    /// A native call that returned a result: a failure is decoded and
+    /// counted by its metadata (and returned to be thrown), a success that
+    /// reports an effect, or omits the flag, counts as possible. A result
+    /// whose metadata is malformed counts as possible and throws.
+    mutating func record(result object: [String: Any]) throws -> DDIOperationFailure? {
+        let failure: DDIOperationFailure?
+        do { failure = try DDIOperationFailure.decode(object) } catch { possible += 1; throw error }
+        if let failure { record(failure) }
+        else if DDIOperationFailure.flag(object["action_issued"]) != false { possible += 1 }
+        return failure
+    }
+    mutating func record(_ failure: DDIOperationFailure) {
+        if failure.actionIssued { possible += 1 } else { refused += 1 }
+    }
+
+    static func - (lhs: Self, rhs: Self) -> Self {
+        Self(possible: lhs.possible - rhs.possible, refused: lhs.refused - rhs.refused)
+    }
+}
+
+/// A phone call refused before it was handed to the device: not enough of the
+/// turn is left for the call and its cleanup, or native code refused the
+/// expiry at entry. Nothing of this call was sent.
+nonisolated struct PhoneCallNotDispatched: LocalizedError, Equatable {
+    var reason: String
+    var errorDescription: String? { reason }
+    static let insufficientTime = PhoneCallNotDispatched(reason: "本轮剩余时间不足以安全执行手机操作；未执行。")
+}
+
+nonisolated enum DDIResultError: LocalizedError, Equatable {
+    case outsideCount
+    var errorDescription: String? { "DDI 观察结果格式无效：缺少有效的应用外元素计数。" }
 }
 
 /// Normalize only device-reported AX semantics. AX role codes differ from
@@ -47,13 +141,30 @@ nonisolated enum DDINodeMapping {
         return a
     }
 
+    /// Elements on screen hosted by another process that the observation did
+    /// not read (native limit 32). Every DDI snapshot reports it; a missing,
+    /// boolean, fractional, non-finite or out-of-range count is a malformed
+    /// observation, never guessed.
+    static let outsideLimit = 32
+    static func outsideAppElements(_ result: [String: Any]) throws -> Int {
+        guard let number = result["outside_app_elements"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            throw DDIResultError.outsideCount
+        }
+        let value = number.doubleValue
+        guard value.isFinite, value == value.rounded(), (0...Double(outsideLimit)).contains(value) else {
+            throw DDIResultError.outsideCount
+        }
+        return Int(value)
+    }
+
     static func confirmsInput(_ node: [String: String], text: String) -> Bool {
         guard let value = node["value"] else { return false }
         let placeholder = node["placeholder"]
-        // An empty field can report its placeholder as AX value, e.g. after a
-        // refused paste; that value cannot confirm nonempty input.
+        // An empty field can report its placeholder as its value (for example
+        // after a paste that did not land): that cannot confirm nonempty text,
+        // even text equal to the placeholder.
         guard text.isEmpty else { return value == text && value != placeholder }
-        // Clear-only keeps its existing placeholder-or-empty confirmation.
-        return value == text || value == placeholder
+        // Clear-only keeps its empty-or-placeholder confirmation.
+        return value.isEmpty || value == placeholder
     }
 }

@@ -243,7 +243,12 @@ struct ToolRegistryTests {
         #expect(ToolCatalog.decision(for: "run_script", capabilities: ToolCapabilities(workspace: true)) != .allow)
         #expect(ToolCatalog.decision(for: "made_up", capabilities: ToolCapabilities(workspace: true, scripts: true, skills: true)) != .allow)
         let all = ToolCapabilities(workspace: true, scripts: true, skills: true)
-        #expect(ToolCatalog.available(all).count == ToolCatalog.all.count)
+        #expect(ToolCatalog.available(all).count == ToolCatalog.all.count - ToolCatalog.memoryTools.count)
+        // Read-only memory tools exist only on the primary line, never for scripts.
+        let primary = ToolCapabilities(workspace: true, scripts: true, skills: true, memory: true)
+        #expect(ToolCatalog.available(primary).count == ToolCatalog.all.count)
+        #expect(ToolCatalog.scriptDecision(for: "memory_search", capabilities: primary) != .allow)
+        #expect(ExecutionStatus.phase(for: "memory_search") == .memoryTool)
         #expect(!ToolCatalog.prompt(none, workspaceName: nil).contains("pocketagent-phone"))
         #expect(ToolCatalog.prompt(all, workspaceName: "P").contains("pocketagent-phone"))
         // A script may request phone tools only.
@@ -306,24 +311,20 @@ struct ScriptTranscriptTests {
 }
 
 struct ChatPreservationTests {
-    @Test func currentHistoryWithoutWorkspaceKeepsEverythingAndWorkspaceStaysLocal() throws {
+    @Test func currentHistoryKeepsWorkspaceLocallyAndOutOfPortableSync() throws {
         let user = AgentTranscriptMessage(role: .user, text: "读取提醒事项")
         let reply = AgentTranscriptMessage(role: .assistant, text: "好的")
-        let id = UUID(), provider = UUID()
-        let row: [String: Any] = ["id": id.uuidString, "title": "旅行", "messages": [
-            try JSONSerialization.jsonObject(with: JSONEncoder().encode(user)),
-            try JSONSerialization.jsonObject(with: JSONEncoder().encode(reply))],
-            "draft": "未发送", "state": "completed", "detail": "", "updatedAt": 10,
-            "selection": ["providerID": provider.uuidString, "modelID": "m1"],
-            "attributions": [reply.id.uuidString: "m1 · P"], "metadataUpdatedAt": 5]
-        let data = try JSONSerialization.data(withJSONObject: ["version": 3, "selectedID": id.uuidString, "sessions": [row]])
-        var file = try HistoryMigration.decode(data, legacySelection: nil)
-        #expect(file.sessions[0].workspaceID == nil)
-        #expect(file.sessions[0].messages == [user, reply] && file.sessions[0].draft == "未发送")
-        #expect(file.sessions[0].attributions == [reply.id.uuidString: "m1 · P"])
+        let provider = UUID()
+        var file = HistoryFile.initial(selection: ModelSelection(providerID: provider, modelID: "m1"))
+        let id = file.assistant.primarySessionID
+        file.sessions[0].title = "旅行"
+        file.sessions[0].messages = [user, reply]
+        file.sessions[0].draft = "未发送"
+        file.sessions[0].attributions = [reply.id.uuidString: "m1 · P"]
+        #expect(try HistoryCodec.decode(try HistoryCodec.encode(file)).sessions[0].workspaceID == nil)
         let workspace = UUID()
         file.sessions[0].workspaceID = workspace
-        let again = try HistoryMigration.decode(try HistoryMigration.encode(file), legacySelection: nil)
+        let again = try HistoryCodec.decode(try HistoryCodec.encode(file))
         #expect(again.sessions[0].id == id && again.sessions[0].workspaceID == workspace)
         #expect(again.sessions[0].messages == [user, reply] && again.selectedID == id)
         // Portable sync never carries the local project, and applying a remote
