@@ -196,6 +196,15 @@ nonisolated enum ToolCatalog {
 /// The system prompt actually sent with a turn: phone instructions, the
 /// capability section generated from the registry, then user rules/skills.
 nonisolated enum AgentInstructions {
+    /// The host owns the capability catalog, output pagination and phone queue.
+    static func loopConfiguration() -> AgentLoopConfiguration {
+        var loop = AgentLoopConfiguration()
+        loop.includesSharedScratchTools = false
+        loop.toolExecution = .sequential
+        loop.maximumToolConcurrency = 1
+        loop.modelRetryPolicy = AgentModelRetryPolicy(delays: [.seconds(1)])
+        return loop
+    }
     static func phone(assistantBundleID: String) -> String {
         """
         你是运行在用户这台 iPhone 上的手机助手，使用用户的语言回答。
@@ -257,6 +266,9 @@ nonisolated enum HostToolResult {
             text = String(decoding: Data(text.utf8).prefix(limit), as: UTF8.self) + "\n…（结果超过 \(limit) 字节，已截断）"
         }
         var result = AgentToolResult(callID: callID, content: text, isError: isError)
+        // Freeze the host's bounded, redacted projection. Its continuation
+        // fields must survive the SDK's generic truncation/capture policy.
+        result.modelContent = AgentSensitiveDataRedactor.toolResultText(text, isUntrusted: false)
         result.hasBoundedModelContent = true
         return result
     }

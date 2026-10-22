@@ -92,9 +92,7 @@ extension Model {
                     let origin = streamStamp.origin(), fields = trace.fields
                     Task { @MainActor in self?.log("model_stream", fields, origin: origin) }
                 }
-                var loop = AgentLoopConfiguration()
-                loop.toolExecution = .sequential; loop.maximumToolConcurrency = 1
-                loop.modelRetryPolicy = AgentModelRetryPolicy(delays: [.seconds(1)])
+                var loop = AgentInstructions.loopConfiguration()
                 var tools = turn.tools()
                 var prior = priorMessages
                 var systemPrompt = AgentInstructions.systemPrompt(assistantBundleID: DeviceSettings.assistantBundleID,

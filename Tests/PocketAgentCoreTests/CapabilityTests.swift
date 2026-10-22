@@ -198,7 +198,8 @@ struct RulesContextTests {
         let tools = ToolCatalog.available(capabilities).map { spec in
             AnyAgentTool(descriptor: spec.descriptor) { invocation, _ in AgentToolResult(callID: invocation.call.id, content: "") }
         }
-        let runtime = AgentRuntime(model: model, tools: tools, approval: AllowAll())
+        let runtime = AgentRuntime(model: model, tools: tools, approval: AllowAll(),
+                                   configuration: AgentInstructions.loopConfiguration())
         let prompt = AgentInstructions.systemPrompt(assistantBundleID: "app", capabilities: capabilities,
                                                     workspaceName: "Trip", rules: context)
         for await _ in await runtime.start(AgentRunRequest(conversationID: UUID(), prompt: "hi", permissionMode: .fullAccess,
@@ -762,6 +763,20 @@ struct ScriptBridgeTests {
 }
 
 struct HostToolResultTests {
+    @Test func frozenProjectionRedactsSecretsAndPreservesContinuation() throws {
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "authorization": "Bearer private-test-value", "output": String(repeating: "x", count: 70 * 1024),
+            "next_offset": 72, "saved_to": "output.txt",
+        ]), as: UTF8.self)
+        let result = HostToolResult.make(callID: "bounded", content: text)
+        let model = try #require(result.modelContent)
+        #expect(!model.contains("private-test-value"))
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(model.utf8)) as? [String: Any])
+        #expect(object["next_offset"] as? Int == 72)
+        #expect(object["saved_to"] as? String == "output.txt")
+        #expect((object["output"] as? String)?.utf8.count == 70 * 1024)
+    }
+
     /// A bounded host result reaches the next model request whole; AgentKit's
     /// generic projection would replace it with a preview pointing at scratch
     /// tools this app does not register.

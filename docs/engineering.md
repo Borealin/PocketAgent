@@ -27,8 +27,18 @@ turn teardown cancel and drain it. Source edits/chain changes reject its CAS;
 forgetting, storage errors and the turn deadline stop the turn. An optional
 summary's own timeout/provider failure leaves the existing context in use.
 
-AgentKit is pinned to `e0f6e89db716bed948fdb6508e026ac8d5fa90ac` in all
-dependency manifests and both lockfiles. Its ordered drain awaits the existing
+AgentKit is pinned to `e382e5e5c4412e997ba42daa1230930800f88c44` in all
+dependency manifests and both lockfiles. Fork main follows upstream 4.0.0 at
+`3481866cd47e83f6bf56b80c432c7824f61130b9`; the downstream diff retains bounded
+consumption and commit acknowledgements, refines upstream bare-error handling,
+and extends its unified finish without restoring per-run secret teardown.
+The upstream upgrade initially advertised shared scratch tools outside the host
+catalog and re-truncated host-bounded results, losing continuation metadata.
+`AgentInstructions.loopConfiguration()` explicitly disables automatic scratch
+registration (the SDK default remains enabled). `HostToolResult` freezes its
+existing bounded projection only after SDK redaction, preserving raw history and
+continuation fields while avoiding a second generic truncation.
+Its ordered drain awaits the existing
 host message/result write barrier before later dispatch. Snapshot writes throw;
 successful completion follows the terminal snapshot save. The SDK cancellation
 regression found during this work was caused by flushing from an already

@@ -23,6 +23,16 @@
 
 当前 App 在文本 delta 上反复发布 live 状态，展示先准备完整历史再分页。SDK 已有 pacing，但展示节流应与执行/提交路径分离。摘要虽在预算 70% 触发，仍在新轮首个请求前等待；可提前处理已稳定的历史前缀。AgentKit 的事件/快照保存目前吞掉存储错误，App 另有真实落盘屏障；SDK 应提供明确的等待与失败传播，同时保留宿主的业务校验。
 
+2026-10-22 再次核对上游 4.0.0（`3481866cd47e83f6bf56b80c432c7824f61130b9`），fork main 已按该提交快进同步；SDK PR #1 改为直接对 main 审阅，包含 App 原先依赖的有界消费 API。
+
+| 能力 | 上游覆盖与本项目处理 |
+|---|---|
+| 裸 SSE 错误 | 上游已识别 root error；不叠加第二套识别，只细化 null/空 error 与正常数据共存，以及保留字符串错误原因 |
+| 取消与终态结构 | 复用上游统一 finish、未开始调用收束和同批次授权证据；在统一结构内加入提交等待与未取消的终态保存 |
+| 秘密与工具输出 | 沿用上游调用方拥有 secret storage、统一截断与共享捕获，不恢复旧的每轮清理，也不另建输出处理机制 |
+| App 工具与结果边界 | 上游默认新增共享 scratch、统一截断；SDK 保留默认并提供显式 registry 选择，App 关闭自动加入并冻结原有已限长且脱敏的 modelContent，避免重截断丢失续读字段 |
+| 有界消费与提交屏障 | 上游仍无带体积/行/事件上限的 callback consume，事件/快照写入仍吞错；保留这两项宿主必需增量 |
+
 <details><summary>选型与拒绝方案</summary>
 
 - 保留 AgentKit 与 HistoryOwner，分别改进展示投影、摘要时机与 SDK 的提交边界。
@@ -48,7 +58,7 @@ HistoryOwner 继续是唯一权威历史 owner。流式原始事件完整消费�
 
 兼容性：assistant-v1 的字段、消息 ID、记忆与删除记录、provider 设置和 Keychain 不变。Android、蓝牙/ISP/Wi-Fi 固件、schema/rpc、lt-vad 不受影响：本期只修改 iOS 宿主和 Swift agent SDK，无 App↔设备协议或音频变化。
 
-集成顺序：展示优化 → 提前摘要 → AgentKit 独立提交与发布固定 ref → App 依赖更新与集成回归。SDK 固定提交为 `e0f6e89db716bed948fdb6508e026ac8d5fa90ac`，审阅见 https://github.com/Borealin/AgentKit/pull/1 。SDK 的等待接口不替代遗忘撤销、来源/预算验证与现有手机动作授权。取消收束由独立的未取消任务保存终态，避免取消等待误报为存储失败。提前摘要保存/来源撤销等终止类错误停止轮次（存储错先关闭提交屏障）；自身可选时限或普通服务失败只留下未完成说明。
+集成顺序：展示优化 → 提前摘要 → AgentKit 独立提交与发布固定 ref → App 依赖更新与集成回归。SDK 固定提交为 `e382e5e5c4412e997ba42daa1230930800f88c44`，审阅见 https://github.com/Borealin/AgentKit/pull/1 。SDK 的等待接口不替代遗忘撤销、来源/预算验证与现有手机动作授权。取消收束由独立的未取消任务保存终态，避免取消等待误报为存储失败。提前摘要保存/来源撤销等终止类错误停止轮次（存储错先关闭提交屏障）；自身可选时限或普通服务失败只留下未完成说明。
 
 验收覆盖：可见窗口与原分页等价、连续 delta/终态/重试/切换会话、摘要 Stop/过期/遗忘/来源改写与链变化、持久化故障时零后续模型或工具分派，以及完整 Core、iOS archive、IPA 检查和选定设备的实际使用。性能结论需标明设备、规模与统计口径。成功日志和产物引用仅存仓库外。
 
@@ -60,5 +70,5 @@ HistoryOwner 继续是唯一权威历史 owner。流式原始事件完整消费�
 |---|---|---|---|---|---|---|---|---|
 | 流式展示 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 实现完成；2026-10-22 | main@2025fce |
 | 提前摘要 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 实现完成；2026-10-22 | 现有 CAS/forget/期限 |
-| 提交确认 | AgentKit/Swift | 待确认 | 待确认 | codex/durable-event-commits | 待确认 | 待确认 | 实现完成；2026-10-22 | e1c81c9 |
-| 集成与验收 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 固定 ref 集成；验收记录留本地 | SDK e0f6e89、同签名更新、用户指定 iPhone 12 mini |
+| 提交确认 | AgentKit/Swift | 待确认 | 待确认 | codex/durable-event-commits | 待确认 | 待确认 | 已适配上游 4.0.0；2026-10-22 | upstream@3481866 |
+| 集成与验收 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 固定 ref 集成；验收记录留本地 | SDK e382e5e、同签名更新、用户指定 iPhone 12 mini |
