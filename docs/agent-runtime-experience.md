@@ -1,6 +1,6 @@
 # Agent 运行与交互优化技术方案
 
-> 状态：已决定待开发  
+> 状态：实现完成，验收与剩余边界见仓库外本地交付记录
 > 最后核对：2026-10-22  
 > 范围：保留 AgentKit，优化流式展示、提前摘要与持久化确认。
 
@@ -34,21 +34,21 @@
 
 ## 3. 技术方案总括
 
-HistoryOwner 继续是唯一权威历史 owner。流式原始事件完整消费，最终消息及工具结果保持原有顺序和 ACK；UI 单独发布最新临时快照并缓存可见历史窗口。提前摘要只读当前轮次之前的已结束历史，在当前轮次内最多启动一次，使用相同冻结 provider/model/凭证和预算；CAS 提交供下一轮使用，不替换当前运行时已装配的请求投影。SDK 关键边界等待已接受的持久化工作，保存失败明确停止后续模型/工具分派。
+HistoryOwner 继续是唯一权威历史 owner。流式原始事件完整消费，最终消息及工具结果保持原有顺序和 ACK；UI 单独发布最新临时快照并缓存可见历史窗口。提前摘要只读当前轮次之前的已结束历史，在当前轮次内最多启动一次，使用相同冻结 provider/model/凭证和预算；CAS 提交供下一轮使用，不替换当前运行时已装配的请求投影。达到阈值的工具轮次可能增加一次摘要请求；即使本轮结束取消整理，也可能已产生服务侧用量，换取下一轮较少的阻塞整理。SDK 关键边界等待已接受的持久化工作，保存失败明确停止后续模型/工具分派。
 
 <details><summary>落点、约束与验收</summary>
 
 | 模块 | 改造 |
 |---|---|
-| ChatSessions / ChatTranscriptView | 缓存按历史版本、会话、分页与 live 身份定位的可见窗口，保留工具调用组和 steering 顺序 |
+| ChatSessions / ChatTranscriptView | 缓存按历史版本、会话、分页与 live 身份定位的可见窗口和已分组时间线，保留工具调用组和 steering 顺序 |
 | ChatTurns | 原始 partial 立即累积；只合并展示发布；终态、重试和会话结束撤销待发布快照 |
 | AssistantContext / AssistantTurnSupport | 较低水位计划一次可选的提前摘要；保留已有强制准备路径、来源登记、预算与 CAS |
-| PhoneAgent | 启动和取消提前维护；轮次结束前收束维护，不延长系统后台任务生命周期 |
+| PhoneAgent | 首个工具开始后启动维护；可选维护限 30 秒、一次一折；轮次结束前收束维护，不延长系统后台任务生命周期 |
 | AgentKit EventChannel / Runtime / ToolExecutor | 明确持久化等待与失败契约；保持非持久 delta 独立，拒绝保存失败之后的新分派 |
 
 兼容性：assistant-v1 的字段、消息 ID、记忆与删除记录、provider 设置和 Keychain 不变。Android、蓝牙/ISP/Wi-Fi 固件、schema/rpc、lt-vad 不受影响：本期只修改 iOS 宿主和 Swift agent SDK，无 App↔设备协议或音频变化。
 
-集成顺序：展示优化 → 提前摘要 → AgentKit 独立提交与发布固定 ref → App 依赖更新与集成回归。SDK 的等待接口不替代遗忘撤销、来源/预算验证与现有手机动作授权。
+集成顺序：展示优化 → 提前摘要 → AgentKit 独立提交与发布固定 ref → App 依赖更新与集成回归。SDK 固定提交为 `e0f6e89db716bed948fdb6508e026ac8d5fa90ac`，审阅见 https://github.com/Borealin/AgentKit/pull/1 。SDK 的等待接口不替代遗忘撤销、来源/预算验证与现有手机动作授权。取消收束由独立的未取消任务保存终态，避免取消等待误报为存储失败。提前摘要保存/来源撤销等终止类错误停止轮次（存储错先关闭提交屏障）；自身可选时限或普通服务失败只留下未完成说明。
 
 验收覆盖：可见窗口与原分页等价、连续 delta/终态/重试/切换会话、摘要 Stop/过期/遗忘/来源改写与链变化、持久化故障时零后续模型或工具分派，以及完整 Core、iOS archive、IPA 检查和选定设备的实际使用。性能结论需标明设备、规模与统计口径。成功日志和产物引用仅存仓库外。
 
@@ -58,7 +58,7 @@ HistoryOwner 继续是唯一权威历史 owner。流式原始事件完整消费�
 
 | 模块 | 仓库/端 | 负责人 | 人日 | 开发分支 | 跟车版本 | 提测时间 | 状态/核对 | 依赖 |
 |---|---|---|---|---|---|---|---|---|
-| 流式展示 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 待开发；2026-10-22 | main@2025fce |
-| 提前摘要 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 待开发；2026-10-22 | 现有 CAS/forget/期限 |
-| 提交确认 | AgentKit/Swift | 待确认 | 待确认 | codex/durable-event-commits | 待确认 | 待确认 | 待开发；2026-10-22 | e1c81c9 |
-| 集成与验收 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 待开发；2026-10-22 | SDK 固定提交、签名与可用设备 |
+| 流式展示 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 实现完成；2026-10-22 | main@2025fce |
+| 提前摘要 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 实现完成；2026-10-22 | 现有 CAS/forget/期限 |
+| 提交确认 | AgentKit/Swift | 待确认 | 待确认 | codex/durable-event-commits | 待确认 | 待确认 | 实现完成；2026-10-22 | e1c81c9 |
+| 集成与验收 | PocketAgent/iOS | 待确认 | 待确认 | codex/agent-runtime-experience | 待确认 | 待确认 | 固定 ref 集成；验收记录留本地 | SDK e0f6e89、同签名更新、用户指定 iPhone 12 mini |

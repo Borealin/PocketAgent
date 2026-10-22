@@ -15,6 +15,41 @@ impact before excluding sources. Status and verification scope are in
 breaking data format without legacy compatibility or migration, and then the
 full implementation.
 
+The [agent runtime and display follow-up](agent-runtime-experience.md) keeps
+that contract and the assistant-v1 format. The transcript caches a visible
+window by owner revision and live identity; only replaceable live text is
+published at 50 ms intervals. Final messages, results and commit acknowledgements
+retain their original event path. Once tool work starts, a primary turn may
+summarize one stable prefix of earlier history at the 50% input target, for at
+most 30 seconds within its frozen turn budget. This is optional preparation for
+the next turn; the 70% blocking preparation policy remains. Stop, expiration and
+turn teardown cancel and drain it. Source edits/chain changes reject its CAS;
+forgetting, storage errors and the turn deadline stop the turn. An optional
+summary's own timeout/provider failure leaves the existing context in use.
+
+AgentKit is pinned to `e0f6e89db716bed948fdb6508e026ac8d5fa90ac` in all
+dependency manifests and both lockfiles. Its ordered drain awaits the existing
+host message/result write barrier before later dispatch. Snapshot writes throw;
+successful completion follows the terminal snapshot save. The SDK cancellation
+regression found during this work was caused by flushing from an already
+cancelled task: its cancellation-aware wait aborted the terminal save and
+reported failure. Cleanup now drains and attempts the terminal save from an
+uncancelled task, retaining a real storage failure as failure. This adds no
+phone-action replay or second authoritative history writer. The viewport launch
+probe also replaces a synthetic live row rapidly in its read-only controller;
+its display-link intervals measure main-thread availability, not completed
+presentation or a provider/phone workflow. Build and device acceptance records
+remain local outside Git.
+
+The synthetic live-row probe exposed another repeated cost after paging:
+`TranscriptItem.build` reparsed tool observations across all 2,400 expanded
+messages on each update. The visible window now caches its grouped timeline
+as well as messages and replaces just the live item. The same 200-update
+workload over 10k/50k histories on the 12 mini changed display-link p95 from
+about 450–470 ms to about 23 ms. This is a short synthetic regression check,
+including updates faster than the production display coalescer; it does not
+measure end-to-end provider latency or prove every frame was presented.
+
 Native provider management on a dedicated page, provider/model selection per
 conversation (the primary line and independent tasks alike), iCloud Drive
 synchronization of portable data, reproducible IPA

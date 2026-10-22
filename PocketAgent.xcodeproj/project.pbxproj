@@ -42,6 +42,7 @@
 		70E1558DD60DD52607A32538 /* HistoryOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FA7F23F4F43343D30E3D16A /* HistoryOwner.swift */; };
 		72018019477198B62A047CE7 /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F266439E5ACA1E35405D10A /* CloudSync.swift */; };
 		721E84227AA099CD68F9CE04 /* PhoneBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E07338DA36C6016FB8828 /* PhoneBackend.swift */; };
+		72DB032B1A9E6CC4B0FCE4C1 /* TranscriptWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA199D65896D97BCD8EAFCE2 /* TranscriptWindow.swift */; };
 		73302C0C511CA39E86999817 /* AssistantRequestPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7479825EBF4A10452CAE8365 /* AssistantRequestPreparer.swift */; };
 		73C6EE4DC567E9F8A176F5A7 /* Workspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA4E9B0BE1A88E58D59E7DD /* Workspaces.swift */; };
 		73D75A5E5B3D02249D777DD0 /* StreamingSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925006F86E0B486805C14187 /* StreamingSummary.swift */; };
@@ -67,6 +68,7 @@
 		A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */; };
 		A8D642607E15F33D0BC95BFC /* ScriptGateProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1929B5B153106268A9936660 /* ScriptGateProbe.swift */; };
 		BB9E2731768BEDA7EDA491BF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE88C9FB1A659621C93A20A /* SettingsView.swift */; };
+		C10BEF877FF353DDCA9E8034 /* PrecompactionTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55ACD59AFD5BF28ED85E3B02 /* PrecompactionTask.swift */; };
 		CA5313FC848276D82CFBD4E2 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64A275A3B478025AE3327E64 /* Security.framework */; };
 		CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4597769ADE790DBCF5243A /* TextInputRequest.swift */; };
 		CE20ABAE4B66E96F070C260B /* AssistantViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C4A1F3A3E94715B7D46161 /* AssistantViews.swift */; };
@@ -132,6 +134,7 @@
 		532A0E3415F99019452AA442 /* AssistantState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantState.swift; sourceTree = "<group>"; };
 		544AB90450A6D3349F8F2BB9 /* TurnLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnLifecycle.swift; sourceTree = "<group>"; };
 		55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptRuntime.swift; sourceTree = "<group>"; };
+		55ACD59AFD5BF28ED85E3B02 /* PrecompactionTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrecompactionTask.swift; sourceTree = "<group>"; };
 		59F24A784103BF8F2532963F /* ChatHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistory.swift; sourceTree = "<group>"; };
 		64A275A3B478025AE3327E64 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		6C405D30C26DD74E9D43D252 /* SerialGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerialGate.swift; sourceTree = "<group>"; };
@@ -175,6 +178,7 @@
 		CC78893A183661157A2CB031 /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalDigest.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
+		DA199D65896D97BCD8EAFCE2 /* TranscriptWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptWindow.swift; sourceTree = "<group>"; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
 		DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearPrimary.swift; sourceTree = "<group>"; };
 		E39E07338DA36C6016FB8828 /* PhoneBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneBackend.swift; sourceTree = "<group>"; };
@@ -279,6 +283,7 @@
 				E39E07338DA36C6016FB8828 /* PhoneBackend.swift */,
 				7275078FC662C894CFA79E33 /* PocketMemoryAdapter.swift */,
 				43E0C2567C5EBBE3F23DDCC3 /* PortableSync.swift */,
+				55ACD59AFD5BF28ED85E3B02 /* PrecompactionTask.swift */,
 				73652AF715C4968790030FB2 /* ProviderConfig.swift */,
 				3E05053CBE20D50CBF450D09 /* ProviderContextLimit.swift */,
 				EE8BD58C9A08F8998E720B8A /* ProviderEndpoints.swift */,
@@ -296,6 +301,7 @@
 				7F4597769ADE790DBCF5243A /* TextInputRequest.swift */,
 				E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */,
 				B5663978DEBD3F751D7210B1 /* TranscriptCommitBarrier.swift */,
+				DA199D65896D97BCD8EAFCE2 /* TranscriptWindow.swift */,
 				288C5CC7122C0F08F9B29C94 /* TurnGates.swift */,
 				544AB90450A6D3349F8F2BB9 /* TurnLifecycle.swift */,
 				E65594612732E3288F588504 /* WDARequestDiagnostics.swift */,
@@ -503,6 +509,7 @@
 				0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */,
 				EE2DB1A7602817A794DF95CA /* PocketMemoryAdapter.swift in Sources */,
 				9B9AD05233A99743A5665ADD /* PortableSync.swift in Sources */,
+				C10BEF877FF353DDCA9E8034 /* PrecompactionTask.swift in Sources */,
 				15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */,
 				4F9D8C958D65133B7871FFA9 /* ProviderContextLimit.swift in Sources */,
 				A5325486451E1E71DDD3E902 /* ProviderEndpoints.swift in Sources */,
@@ -526,6 +533,7 @@
 				CD0501B26CB0572DE229908A /* TextInputRequest.swift in Sources */,
 				58918D3622FCD7F990F38937 /* ToolCatalog.swift in Sources */,
 				568A57DD3305D84BA6EA0463 /* TranscriptCommitBarrier.swift in Sources */,
+				72DB032B1A9E6CC4B0FCE4C1 /* TranscriptWindow.swift in Sources */,
 				D970A71342760BB278CDAABC /* TurnGates.swift in Sources */,
 				DD53B775CF4E9A51C757BE79 /* TurnLifecycle.swift in Sources */,
 				53031A55CB978A7FF24858E9 /* ViewportBenchmark.swift in Sources */,
@@ -738,7 +746,7 @@
 			repositoryURL = "https://github.com/Borealin/AgentKit.git";
 			requirement = {
 				kind = revision;
-				revision = e1c81c911564c39d5f78ccec6808ba96c1acd2e8;
+				revision = e0f6e89db716bed948fdb6508e026ac8d5fa90ac;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

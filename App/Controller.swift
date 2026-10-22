@@ -296,6 +296,7 @@ final class Model: ObservableObject {
     @Published var status = ""
     @Published var busy = false
     var activeAgentRuntime: AgentRuntime?
+    var activeMaintenance: PrecompactionTask?
     var pendingAgentCancellation = false
     var job: Task<Void, Never>?
     var runID = ""
@@ -608,6 +609,7 @@ final class Model: ObservableObject {
         log("agent_cancel_requested", ["hadRuntime": activeAgentRuntime != nil])
         releasePreparedPhoneConnection(message: "已停止并释放准备连接")
         pendingAgentCancellation = true
+        activeMaintenance?.cancel()
         if let runtime = activeAgentRuntime {
             // Drain AgentKit's terminal events before releasing phone resources.
             // Cancelling the consumer task would stop waiting for an in-flight tool.

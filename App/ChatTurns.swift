@@ -49,6 +49,8 @@ final class ChatJob {
     var started = false
     var runID: UUID?
     var partial: AgentTranscriptMessage?
+    /// Display scheduling only; raw events and persistence never wait for this.
+    var livePublication: Task<Void, Never>?
     var pendingSteering: Set<UUID> = []
     /// Accepted steering not yet settled, with its attachment references (kept from GC).
     var steerLeases: [UUID: [ChatAttachment]] = [:]
@@ -522,26 +524,30 @@ extension ChatController {
 
     private func handle(_ event: AgentEvent, status: ExecutionStatus, job: ChatJob) {
         guard jobs[job.sessionID] === job else { return }
-        statuses[job.sessionID] = status
+        if statuses[job.sessionID] != status { statuses[job.sessionID] = status }
         switch event {
         case .runStarted(let run): job.ready = true; job.started = true; job.runID = run.id
-        case .messageStarted(let message): job.partial = message; live[job.sessionID] = message
+        case .messageStarted(let message):
+            cancelLivePublication(job)
+            job.partial = message; live[job.sessionID] = message
         case .messageDelta(let id, let text):
-            if job.partial?.id == id { job.partial?.text += text; live[job.sessionID] = job.partial }
+            if job.partial?.id == id { job.partial?.text += text; scheduleLivePublication(job) }
         case .reasoningDelta(let id, let text):
             // Provider-supplied reasoning only; nothing is synthesized locally.
             if var partial = job.partial, partial.id == id {
                 if partial.reasoning.isEmpty { partial.reasoning = [AgentReasoningBlock(text: "")] }
                 partial.reasoning[partial.reasoning.count - 1].text += text
-                job.partial = partial; live[job.sessionID] = partial
+                job.partial = partial; scheduleLivePublication(job)
             }
         case .messageFinished(let message):
+            cancelLivePublication(job)
             recordEvent(job, message, attribution: message.role == .assistant ? job.config.label : nil)
             job.partial = nil; live[job.sessionID] = nil
         case .steeringDelivered(let message):
             job.pendingSteering.remove(message.id)
             recordSteering(job, message, delivered: true)
         case .modelRetryScheduled:
+            cancelLivePublication(job)
             // Discard the abandoned attempt's transient text and reasoning.
             job.partial = nil; live[job.sessionID] = nil
         case .toolFinished(let invocation, let result):
@@ -559,9 +565,28 @@ extension ChatController {
         case .toolStarted(let invocation):
             diagnosticForgetDuringRun(job, tool: invocation.call.name)
         case .runFinished:
+            cancelLivePublication(job)
             job.terminal = true; job.ready = false
         default: break
         }
+    }
+
+    /// At most one pending display delivery per job. Completed messages bypass
+    /// it; cancelling a timer cannot delay a tool result, a gate or Stop.
+    private func scheduleLivePublication(_ job: ChatJob) {
+        guard job.livePublication == nil else { return }
+        job.livePublication = Task { @MainActor [weak self, weak job] in
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+            guard let self, let job else { return }
+            job.livePublication = nil
+            guard self.jobs[job.sessionID] === job, !job.terminal else { return }
+            self.live[job.sessionID] = job.partial
+        }
+    }
+
+    private func cancelLivePublication(_ job: ChatJob) {
+        job.livePublication?.cancel()
+        job.livePublication = nil
     }
 
     /// Event order is authoritative. A tool event is consumed after a later
@@ -608,6 +633,7 @@ extension ChatController {
     }
 
     private func finish(_ job: ChatJob, state: ChatState, detail: String) {
+        cancelLivePublication(job)
         guard jobs[job.sessionID] === job else { return }
         jobs[job.sessionID] = nil; live[job.sessionID] = nil
         owner.barrier.close(epoch: job.epoch)

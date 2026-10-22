@@ -161,7 +161,11 @@ extension Model {
                     case .deny(let reason): .deny(reason)
                     }
                 }
-                let runtime = AgentRuntime(model: gatedModel, tools: tools, approval: approval, configuration: loop)
+                let repository = InMemoryAgentRunRepository()
+                let commit = TranscriptEventCommit(barrier: gates.barrier, epoch: gates.epoch)
+                let channel = AgentEventChannel(repository: repository, committing: { try await commit.commit($0) })
+                let runtime = AgentRuntime(model: gatedModel, tools: tools, approval: approval,
+                                           repository: repository, configuration: loop, channel: channel)
                 log("phone_agent_started", ["tools": tools.map { $0.descriptor.name }, "imageInput": config.supportsImages,
                     "workspace": workspace != nil, "globalRules": rules.globalRules != nil,
                     "projectRules": rules.projectRules != nil, "skills": rules.skills.count,
@@ -172,9 +176,11 @@ extension Model {
                 try Task.checkCancellation()
                 try gates.permit()
                 activeAgentRuntime = runtime
+                activeMaintenance = gates.assistant?.precompaction
                 let watchdog = Task {
                     do { try await Task.sleep(for: .seconds(max(0, deadline.remaining))) } catch { return }
                     log("deadline_exceeded")
+                    self.activeMaintenance?.cancel()
                     // The turn's own limit, not a user Stop: it is the reported cause.
                     if status.value.failure == nil { status.value.failure = TurnDeadlineReached().errorDescription }
                     await runtime.cancel()
@@ -192,6 +198,13 @@ extension Model {
                         switch event {
                         // Default diagnostics omit arguments, results and message text.
                         case .toolStarted(let invocation):
+                            gates.assistant?.startPrecompaction(
+                                prompt: AgentTranscriptMessage(id: promptID, role: .user, text: goal, images: images),
+                                systemPrompt: systemPrompt, tools: tools.map(\.descriptor), provider: provider, deadline: deadline,
+                                stopTurn: { error in
+                                    if status.value.failure == nil { status.value.failure = error.localizedDescription }
+                                    Task { await runtime.cancel() }
+                                })
                             log("tool_started", ["name": invocation.call.name, "callID": invocation.call.id])
                         case .toolFinished(let invocation, let result):
                             log("tool_finished", ["name": invocation.call.name, "callID": result.callID,
@@ -214,6 +227,10 @@ extension Model {
                 }
                 log(Task.isCancelled ? "interrupted" : "failed", Model.errorFields(error))
             }
+            await gates.assistant?.precompaction.finish()
+            if gates.assistant?.precompaction.requiresTurnStop == true { successful = false }
+            if let note = gates.assistant?.maintenanceNote { status.value.contextNote = note }
+            activeMaintenance = nil
             task.expirationHandler = nil
             if !status.value.phase.isTerminal { status.value.phase = .finishing }
             publish("finishing")

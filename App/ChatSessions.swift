@@ -67,6 +67,7 @@ final class ChatController: ObservableObject {
     @Published var steerPrimary = false
     /// Messages shown per transcript page; grows with "显示更早".
     @Published var visibleLimit: [UUID: Int] = [:]
+    private var transcriptWindow = TranscriptWindowCache()
     let engine: Model
     let providers: ProviderStore
     let workspaces: WorkspaceStore
@@ -238,6 +239,14 @@ final class ChatController: ObservableObject {
             messages.insert(partial, at: index)
         }
         return messages
+    }
+
+    /// The saved window is independent of live text. A token changes one visible
+    /// row rather than copying and searching the entire conversation again.
+    func transcriptPage(limit: Int) -> TranscriptWindow {
+        guard let selected else { return TranscriptWindow(history: [], partial: nil, pendingSteering: [], limit: limit) }
+        return transcriptWindow.page(session: selected.id, revision: revision, history: selected.messages,
+                                     partial: live[selected.id], pendingSteering: jobs[selected.id]?.pendingSteering ?? [], limit: limit)
     }
 
     /// The provider and model that actually produced a message.

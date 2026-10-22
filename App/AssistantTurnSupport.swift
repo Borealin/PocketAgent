@@ -30,6 +30,7 @@ final class AssistantTurnSupport {
     private let requests: AssistantRequestPreparer
     /// Outcome of context maintenance this turn (shown in the status detail).
     private(set) var maintenanceNote: String?
+    let precompaction = PrecompactionTask()
     /// Metadata of each summary fold's provider request (opt-in run log).
     var observeStream: (@Sendable (ModelStreamTrace) -> Void)?
     /// Receives the estimate of every complete request, before the ceiling check.
@@ -114,15 +115,14 @@ final class AssistantTurnSupport {
     /// estimate against the frozen budget) and committed by CAS. All folds
     /// share one 150 s maintenance deadline that never passes the turn
     /// deadline; idle is 45 s per attempt.
-    private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
-                           onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
+    private func summaryProducer(_ provider: AgentProviderClient) -> StreamingSummary.Producer {
         // Local acceptance launch arguments only (DeviceSettings); all absent by default.
         let hold = DeviceSettings.maintenanceDispatchHold
         let injected = DeviceSettings.injectSlowSummaryStream
         let recorder = DeviceSettings.recordMaintenanceStream ? MaintenanceStreamRecorder(injected: injected) : nil
         let stopAtText = DeviceSettings.stopAtFirstSummaryText
         let observe = observeStream
-        let producer: StreamingSummary.Producer = { request, onEvent in
+        return { request, onEvent in
             if let hold { try await Task.sleep(for: hold) }
             recorder?.started()
             var trace = ModelStreamTrace(path: .summary)
@@ -154,11 +154,38 @@ final class AssistantTurnSupport {
                 throw ProviderContextLimit.classify(error, path: .summary) ?? error
             }
         }
+    }
+
+    private func summarize(_ plan: SummaryPlan, provider: AgentProviderClient, deadline: TurnDeadline,
+                           onWork: @escaping @MainActor @Sendable (Int) -> Void) async throws {
         try await SummaryMaintenance.run(
             plan, turn: .init(sessionID: sessionID, promptID: promptID, scope: scope, budget: config.budget,
                               estimator: EstimatorCalibration.shared.estimator(calibrationKey), summaryModel: config.label),
-            owner: owner, producer: producer, deadline: MaintenanceDeadline(turnRemaining: deadline.remaining),
+            owner: owner, producer: summaryProducer(provider), deadline: MaintenanceDeadline(turnRemaining: deadline.remaining),
             progress: ProgressCoalescer(deliver: onWork))
+    }
+
+    /// Called once tool work has begun, so maintenance never competes with
+    /// the first model request. Only finished history before this prompt is
+    /// eligible; at most one fold and thirty seconds, within the same turn.
+    func startPrecompaction(prompt: AgentTranscriptMessage, systemPrompt: String, tools: [AgentToolDescriptor],
+                           provider: AgentProviderClient, deadline: TurnDeadline,
+                           stopTurn: @escaping @MainActor (any Error) -> Void) {
+        guard !precompaction.attempted, isActive(), deadline.remaining > 30 else { return }
+        let estimator = EstimatorCalibration.shared.estimator(calibrationKey)
+        let input = AssistantContext.Input(file: owner.file, sessionID: sessionID, promptID: promptID, scope: scope,
+            references: references, budget: config.budget, estimator: estimator, systemPrompt: systemPrompt, tools: tools, prompt: [prompt])
+        precompaction.start(plan: AssistantContext.precompactionPlan(input),
+            turn: .init(sessionID: sessionID, promptID: promptID, scope: scope, budget: config.budget,
+                        estimator: estimator, summaryModel: config.label),
+            owner: owner, producer: summaryProducer(provider),
+            deadline: MaintenanceDeadline(turnRemaining: deadline.remaining, total: 30), isActive: isActive,
+            onFailure: { [weak self] error in
+                guard let self else { return }
+                self.maintenanceNote = "提前整理未完成：" + error.localizedDescription
+                if let storage = error as? StorageCommitError { self.owner.barrier.fail(epoch: self.epoch, storage) }
+                if SummaryMaintenance.stopsTurn(error) { stopTurn(error) }
+            })
     }
 
     // MARK: Every request
