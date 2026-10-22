@@ -40,8 +40,12 @@ registration (the SDK default remains enabled). `HostToolResult` freezes its
 existing bounded projection only after SDK redaction, preserving raw history and
 continuation fields while avoiding a second generic truncation.
 Phone observations have a separate frozen, redacted projection capped at 64 KiB.
-It retains snapshot_id, app and screen while dropping only complete trailing
-nodes and marking model_omitted_elements/truncated; raw event content remains
+It retains the nested screen.snapshot_id, app and dimensions while dropping
+only complete trailing nodes and marking screen.model_omitted_elements/truncated.
+The outer ok/action outcome/input/recovery/no-replay fields are preserved;
+oversized remote failure prose can be shortened with an explicit marker.
+The phone executor and contract fixtures share the result serializer and cover
+both successful and unconfirmed-action envelopes. Raw event content remains
 available to the existing history writer. This fixes the upstream generic
 head/line projection dropping the action identity even for compact observations
 with many short nodes. A text-only next request must retain that identity.
@@ -54,7 +58,7 @@ failures retain their own descriptions. Optional maintenance timeout text uses
 its configured duration (30 seconds for early work, 150 for preparation) and
 states that no new summary was generated.
 
-Its ordered drain awaits the existing
+The SDK's ordered drain awaits the existing
 host message/result write barrier before later dispatch. Snapshot writes throw;
 successful completion follows the terminal snapshot save. The SDK cancellation
 regression found during this work was caused by flushing from an already

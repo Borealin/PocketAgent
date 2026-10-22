@@ -603,8 +603,7 @@ final class PhoneExecutor {
         apps.map { ["bundle_id": $0.bundleID, "name": $0.name as Any? ?? NSNull(), "names": $0.names] }
     }
     private static func result(_ object: [String: Any], error: Bool = false) throws -> (content: String, isError: Bool) {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return (String(decoding: data, as: UTF8.self), error)
+        try PhoneToolResult.encode(object, isError: error)
     }
     private func inputElement(_ a: [String: String], base: String, proceed: () throws -> Void) async throws -> PhoneInput {
         let input = try await control.input(a)
