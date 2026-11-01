@@ -237,6 +237,25 @@ private final class CapturingModel: AgentModelStreaming, @unchecked Sendable {
 }
 
 struct ToolRegistryTests {
+    @Test func disabledSdkScratchCannotExecuteGuessedCalls() async throws {
+        let model = CapturingModel(turns: [
+            [.toolCallSnapshot(id: "extra", providerItemID: nil, name: "scratch_write",
+                               arguments: #"{"path":"migration-test.txt","content":"must not be written"}"#), .finished(.toolCalls)],
+            [.textDelta("ok"), .finished(.completed)],
+        ])
+        let runtime = AgentRuntime(model: model, tools: [], approval: AllowAll(),
+                                   configuration: AgentInstructions.loopConfiguration())
+        var started = false
+        var rejected = false
+        for await event in await runtime.start(AgentRunRequest(conversationID: UUID(), prompt: "go", permissionMode: .fullAccess)) {
+            if case .toolStarted = event { started = true }
+            if case .toolFinished(_, let result) = event { rejected = result.isError && result.callID == "extra" }
+        }
+        #expect(!started && rejected)
+        #expect(model.requests.count == 2)
+        #expect(model.requests.allSatisfy { $0.tools.isEmpty })
+    }
+
     @Test func capabilitiesGateDefinitionsPolicyAndPrompt() {
         let none = ToolCapabilities()
         #expect(ToolCatalog.available(none).map(\.name) == ToolCatalog.phoneTools.map(\.name) + ["http_request"])
@@ -781,7 +800,12 @@ struct HostToolResultTests {
     /// generic projection would replace it with a preview pointing at scratch
     /// tools this app does not register.
     @Test func largeHostResultReachesTheModelIntact() async throws {
-        let content = String(repeating: "r", count: 70 * 1024) + "TAIL-full_output"
+        let output = String(repeating: "r", count: 70 * 1024) + "TAIL-full_output"
+        let content = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "stdout": output, "full_output": ["stdout": ".pocketagent/runs/r1/stdout"],
+            "saved_to": "result.json", "phone_actions": [["tool": "observe_screen", "ok": true]],
+            "token": "migration-fixture-secret",
+        ]), as: UTF8.self)
         let model = CapturingModel(turns: [
             [.toolCallSnapshot(id: "c1", providerItemID: nil, name: "search_files", arguments: #"{"pattern":"x"}"#), .finished(.toolCalls)],
             [.textDelta("ok"), .finished(.completed)],
@@ -789,11 +813,18 @@ struct HostToolResultTests {
         let tool = AnyAgentTool(descriptor: ToolCatalog.spec("search_files")!.descriptor) { invocation, _ in
             HostToolResult.make(callID: invocation.call.id, content: content)
         }
-        let runtime = AgentRuntime(model: model, tools: [tool], approval: AllowAll())
+        let runtime = AgentRuntime(model: model, tools: [tool], approval: AllowAll(),
+                                   configuration: AgentInstructions.loopConfiguration())
         for await _ in await runtime.start(AgentRunRequest(conversationID: UUID(), prompt: "go", permissionMode: .fullAccess)) {}
         let second = try #require(model.requests.dropFirst().first)
         let toolText = second.messages.filter { $0.role == .tool }.map { $0.modelText ?? $0.text }.joined()
-        #expect(toolText.contains(content) && !toolText.contains("preview is shortened"))
+        let object = try #require(AgentToolResult.decodeStructuredPayload(toolText)?.objectValue)
+        #expect(object["stdout"]?.stringValue == output)
+        #expect(object["full_output"]?.objectValue?["stdout"]?.stringValue == ".pocketagent/runs/r1/stdout")
+        #expect(object["saved_to"]?.stringValue == "result.json")
+        let action = try #require(object["phone_actions"]?.arrayValue?.first?.objectValue)
+        #expect(action["tool"]?.stringValue == "observe_screen" && action["ok"]?.boolValue == true)
+        #expect(object["token"]?.stringValue == "[REDACTED]")
         #expect(HostToolResult.make(callID: "x", content: String(repeating: "z", count: HostToolResult.limit + 10)).content.utf8.count
                 < HostToolResult.limit + 200)
     }
