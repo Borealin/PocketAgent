@@ -1988,6 +1988,9 @@ flow remains unaccepted. No app-side namespace workaround is retained: Apple's
 API specifies a bundle-prefixed identifier, and the bounded debugger probe did
 not evaluate registration or submission. Candidate publication scope must not
 represent the development copy as AltStore/Duo acceptance.
+The task owner authorized publishing the 0.4.0 candidate and updating the
+existing source with this validation boundary; Duo/AltStore acceptance remains
+separate from that publication.
 
 The PR #1 compatibility review reproduced optional-null rejection and nonempty
 paste false confirmation using the compiled Core code, and old-patch bootstrap

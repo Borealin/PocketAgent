@@ -8,6 +8,11 @@ provider you configure.
 
 ## Installation
 
+The 0.4.0 candidate has been exercised on an iPhone 12 mini with development
+signing. Duo layouts and its actual AltStore 2.3.2 re-signing flow remain
+unverified. A signer that renames the app must also update its permitted
+background-task identifiers; otherwise a turn can be rejected before it starts.
+
 The 0.4.0 candidate's default DDI backend uses the main app, Developer Mode, an RP pairing record
 and a local VPN. It needs no Automation companion or XCTest authorization.
 Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
