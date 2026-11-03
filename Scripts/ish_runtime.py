@@ -5,7 +5,7 @@ Inputs are pinned in dependencies.json (`iSH` archives and `alpineRootfs`).
 Outputs are ignored build products under .build/ish:
 
   sources/ish                    patched iSH tree (with deps)
-  <config>-iphoneos/*.a          static libraries linked into the app
+  <config>-<sdk>/*.a             static libraries linked into the app
   ish-root.tar.gz                Alpine i386 rootfs bundled as an app resource
   PocketAgent-iSH-source.tar.gz  corresponding source for GPL distribution
 
@@ -200,13 +200,13 @@ def library_paths(products):
     return found
 
 
-def build(configuration='Release', force=False):
+def build(configuration='Release', force=False, sdk='iphoneos'):
     source = fetch()
-    products = OUT / f'{configuration}-iphoneos'
+    products = OUT / f'{configuration}-{sdk}'
     marker = products / '.pocketagent-build'
-    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
+    sdk_version = subprocess.check_output(['xcrun', '--sdk', sdk, '--show-sdk-version'], text=True).strip()
     settings = hashlib.sha256(json.dumps([prefix_maps(), KERNEL_IDENTITY]).encode()).hexdigest()[:16]
-    signature = f'{configuration}:{sdk}:{source_signature()}:{settings}'
+    signature = f'{configuration}:{sdk}:{sdk_version}:{source_signature()}:{settings}'
     write_notices(source)
     if not force and marker.is_file() and marker.read_text() == signature and \
             all((products / f'{lib}.a').is_file() for lib in LIBRARIES + ['libiSHHost']):
@@ -229,7 +229,7 @@ def build(configuration='Release', force=False):
                                     ('deps/libarchive.xcodeproj', 'libarchive', configuration)]:
         built = products / f'.{target}'
         run(['xcodebuild', '-project', source / project, '-target', target, '-configuration', config,
-             '-sdk', 'iphoneos', 'ARCHS=arm64', 'IPHONEOS_DEPLOYMENT_TARGET=16.4',
+             '-sdk', sdk, 'ARCHS=arm64', 'IPHONEOS_DEPLOYMENT_TARGET=16.4',
              f'CONFIGURATION_BUILD_DIR={built}', f'OBJROOT={products}/.obj-{target}', f'SYMROOT={built}',
              f'MESON_BUILD_DIR={products}/meson', 'CODE_SIGNING_ALLOWED=NO', 'CODE_SIGNING_REQUIRED=NO',
              *prefix, 'build'], env=env)
@@ -241,17 +241,18 @@ def build(configuration='Release', force=False):
     if configuration == 'Release' and 'buildtype = debugoptimized' not in options:
         raise SystemExit('iSH meson build is not optimized:\n' + options)
     # fakefs import (tools/fakefs.c) and fchdir helper are not Xcode targets.
-    sdk_path = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
+    sdk_path = subprocess.check_output(['xcrun', '--sdk', sdk, '--show-sdk-path'], text=True).strip()
+    minimum = '-mios-simulator-version-min=16.4' if sdk == 'iphonesimulator' else '-miphoneos-version-min=16.4'
     objects = []
     for c in ['tools/fakefs.c', 'util/fchdir.c']:
         obj = products / (Path(c).stem + '.o')
-        run(['xcrun', '--sdk', 'iphoneos', 'clang', '-arch', 'arm64', '-isysroot', sdk_path,
-             '-miphoneos-version-min=16.4', '-O2', *prefix_maps(),
+        run(['xcrun', '--sdk', sdk, 'clang', '-arch', 'arm64', '-isysroot', sdk_path,
+             minimum, '-O2', *prefix_maps(),
              '-I', source, '-I', source / 'deps/libarchive/libarchive', '-c', source / c, '-o', obj], env=env)
         objects.append(obj)
-    run(['xcrun', '--sdk', 'iphoneos', 'libtool', '-static', '-o', products / 'libiSHHost.a', *objects], env=env)
-    symbols = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', 'nm', '-gU', products / 'libiSHLinux.a'], text=True)
-    symbols += subprocess.check_output(['xcrun', '--sdk', 'iphoneos', 'nm', '-gU', products / 'liblinux.a'], text=True)
+    run(['xcrun', '--sdk', sdk, 'libtool', '-static', '-o', products / 'libiSHHost.a', *objects], env=env)
+    symbols = subprocess.check_output(['xcrun', '--sdk', sdk, 'nm', '-gU', products / 'libiSHLinux.a'], text=True)
+    symbols += subprocess.check_output(['xcrun', '--sdk', sdk, 'nm', '-gU', products / 'liblinux.a'], text=True)
     for symbol in ['_pocket_mount_workspace', '_pocket_run_process', '_pocket_user_tasks',
                    '_pocket_set_blocked_hosts', '_pocket_hostfs_set_root']:
         if symbol not in symbols:
@@ -467,13 +468,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['fetch', 'build', 'rootfs', 'verify-rootfs', 'source', 'all'])
     parser.add_argument('--configuration', default='Release')
+    parser.add_argument('--sdk', choices=['iphoneos', 'iphonesimulator'], default='iphoneos')
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--strict', action='store_true', help='source: fail if a module source is missing')
     args = parser.parse_args()
     if args.command == 'fetch':
         print(fetch(args.force))
     if args.command in ['build', 'all']:
-        build(args.configuration, args.force)
+        build(args.configuration, args.force, args.sdk)
     if args.command in ['rootfs', 'all']:
         rootfs(args.force)
     if args.command == 'verify-rootfs':

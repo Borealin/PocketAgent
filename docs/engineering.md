@@ -2,6 +2,37 @@
 
 ## Requirements and scope
 
+The [Duo adaptation](duo-adaptation.md) replaces the custom session drawer with
+one system `NavigationSplitView` hierarchy. Compact windows show the selected
+conversation with native navigation back to the session list; wider windows can
+show both columns. Keep the system's column sizing and style: forcing a narrow
+sidebar prevented the half-fold layout from aligning its columns with the
+division region. With those overrides removed, the simulator places a column
+on either side of the vertical fold. Native forms, sheets and bars retain their
+own safe-area handling. iPhone now declares both landscape orientations;
+compact-height editing displays at most three draft lines, with the remaining
+text scrollable, while other layouts retain the six-line limit.
+
+Both native build scripts accept `--sdk iphonesimulator` for real arm64 simulator
+libraries, in separate product/cache directories; their default remains
+`iphoneos`. The generated project selects matching native and iSH libraries by
+SDK. Simulator Debug linking exposed libarchive's bzip2 compression dependency;
+the app explicitly links `bz2`. These builds keep the pinned native code and
+do not replace phone or script execution with simulated successes.
+
+The Duo simulator checks cover outer-screen rotation, open inner-screen layouts,
+both half-fold axes, software-keyboard avoidance, retained draft/model/session
+identity, Settings/provider forms and model/project pickers. They do not accept
+the full system Split View matrix, all secondary screens, model execution or
+DDI/WDA control on Duo. A separate system-task probe on the same iOS 27.2
+simulator returns `BGTaskSchedulerErrorDomain` code 1, explicitly stating that
+the scheduler is unavailable on this platform. The system task indicator still
+has no implemented default-collapse/timed-expansion contract: the public
+`BGContinuedProcessingTask` API supplies no presentation timer, and the existing
+portrait-only horizontal preparation gesture is unchanged. A connected physical
+Duo is required to reproduce and validate that reported obstruction. The UI
+adaptation and successful builds must not be presented as its repair.
+
 The [single-entry and long-term memory design](long-lived-assistant.md)
 records the user-confirmed 2026-10-14 direction, the public research behind it
 and the implemented P1–P4 contract: a default "你的助理" entry on the existing

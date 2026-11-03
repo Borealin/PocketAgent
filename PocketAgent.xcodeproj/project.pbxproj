@@ -557,11 +557,12 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = .build/Info.plist;
 				ISH_PRODUCTS = "$(SRCROOT)/.build/ish/Release-iphoneos";
+				"ISH_PRODUCTS[sdk=iphonesimulator*]" = "$(SRCROOT)/.build/ish/Release-iphonesimulator";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv";
+				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -lbz2 -liconv";
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -627,8 +628,10 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
+				OTHER_LDFLAGS = "$(inherited) $(POCKETAGENT_NATIVE_PRODUCTS)/libidevice_ffi.a";
 				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
+				POCKETAGENT_NATIVE_PRODUCTS = "$(SRCROOT)/.build/native";
+				"POCKETAGENT_NATIVE_PRODUCTS[sdk=iphonesimulator*]" = "$(SRCROOT)/.build/native-iphonesimulator";
 				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -691,8 +694,10 @@
 				MARKETING_VERSION = 0.4.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_LDFLAGS = "$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a";
+				OTHER_LDFLAGS = "$(inherited) $(POCKETAGENT_NATIVE_PRODUCTS)/libidevice_ffi.a";
 				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(SRCROOT)=.";
+				POCKETAGENT_NATIVE_PRODUCTS = "$(SRCROOT)/.build/native";
+				"POCKETAGENT_NATIVE_PRODUCTS[sdk=iphonesimulator*]" = "$(SRCROOT)/.build/native-iphonesimulator";
 				POCKETAGENT_RUNNER_BUNDLE_ID = io.github.borealin.PocketAgent.WDA.xctrunner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -710,11 +715,12 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = .build/Info.plist;
 				ISH_PRODUCTS = "$(SRCROOT)/.build/ish/Release-iphoneos";
+				"ISH_PRODUCTS[sdk=iphonesimulator*]" = "$(SRCROOT)/.build/ish/Release-iphonesimulator";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv";
+				OTHER_LDFLAGS = "$(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20 -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -lbz2 -liconv";
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.borealin.PocketAgent;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

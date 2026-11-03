@@ -13,7 +13,9 @@ settings:
     SWIFT_INCLUDE_PATHS: '$(SRCROOT)/Native'
     OTHER_SWIFT_FLAGS: '$(inherited) -file-prefix-map $(SRCROOT)=.'
     HEADER_SEARCH_PATHS: '$(SRCROOT)/Native'
-    OTHER_LDFLAGS: '$(inherited) $(SRCROOT)/.build/native/libidevice_ffi.a'
+    POCKETAGENT_NATIVE_PRODUCTS: '$(SRCROOT)/.build/native'
+    'POCKETAGENT_NATIVE_PRODUCTS[sdk=iphonesimulator*]': '$(SRCROOT)/.build/native-iphonesimulator'
+    OTHER_LDFLAGS: '$(inherited) $(POCKETAGENT_NATIVE_PRODUCTS)/libidevice_ffi.a'
     POCKETAGENT_RUNNER_BUNDLE_ID: io.github.borealin.PocketAgent.WDA.xctrunner
 packages:
   AgentKit:
@@ -50,11 +52,12 @@ targets:
         # The iSH kernel libraries need their sections aligned and every
         # initcall object loaded (Scripts/ish_runtime.py builds them).
         ISH_PRODUCTS: '$(SRCROOT)/.build/ish/Release-iphoneos'
+        'ISH_PRODUCTS[sdk=iphonesimulator*]': '$(SRCROOT)/.build/ish/Release-iphonesimulator'
         OTHER_LDFLAGS: >-
           $(inherited) -Wl,-sectalign,__DATA,__percpu_first,1000 -Wl,-sectalign,__DATA,__tracepoints,20
           -force_load $(ISH_PRODUCTS)/liblinux.a -force_load $(ISH_PRODUCTS)/libiSHLinux.a
           $(ISH_PRODUCTS)/libiSHLinuxUser.a $(ISH_PRODUCTS)/libfakefs.a $(ISH_PRODUCTS)/libish_emu.a
-          $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -liconv
+          $(ISH_PRODUCTS)/libarchive.a $(ISH_PRODUCTS)/libiSHHost.a -lsqlite3 -lz -lbz2 -liconv
     info:
       path: .build/Info.plist
       properties:
@@ -64,6 +67,8 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
