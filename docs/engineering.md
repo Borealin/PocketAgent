@@ -1975,6 +1975,20 @@ digest, matching-commit, replacement and timeout steps and all production
 deadlines remain unchanged. This removes the unnecessary actor contention
 without weakening the timeout or adding production state.
 
+A re-signed bundle can pass the RP/VPN check yet reject a turn before its
+startup permit when the signer changes `CFBundleIdentifier` without updating
+`BGTaskSchedulerPermittedIdentifiers`. The generated continued-task identifier
+then falls outside the declared wildcard; this was reproduced on the reference
+phone with mismatched signing metadata and resolved in the development copy by
+keeping those fields synchronized. It is not a pairing-file failure. The
+[published AltStore signing source](https://github.com/altstoreio/AltStore/blob/56854e66fef2eac32dad88dcbad1dc131d430e60/AltStore/Operations/ResignAppOperation.swift#L108-L143)
+renames the bundle without this wildcard rewrite, but the installed 2.3.2
+binary's behavior has not been established. The Duo's actual AltStore-signed
+flow remains unaccepted. No app-side namespace workaround is retained: Apple's
+API specifies a bundle-prefixed identifier, and the bounded debugger probe did
+not evaluate registration or submission. Candidate publication scope must not
+represent the development copy as AltStore/Duo acceptance.
+
 The PR #1 compatibility review reproduced optional-null rejection and nonempty
 paste false confirmation using the compiled Core code, and old-patch bootstrap
 upgrade failure using an isolated checkout of the pinned idevice revision. Source
