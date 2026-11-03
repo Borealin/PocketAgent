@@ -7,7 +7,8 @@
 Mac 需要能正常识别、信任目标 iPhone。下面的官方工具是 Apple Silicon / Intel
 通用版；建议使用仍在维护的 macOS。通用二进制不代表所有旧 macOS 和所有
 iOS 版本组合都经过 PocketAgent 验证。手机需设置解锁密码；使用 PocketAgent
-手机操作还需打开开发者模式、安装同版本 Automation，并连接 LocalDevVPN。
+手机操作还需打开开发者模式并连接 LocalDevVPN。0.4.0 默认使用 DDI；选择
+WDA 后端时，才需要安装同版本 Automation 并完成 XCTest 系统授权。
 
 ## 1. 下载 Mac 图形化工具
 
@@ -68,10 +69,10 @@ GUI 的“Save to file”可能覆盖所选文件，务必选新文件；重新�
 2. 在 iPhone 上选择“存储到文件”。其他传输方式也可以，最终让它出现在
    “文件”App 中。
 3. 打开 PocketAgent → 左上角列表 → **设置**。
-   - 已发布的 **0.3.1**：**设备配对 → 导入配对文件…**。
-   - **0.3.2**（目前待发布，测试设备已安装）：**手机操作配置 → 从“文件”导入配对文件…**。
+   - **0.3.2 及以后（含 0.4.0）**：**手机操作配置 → 从“文件”导入配对文件…**。
+   - **0.3.1**：**设备配对 → 导入配对文件…**。
 4. 选择刚传来的 plist，确认导入成功。
-5. 连接 LocalDevVPN，保持手机解锁。0.3.2 可点 **检查连接**，检查已保存的
+5. 连接 LocalDevVPN，保持手机解锁。点 **检查连接**，检查已保存的
    配对和 VPN；这一步不会启动 Automation 或打开其他 App。
 
 同一文件只能用于它配对的那台 iPhone。更换手机要为新手机生成文件。
@@ -79,8 +80,9 @@ GUI 的“Save to file”可能覆盖所选文件，务必选新文件；重新�
 导入后的记录只保存在 PocketAgent 本机受保护的存储中，不参与 iCloud 同步
 或备份；Mac 上导出的原文件由你保管。
 
-首次运行手机操作时，iOS 可能显示 **Enable UI Automation / XCTest**，需要
-在手机的系统页面输入解锁密码。它与本节的文件导入是两个步骤。
+选择 WDA 后端后，首次运行手机操作时，iOS 可能显示
+**Enable UI Automation / XCTest**，需要在手机的系统页面输入解锁密码。
+它与本节的文件导入是两个步骤；默认 DDI 后端不需要这项 XCTest 授权。
 
 ## 常见问题
 
@@ -90,8 +92,8 @@ GUI 的“Save to file”可能覆盖所选文件，务必选新文件；重新�
 | Create 失败或开发者镜像未准备好 | 检查手机开发者模式，保持解锁和网络连接，等待自带镜像个性化挂载完成；重新连接再试。 |
 | Create 一直显示 Trust this computer on your device | 查看手机上的第二个 RP 信任弹窗，核对请求方为本次 idevice_pair，点 Trust 并完成系统密码步骤。USB 信任和 RP 信任是两个阶段。 |
 | 导入提示 SideStore / Lockdown 格式 | 回到工具选择 Remote pairing，重新 Create、Validate、Save；不是更改扩展名。 |
-| 导入成功但连接失败 | 核对文件属于这台手机，LocalDevVPN 显示 Connected，手机未锁屏。0.3.1 需在运行手机工具时检查；0.3.2 有独立检查按钮。 |
-| 配对/VPN 检查成功，但手机操作失败 | 检查 Automation 是否同版本且未过签名有效期，安装后的 Bundle ID 是否与设置一致，以及 XCTest 系统授权。 |
+| 导入成功但连接失败 | 核对文件属于这台手机，LocalDevVPN 显示 Connected，手机未锁屏。0.3.2 及以后有独立检查按钮；0.3.1 需在运行手机工具时检查。 |
+| 配对/VPN 检查成功，但手机操作失败 | 检查所选后端和开发者模式。使用 WDA 时，还需检查 Automation 是否同版本且未过签名有效期、安装后的 Bundle ID 和 XCTest 系统授权。 |
 
 ## 命令行方式（可选）
 
