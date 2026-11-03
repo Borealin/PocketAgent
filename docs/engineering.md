@@ -334,7 +334,8 @@ on the next launch.
 
 Build an ordinary Xcode project from XcodeGen plus pinned dependencies. IPA
 artifacts carry no development profile, team identity, credential or device
-record. A separate WDA companion IPA is necessary for phone automation. The
+record. DDI is the default phone backend; the separate WDA companion IPA is
+required only when WDA is selected. The
 AltStore Classic feed lists real versions, sizes, hashes and permissions. PAL
 notarization and LiveContainer guest execution are separate and untested paths.
 
@@ -344,7 +345,7 @@ mirror is needed. The README provides the official HTTPS AltStore source deep
 link, a source URL for SideStore, manual IPA downloads and initial device setup.
 The feed, icon, both IPAs, checksums and complete corresponding source are
 publicly accessible without GitHub authentication. Public hosting does not
-remove sideload signing, the separate automation companion or device setup.
+remove sideload signing or device setup; WDA also needs its automation companion.
 
 ## Architecture and compatibility
 
@@ -915,7 +916,8 @@ handshake checks pairing and VPN without starting an automation runner. That
 result does not establish Automation installation or XCTest authorization.
 
 The Mac onboarding guide uses upstream idevice_pair v1.1.0's universal GUI and
-documents the released 0.3.1 and staged 0.3.2 import locations. An optional Bash
+documents current and historical import locations, including the default DDI
+and optional WDA setup in 0.4.0. An optional Bash
 download helper pins its official DMG URL and SHA-256, uses an independently
 created private Downloads directory, verifies before opening and never reads or
 writes a pairing record. It does not install the GUI or change the phone. The
@@ -1962,6 +1964,33 @@ in the parent workspace work/ directory. Synchronization runtime claims require
 actual iCloud folder access; multi-device convergence requires two-device proof.
 
 ## Confirmed integration problems and fixes
+
+The 0.4.0 candidate preparation found a post-merge Core CI timeout in
+`barrierWaitsForDurableContentAndRejectsWrongDigest`. Its standalone,
+thread-safe barrier ran inside a MainActor-isolated suite: test sleeps required
+the matching commit to resume on that actor while the barrier's five-second
+timeout could run independently. The failing runner's precise scheduling cause
+was not reproduced locally. Only this test is now nonisolated; its existing
+digest, matching-commit, replacement and timeout steps and all production
+deadlines remain unchanged. This removes the unnecessary actor contention
+without weakening the timeout or adding production state.
+
+A re-signed bundle can pass the RP/VPN check yet reject a turn before its
+startup permit when the signer changes `CFBundleIdentifier` without updating
+`BGTaskSchedulerPermittedIdentifiers`. The generated continued-task identifier
+then falls outside the declared wildcard; this was reproduced on the reference
+phone with mismatched signing metadata and resolved in the development copy by
+keeping those fields synchronized. It is not a pairing-file failure. The
+[published AltStore signing source](https://github.com/altstoreio/AltStore/blob/56854e66fef2eac32dad88dcbad1dc131d430e60/AltStore/Operations/ResignAppOperation.swift#L108-L143)
+renames the bundle without this wildcard rewrite, but the installed 2.3.2
+binary's behavior has not been established. The Duo's actual AltStore-signed
+flow remains unaccepted. No app-side namespace workaround is retained: Apple's
+API specifies a bundle-prefixed identifier, and the bounded debugger probe did
+not evaluate registration or submission. Candidate publication scope must not
+represent the development copy as AltStore/Duo acceptance.
+The task owner authorized publishing the 0.4.0 candidate and updating the
+existing source with this validation boundary; Duo/AltStore acceptance remains
+separate from that publication.
 
 The PR #1 compatibility review reproduced optional-null rejection and nonempty
 paste false confirmation using the compiled Core code, and old-patch bootstrap

@@ -8,7 +8,12 @@ provider you configure.
 
 ## Installation
 
-This branch's DDI backend uses the main app, Developer Mode, an RP pairing record
+The 0.4.0 candidate has been exercised on an iPhone 12 mini with development
+signing. Duo layouts and its actual AltStore 2.3.2 re-signing flow remain
+unverified. A signer that renames the app must also update its permitted
+background-task identifiers; otherwise a turn can be rejected before it starts.
+
+The 0.4.0 candidate's default DDI backend uses the main app, Developer Mode, an RP pairing record
 and a local VPN. It needs no Automation companion or XCTest authorization.
 Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
 selection is captured when a turn is queued. DDI currently accepts verified
@@ -27,15 +32,14 @@ the App response because some validation callbacks may not fire. AX excludes
 password fields, TextView and caret insertion. AX does not promise focus transfer;
 confirm target focus before submitting a keyboard action. Uncertain effects are never replayed. Keyboard calls return the actual screen
 without assuming the layout or claiming that composition has committed.
-The published candidate instructions below describe the earlier WDA release;
-the DDI change has not been published to that feed.
-
-The source offers both apps from the
-[v0.3.7 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.7).
-This update adds installed-app lookup and opening by the exact name reported
-by the device, with explicit ambiguity handling and no guessed bundle IDs.
-Phone tools support observed search fields, ordinary scrolling and coordinate
-swipes for nested lists or edge-back gestures. Changed foreground apps and stale
+The source offers the main app and optional WDA companion from the
+[0.4.0 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0).
+This release adds the default "你的助理" entry, explicit long-term memory,
+validated history summaries, a pending-next request, faster long-history streaming
+and the pinned AgentKit 4 runtime. It starts a new history namespace; read the
+upgrade note below before updating. Phone tools retain installed-app lookup and
+opening by the exact name reported by the device, explicit ambiguity handling,
+ordinary scrolling and coordinate swipes. Changed foreground apps and stale
 nodes return a fresh observation when possible; interrupted actions are never
 replayed. Screen parts drawn by another system process, such as the keyboard's
 paste suggestion, are reported as present but not read; a tap that would land on
@@ -53,38 +57,42 @@ The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
 0.3.1 and later package the complete test module as a nested framework.
 Update both apps when leaving 0.3.0; do not mix the old companion with the new app.
 
-[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.7)
+[![Download IPAs](https://img.shields.io/badge/Download-IPAs-6554E8?style=for-the-badge)](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0)
 [![Add source to AltStore](https://img.shields.io/badge/AltStore-Add_source-38A169?style=for-the-badge)](https://altstore.io/source/raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json)
 
 Recommended: [add the source](#altstore-classicsidestore-source) and install
-**PocketAgent** and **PocketAgent Automation** from it. Both are required for
-phone tools. To install manually:
+**PocketAgent** from it. Install **PocketAgent Automation** as well if you select
+the WDA backend. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the v0.3.7 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.3.7)
-   in Safari. Download both `PocketAgent-<version>.ipa`
-   and `PocketAgent-WDA-<version>.ipa` to Files.
-3. Import and sign **both IPAs from the same release** in your sideloading app. The second one is
-   **PocketAgent Automation**, required for phone tools. Keep both installed
-   and refresh their signatures using the sideloading app.
+2. Open [the 0.4.0 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0)
+   in Safari. Download `PocketAgent-0.4.0.ipa` to Files. For WDA, also download
+   `PocketAgent-WDA-0.4.0.ipa`.
+3. Import and sign the IPA in your sideloading app. For WDA, install **both IPAs
+   from the same release**. Refresh the installed apps' signatures using the
+   sideloading app.
 4. Enable Developer Mode, configure the local VPN and import this phone's
    **idevice RP pairing record** using the [Mac setup guide (中文)](docs/pairing-zh.md).
-   Leave the advanced Automation Bundle ID empty for automatic matching.
+   For WDA, leave the advanced Automation Bundle ID empty for automatic matching.
    A manual override is available if your signing layout differs.
 5. Add your API provider and model in Settings, then start a conversation.
 
 For an existing installation, update using the same signing account and bundle
-IDs to retain its local data. Do not delete the app first. A separately signed
-installation needs its own credentials and device configuration; portable
-conversations can be imported through the same iCloud Drive sync folder.
+IDs to retain its local settings and current-format data. Do not delete the app
+first. **Upgrading from the published 0.3.x starts an empty assistant-v1 history; earlier
+conversations stay untouched on the device and are not read or migrated.**
+Provider settings, API keys, pairing and phone settings are retained with the
+same signing identity. A separately signed installation needs its own credentials
+and device configuration; only compatible current-format portable conversations
+can be imported through the same iCloud Drive sync folder.
 When upgrading from v0.3.0 to v0.3.1, update both apps: the test module's location
 changed, so mixing these versions does not support phone automation.
 
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.3.7 candidate (build 10)** for both apps. Stable releases update
+offering the **0.4.0 candidate (build 19)** for both apps. Stable releases update
 the feed automatically; this candidate is included explicitly for device validation.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its
@@ -96,7 +104,7 @@ Sources screen. No GitHub sign-in is required.
 https://raw.githubusercontent.com/Borealin/PocketAgent/main/Distribution/source.json
 ```
 
-After adding the source, install both apps from it. New releases appear as
+After adding the source, install PocketAgent and the companion if using WDA. New releases appear as
 updates in the sideloading app. Adding a source still requires signing and the
 initial device setup described below.
 
@@ -251,7 +259,7 @@ Apple ID or IPA signing account.
 [![Download pairing tool](https://img.shields.io/badge/Download-Mac配对工具-38A169?style=for-the-badge)](https://github.com/jkcoxson/idevice_pair/releases/download/v1.1.0/idevice_pair--macos-universal.dmg)
 
 The [Chinese guide](docs/pairing-zh.md) covers USB trust, the GUI, AirDrop and
-both 0.3.1/0.3.2 import locations. The official DMG supports Apple Silicon and
+current and older import locations. The official DMG supports Apple Silicon and
 Intel without Rust, Python or Xcode. The optional
 [download script](Scripts/download_pairing_tool.command) downloads that fixed
 release, verifies SHA-256 and opens its DMG; it does not install software or

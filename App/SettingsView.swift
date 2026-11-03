@@ -247,7 +247,6 @@ struct PhoneSetupView: View {
 }
 
 struct PairingGuideView: View {
-    private let command = "idevice-tools remotepairing_lockdown pair PocketAgent rp_pairing_file.plist"
     var body: some View {
         List {
             Section {
@@ -256,10 +255,10 @@ struct PairingGuideView: View {
             }
             Section {
                 Text("首次生成") .font(.headline)
-                Text("首次需要电脑通过 USB 与这台 iPhone 建立 RP 配对。解锁手机、信任电脑，并使用包含 remotepairing_lockdown 的 idevice-tools 版本运行：")
-                Text(command).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
-                Button("复制电脑命令") { UIPasteboard.general.string = command }
-                Link("idevice-tools 项目与安装说明", destination: URL(string: "https://github.com/jkcoxson/idevice")!)
+                Text("在 Mac 上打开官方 idevice_pair 图形工具，用 USB 连接这台 iPhone，保持解锁并信任电脑。不需要先安装命令行工具。")
+                Text("选中这台手机 → Remote pairing → Create。在手机上完成可能再次出现的信任与密码确认，再点 Validate → Save to file…，另存为新文件。")
+                Link("Mac 配对教程（含命令行方式）", destination: URL(string: "https://github.com/Borealin/PocketAgent/blob/main/docs/pairing-zh.md")!)
+                Link("官方 Mac 配对工具", destination: URL(string: "https://github.com/jkcoxson/idevice_pair/releases/tag/v1.1.0")!)
                 Text("生成后传到手机并导入。之后的聊天、脚本和手机操作可在手机上运行；配对文件不要分享给他人。")
             }
             Section {

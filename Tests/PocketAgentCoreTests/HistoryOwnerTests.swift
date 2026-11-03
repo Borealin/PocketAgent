@@ -105,7 +105,7 @@ struct HistoryOwnerTests {
         }
     }
 
-    @Test func barrierWaitsForDurableContentAndRejectsWrongDigest() async throws {
+    @Test nonisolated func barrierWaitsForDurableContentAndRejectsWrongDigest() async throws {
         let barrier = TranscriptCommitBarrier()
         barrier.open(epoch: 3)
         let message = AgentTranscriptMessage(role: .assistant, text: "a")
