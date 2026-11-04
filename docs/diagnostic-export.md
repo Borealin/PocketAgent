@@ -42,7 +42,8 @@ export does not establish that no matching runs exist beyond the scan.
 Use no-follow directory/file opens and accept only regular log files.
 
 The allowlists retain the actual notification phase names, prepared-connection
-lifecycle events and script progress reasons emitted by the current loggers.
+lifecycle events, DDI service-directory refresh start/failure/completion events,
+and script/phone-preparation progress reasons emitted by the current loggers.
 The privacy regression exercises these values through the exported archive;
 script reasons are derived from the real `ScriptStage` cases in the fixture.
 

@@ -1460,8 +1460,10 @@ Stop/deadline/lease/storage checks run between steps and before any action.
 The chat and system task now show the reached preparation stage (connection,
 image check/download/mount, directory refresh, inventory, control connection),
 rather than the pending screen-read label, without counting preparation as a
-completed phone action. Core/native regressions cover cold and mounted paths,
-late-mount recovery ordering, failed refresh publication, mount failure/Stop and
+completed phone action. Diagnostic export retains the three directory-refresh
+events and the fixed `phone_preparation` reason through its closed allowlists;
+arbitrary error text/reasons remain excluded. Core/native regressions cover cold
+and mounted paths, late-mount recovery ordering, failed refresh publication, mount failure/Stop and
 display. Exact Duo cold-start, late-mount recovery and already-mounted runtime
 acceptance remain pending; host tests and builds cannot certify those paths.
 
