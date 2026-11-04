@@ -1450,9 +1450,10 @@ before DDI service setup or AX reading. The pinned `send_device_handshake`
 generated a new host UUID on every RSD connection, so refresh changed the peer
 identity. The [pymobiledevice3 protocol implementation](https://github.com/doronz88/pymobiledevice3/blob/103647ae12ed50d955fa6910d7d3a9363cc36608/pymobiledevice3/remote/remotexpc.py#L76-L102)
 records that a changed peer UUID on the same tunnel makes remoted reattach and
-close its service listeners. This establishes a protocol defect consistent
-with the reset; proving that it caused this Duo failure still requires the
-rebuilt candidate's device run. No listening-port error is inferred from RST.
+close its service listeners. Joint QA19.1.5, bound to PR #9 `4d37aa0` native
+inputs (`1c92e7e`, tree `e56f99…`), supports this peer-identity diagnosis: two
+consecutive fresh-RP warm observations and WDA launch → `press_home` → `wait` →
+normal cleanup stop passed, with the owned runner PID confirmed absent afterward.
 
 Before opening control services, preparation now re-reads RSD on the retained
 RP tunnel, using the discovery port and host peer UUID captured by its first
@@ -1483,8 +1484,11 @@ native wire regression decodes the initial and refresh HTTP/2/XPC handshakes,
 requires the same host peer UUID, and supplies changed service advertisements.
 Restoring the old refresh constructor makes it fail. Failure/timeout retains
 the old directory. This host peer fixture is not a real RP tunnel or an iOS
-remoted instance. Exact Duo cold-start, late-mount recovery and already-mounted
-runtime acceptance remain pending; host tests and builds cannot certify them.
+remoted instance. No operator Stop was clicked, so the WDA result covers
+normal `stopRunner` cleanup, not button cancellation. Cold startup and
+same-connection real late-mount remain recommended unrun cases rather than
+revision blockers; the original 120-second mount-wait stage and original AX
+root cause remain unconfirmed.
 
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
