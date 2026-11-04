@@ -2364,7 +2364,9 @@ the assistant and stops the owned runner before `setTaskCompleted(success:)`.
 Failed work retains the background-ended cause; already completed agent work
 keeps its completed outcome. No interrupted action is automatically replayed.
 
-A private 0.4.0 (19), iOS 27.3 capture confirms this distinction: expiration
+A private turn's submission log reports iOS 27.2. The following day's inventory
+reported iOS 27.3 and app 0.4.0 (19); that later inventory does not establish
+the failed turn's system or binary version. In the captured turn, expiration
 arrived 93 seconds after submission during a phone action, only 1.5 seconds
 after progress advanced to 22/23 on the same object. A preceding 25.4-second
 tool interval ended successfully and further actions completed before expiration.
