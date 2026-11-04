@@ -2,53 +2,11 @@
 
 ## Requirements and scope
 
-The [Duo adaptation](duo-adaptation.md) replaces the custom session drawer with
-one system `NavigationSplitView` hierarchy. Compact windows show the selected
-conversation with native navigation back to the session list; wider windows can
-show both columns. Keep the system's column sizing and style: forcing a narrow
-sidebar prevented the half-fold layout from aligning its columns with the
-division region. With those overrides removed, the simulator places a column
-on either side of the vertical fold. Native forms, sheets and bars retain their
-own safe-area handling. iPhone now declares both landscape orientations;
-compact-height editing displays at most three draft lines, with the remaining
-text scrollable, while other layouts retain the six-line limit.
-
-Both native build scripts accept `--sdk iphonesimulator` for real arm64 simulator
-libraries, in separate product/cache directories; their default remains
-`iphoneos`. The generated project selects matching native and iSH libraries by
-SDK. Simulator Debug linking exposed libarchive's bzip2 compression dependency;
-the app explicitly links `bz2`. These builds keep the pinned native code and
-do not replace phone or script execution with simulated successes.
-
-The horizontal preparation gesture's implementation is unchanged, but its
-geometry is captured only once, when the turn's `PhoneExecutor` is created.
-Capture requires a foreground phone key window in portrait, portrait screen
-bounds and a top safe inset of at least 59 points. A turn created in landscape
-captures no geometry and skips this gesture for the whole turn, even if the
-target later returns to portrait; geometry is not sampled again. When geometry
-was captured, the observed frame must still match it before the gesture runs.
-DDI separately refuses rotated display geometry. Rotatable UI does not establish
-Duo phone-control acceptance, and inner-display guard behavior remains untested.
-
-Candidate 19.1.7 confirms why the closed outer display skips preparation in
-portrait: its safe insets are top 0/right 84 points, so the existing top-inset capture
-guard rejects it, so the app sent no preparation gesture. An external manual
-status-band horizontal probe at 4% of screen height did not collapse the card.
-External manual central upward swipes collapsed it while the task continued;
-this is not a candidate-app repair. Repeating that gesture after collapse would
-start on underlying app content, outside the existing native status-band guard.
-
-The observed explicit-PID `ActivityProgressUI` snapshot is readable but lacks
-verified app/task ownership and a screen mapping for its host frames. Visibility
-flags and generic phase titles cannot prove this task's expanded card covers
-the swipe start. Safe automatic
-collapse remains blocked, and the requested default-collapse/transient-expansion
-contract remains unimplemented. The public `BGContinuedProcessingTask` API
-supplies no presentation timer. The iOS 27.2
-simulator rejects this scheduler with code 1 (unavailable on this platform).
-Physical checks must cover portrait-created and landscape-created turns,
-including a landscape-created turn whose target subsequently returns to portrait.
-The full Split View matrix and Duo DDI/WDA control remain unaccepted.
+The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
+accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.
+It contains the 19.1.7 display/session/draft acceptance, remaining inner-display
+DDI/WDA and layout limits, and the separate follow-up for the original automatic
+task-card collapse contract.
 
 The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
 ZIP snapshots from Settings and conversation context menus. Only allowlisted

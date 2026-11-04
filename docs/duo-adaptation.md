@@ -1,8 +1,10 @@
 # Duo adaptation
 
-The requested outcome is usable PocketAgent UI on the Duo simulator, including
-the outer display, open inner display, rotation, Split View and the keyboard,
-plus a task indicator that does not continually cover the target app.
+The user approved delivering the accepted Duo UI, real simulator builds and
+anonymous geometry diagnostic separately from automatic task-card collapse.
+The original default-collapse/transient-expansion contract and its
+portrait/landscape phone-turn matrix remain follow-up work in
+[#12](https://github.com/Borealin/PocketAgent/issues/12), outside this delivery.
 
 The UI uses one system `NavigationSplitView` for the session list and
 conversation. Retain its default sizing/style: removing the maximum sidebar
@@ -10,8 +12,12 @@ width restored an even division in the previously observed simulator pose with
 an active vertical fold; this is not a guarantee of equal columns in every pose.
 Candidate 19.1.7's current inner-display landscape layout was accepted, and
 manual new-session/return navigation restored the original session and draft,
-including its visible composer text; active-division alignment and the full
-system Split View matrix remain unaccepted. Conversation, model and draft remain owned by
+including its visible composer text. Returning to the outer portrait display
+preserved the selected session and the persisted/visible draft, with input and
+send controls inside the window. Existing session IDs/order, messages and attachments remained
+exact; the known validation draft was safely cleared, with no active turn.
+Active-division alignment and the full system Split View matrix remain unaccepted.
+Conversation, model and draft remain owned by
 `ChatController` across layout changes. Existing native forms and sheets keep
 their safe-area handling. Compact vertical size classes display at most
 three draft lines (the full draft remains scrollable); other layouts retain six.
@@ -86,8 +92,8 @@ The requested default-collapse/transient-expansion contract is unimplemented;
 the public task API supplies no
 presentation timer. An isolated iOS 27.2 simulator probe fails with
 `BGTaskSchedulerErrorDomain` code 1:
-`BGTaskScheduler is not available on this platform.` Physical acceptance must
-include portrait-created and landscape-created turns, including a
+`BGTaskScheduler is not available on this platform.` The separate task-card
+follow-up must exercise portrait-created and landscape-created turns, including a
 landscape-created turn whose target subsequently returns to portrait.
 The full system Split View resizing matrix, remaining secondary screens and
 inner-display DDI/WDA control remain unaccepted. Rotatable UI alone does not establish
