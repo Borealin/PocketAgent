@@ -2,15 +2,14 @@
 
 The requested outcome is usable PocketAgent UI on the Duo simulator, including
 the outer display, open inner display, rotation, Split View and the keyboard,
-plus a task indicator that does not continually cover the target app. The source
-baseline is `85b8272`; this work is on `codex/duo-adaptation`.
+plus a task indicator that does not continually cover the target app.
 
 The UI uses one system `NavigationSplitView` for the session list and
 conversation. Retain its default sizing/style: a maximum sidebar width prevented
 the system from aligning the two columns with the active vertical fold; removing
-it restores the even division. The selected conversation, model and full draft
-survive the checked window/posture changes. Existing native forms and sheets
-keep their safe-area handling. Compact vertical size classes display at most
+it restores the even division. Conversation, model and draft remain owned by
+`ChatController` across layout changes. Existing native forms and sheets keep
+their safe-area handling. Compact vertical size classes display at most
 three draft lines (the full draft remains scrollable); other layouts retain six.
 Both landscape orientations are enabled without changing the iOS 26 minimum.
 
@@ -21,6 +20,17 @@ less frequent updates alone cannot establish an obstruction fix. Reproduce its
 presentation before changing the current preparation gesture. Do not replace
 continued execution with a shorter background allowance, fake progress, replay
 phone effects or inject unverified gestures on a newly inferred Duo layout.
+
+The horizontal preparation gesture's implementation is unchanged, but the
+turn's `PhoneExecutor` captures its geometry only once at creation. Capture
+requires a foreground key window with phone idiom, portrait interface
+orientation, screen width less than height, and a top safe inset of at least
+59 points. A turn created in landscape captures no geometry and skips the
+gesture for the entire turn, even after the target returns to portrait; there
+is no resampling. With captured geometry, preparation still requires an exact
+match between the observed frame and the stored bounds, alongside its existing
+foreground and effect guards. Which Duo inner-display poses satisfy those
+conditions remains untested.
 
 Both native build scripts now accept `--sdk iphonesimulator`; `iphoneos` remains
 the default. The generated project selects `.build/native-iphonesimulator` and
@@ -43,28 +53,23 @@ Screenshots and logs stay outside Git. Simulator layout checks do not establish
 DDI/WDA control of a second app, hardware transitions or a signed physical Duo
 installation.
 
-DDI currently accepts only a single portrait primary display. Pane ownership,
-rotated touch mapping and multi-display targeting require verified device
-metadata before relaxing that refusal. Preserve the existing fresh-observation,
-serial-action and no-replay contracts while assessing this boundary.
+DDI currently accepts only a single portrait primary display and rejects rotated
+display geometry independently of the app's UI orientation support. Pane
+ownership, rotated touch mapping and multi-display targeting require verified
+device metadata before relaxing that refusal. Preserve the existing
+fresh-observation, serial-action and no-replay contracts.
 
-Current validation: 439 Core tests and 29 Distribution tests passed; the actual
-app builds and starts on the iOS 27.2 Duo simulator, and the iOS Release archive
-build and ad-hoc IPA signature/privacy inspection pass. The validation package
-retains the current version/build; it is not a published release or a signed
-physical-device acceptance artifact. Inspected outer portrait/landscape, inner layouts in both axes,
-book/tabletop half-fold layouts, software keyboard avoidance, retained full
-draft/model/session, Settings/provider forms and model/project pickers. The
-full system Split View resizing matrix and remaining secondary screens are
-still unaccepted; these checks used a nonsecret, non-networked layout fixture.
-
-The reported system indicator obstruction remains open. An isolated task probe
-on this simulator fails with `BGTaskSchedulerErrorDomain` code 1:
-`BGTaskScheduler is not available on this platform.` Thus neither background
-turn execution nor the requested default-collapse/transient-expansion behavior
-can be accepted here. The existing gesture is unchanged. A connected, unlocked
-physical Duo is the next prerequisite; no physical phone was operated during
-this UI work.
+The user reports system task-card obstruction on the closed outer display in
+portrait. Reproduction and repair in that condition remain required; the
+default-collapse/transient-expansion behavior is unimplemented. An isolated
+iOS 27.2 simulator probe fails with `BGTaskSchedulerErrorDomain` code 1:
+`BGTaskScheduler is not available on this platform.` Physical acceptance must
+include portrait-created and landscape-created turns, including a
+landscape-created turn whose target subsequently returns to portrait.
+The full system Split View resizing matrix, remaining secondary screens and
+Duo DDI/WDA control remain unaccepted. Rotatable UI alone does not establish
+phone-control acceptance. Revision-bound validation results and success
+artifacts are kept in the PR description and external evidence.
 
 References: [Apple's adaptive-layout guidance](https://developer.apple.com/videos/play/tech-talks/111463/),
 [Duo preparation](https://developer.apple.com/iphone-duo/prepare/), and

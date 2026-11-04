@@ -20,18 +20,24 @@ SDK. Simulator Debug linking exposed libarchive's bzip2 compression dependency;
 the app explicitly links `bz2`. These builds keep the pinned native code and
 do not replace phone or script execution with simulated successes.
 
-The Duo simulator checks cover outer-screen rotation, open inner-screen layouts,
-both half-fold axes, software-keyboard avoidance, retained draft/model/session
-identity, Settings/provider forms and model/project pickers. They do not accept
-the full system Split View matrix, all secondary screens, model execution or
-DDI/WDA control on Duo. A separate system-task probe on the same iOS 27.2
-simulator returns `BGTaskSchedulerErrorDomain` code 1, explicitly stating that
-the scheduler is unavailable on this platform. The system task indicator still
-has no implemented default-collapse/timed-expansion contract: the public
-`BGContinuedProcessingTask` API supplies no presentation timer, and the existing
-portrait-only horizontal preparation gesture is unchanged. A connected physical
-Duo is required to reproduce and validate that reported obstruction. The UI
-adaptation and successful builds must not be presented as its repair.
+The horizontal preparation gesture's implementation is unchanged, but its
+geometry is captured only once, when the turn's `PhoneExecutor` is created.
+Capture requires a foreground phone key window in portrait, portrait screen
+bounds and a top safe inset of at least 59 points. A turn created in landscape
+captures no geometry and skips this gesture for the whole turn, even if the
+target later returns to portrait; geometry is not sampled again. When geometry
+was captured, the observed frame must still match it before the gesture runs.
+DDI separately refuses rotated display geometry. Rotatable UI does not establish
+Duo phone-control acceptance, and inner-display guard behavior remains untested.
+
+The user reports task-card obstruction on the closed outer display in portrait;
+reproduction and repair under that condition remain required. The requested
+default-collapse/transient-expansion behavior is unimplemented, and the public
+`BGContinuedProcessingTask` API supplies no presentation timer. The iOS 27.2
+simulator rejects this scheduler with code 1 (unavailable on this platform).
+Physical checks must cover portrait-created and landscape-created turns,
+including a landscape-created turn whose target subsequently returns to portrait.
+The full Split View matrix and Duo DDI/WDA control remain unaccepted.
 
 The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
 ZIP snapshots from Settings and conversation context menus. Only allowlisted
