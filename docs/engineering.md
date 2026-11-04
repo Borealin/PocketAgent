@@ -1462,10 +1462,14 @@ image check/download/mount, directory refresh, inventory, control connection),
 rather than the pending screen-read label, without counting preparation as a
 completed phone action. Diagnostic export retains the three directory-refresh
 events and the fixed `phone_preparation` reason through its closed allowlists;
-arbitrary error text/reasons remain excluded. Core/native regressions cover cold
-and mounted paths, late-mount recovery ordering, failed refresh publication, mount failure/Stop and
-display. Exact Duo cold-start, late-mount recovery and already-mounted runtime
-acceptance remain pending; host tests and builds cannot certify those paths.
+arbitrary error text/reasons remain excluded. Core regressions cover helper step
+ordering for missing/already-mounted inputs, mount-failure/Stop propagation and
+preparation display. The fixture supplies the next request's installed state;
+it does not run an image check or a real check-to-refresh integration. Native
+tests cover atomic directory replacement and retention of the old directory on
+failure/timeout using synthetic futures. Exact Duo cold-start, late-mount recovery
+and already-mounted runtime acceptance remain pending; host tests and builds
+cannot certify those paths.
 
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
