@@ -151,6 +151,7 @@ final class AssistantTurnSupport {
             } catch {
                 recorder?.finished(String(describing: type(of: error)) + (Task.isCancelled ? " after cancellation" : ""))
                 trace.failed(error, cancelled: Task.isCancelled); observe?(trace)
+                if let rejection = ProviderAccessRejection.classify(error) { throw rejection }
                 throw ProviderContextLimit.classify(error, path: .summary) ?? error
             }
         }

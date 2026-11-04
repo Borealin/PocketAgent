@@ -339,6 +339,17 @@ binding. Keys and bindings are never included in portable snapshots. Diagnostic
 file output and screenshots default to off; the native log toggle takes effect
 on the next launch.
 
+HTTP 401/403 from main and summary requests use fixed Chinese access-rejection
+guidance before reaching status or history detail. The response body is dropped;
+opt-in stream diagnostics retain only the existing HTTP status metadata. A
+gateway may reject the client or relay an upstream rejection, so the message
+does not blame the entered Key or identify a failing layer. Check the provider
+address, protocol, Key group/model permissions and, when applicable, proxy
+authentication/forwarding and upstream credentials. Request authentication,
+queued configuration, retry policy and optional-summary failure policy are
+unchanged. This improves error presentation; it does not repair external
+credentials or establish the cause of an earlier installed build's rejection.
+
 Build an ordinary Xcode project from XcodeGen plus pinned dependencies. IPA
 artifacts carry no development profile, team identity, credential or device
 record. DDI is the default phone backend; the separate WDA companion IPA is

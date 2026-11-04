@@ -158,6 +158,24 @@ nonisolated enum ProviderError: LocalizedError, Equatable {
     }
 }
 
+/// Fixed presentation for HTTP access rejections. A gateway can reject its
+/// caller or relay an upstream rejection; neither proves the entered key is
+/// wrong. Never retain a response body that could echo credentials.
+nonisolated struct ProviderAccessRejection: LocalizedError, Equatable {
+    let status: Int
+
+    var errorDescription: String? {
+        let reason = status == 401 ? "鉴权未通过" : "拒绝访问"
+        return "模型服务或网关\(reason)（HTTP \(status)）。请在「模型服务」核对地址、协议、Key 所属分组和模型权限；若经代理调用，请由服务管理员检查代理鉴权、转发和上游凭据。仅凭此状态无法确定是哪一层拒绝了请求。"
+    }
+
+    static func classify(_ error: any Error) -> ProviderAccessRejection? {
+        guard let provider = error as? AgentProviderError,
+              case .http(let status, _) = provider, status == 401 || status == 403 else { return nil }
+        return ProviderAccessRejection(status: status)
+    }
+}
+
 nonisolated enum EndpointValidation {
     private static let credentialNames = ["key", "token", "secret", "auth", "sig", "password", "passwd", "credential", "session"]
 
