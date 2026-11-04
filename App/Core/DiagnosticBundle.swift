@@ -98,7 +98,7 @@ nonisolated enum DiagnosticBundle {
             "logsMissing": files.isEmpty,
             "limits": ["runFiles": maxRuns, "directoryEntries": maxEntries, "associationPrefixBytes": prefixBytes,
                        "perFileTailBytes": tailBytes, "totalTailInputBytes": totalBytes],
-            "coverage": "Only existing opt-in metadata logs; no history, provider settings, pairing, screenshots or native text logs. Closed allowlists omit unknown fields and values. Recent files may lack conversation attribution. Conversation export requires a first-record run_context and excludes the global connection log. Bounded tails are not a complete transcript. Skipped counts exclude data outside these bounds. Concurrent partial records are omitted."
+            "coverage": "Only existing opt-in metadata logs; no history, provider settings, pairing, screenshots or native text logs. Closed allowlists omit unknown fields and values. Recent files may lack conversation attribution. Conversation export requires a first-record run_context and excludes the global connection log. Directory enumeration is not chronological; hitting its entry limit can omit even the newest runs. Bounded tails are not a complete transcript. Skipped counts exclude data outside these bounds. Concurrent partial records are omitted."
         ]
         files.insert(("manifest.json", try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys, .prettyPrinted])), at: 0)
         let manager = FileManager.default
@@ -245,6 +245,7 @@ nonisolated enum DiagnosticBundle {
     }
 
     private static let eventNames: Set<String> = [
+        "rp_tunnel_prepared", "rp_tunnel_prepared_expired", "rp_tunnel_prepared_released", "rp_tunnel_prepared_rejected", "rp_tunnel_prepared_consumed",
         "interrupted", "ddi_services_connect_started", "ddi_services_connect_failed", "runner_dvt_connect_started", "runner_dvt_connect_failed", "runner_apps_listing_started", "runner_apps_listing_failed", "runner_bundle_resolve_started", "runner_bundle_resolve_failed", "runner_launch_started", "runner_launch_failed",
         "run_context", "agent_submitted", "agent_started", "agent_event", "agent_cancel_requested", "failed", "completed",
         "scene_phase", "input_release_unconfirmed_latched", "network_authorization_requested", "network_authorized", "rp_tunnel_connected",
@@ -262,14 +263,14 @@ nonisolated enum DiagnosticBundle {
     private static let strings: [String: Set<String>] = [
         "backend": ["ddi", "wda"], "path": ["main", "summary"],
         "outcome": ["running", "ended", "cancelled", "failed", "ok", "error", "timeout", "budget", "installed", "missing"],
-        "phase": ["active", "inactive", "background", "connecting", "responding", "phoneAction", "retrying", "waitingForUser", "cleaningUp", "completed", "failed", "cancelled", "expired"],
+        "phase": ["active", "inactive", "background", "willResignActive", "didEnterBackground", "willEnterForeground", "didBecomeActive", "connecting", "responding", "phoneAction", "retrying", "waitingForUser", "cleaningUp", "completed", "failed", "cancelled", "expired"],
         "step": ["stop_observing", "return", "close", "ddi_finished"],
         "op": ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace", "screenshot", "observe", "request", "home", "open_app", "press_home", "swipe", "type_text", "snapshot", "launch", "button", "signal", "tasks", "ax_tree", "ax_stop", "foreground", "activate", "clipboard_set", "clipboard_verify", "stop_observing", "return"],
         "format": ["chatCompletions", "responses", "messages", "generateContent"],
         "name": Set(ToolCatalog.all.map(\.name)),
         "state": ["idle", "running", "completed", "failed", "cancelled", "interrupted"],
         "layout": ["portrait"],
-        "reason": ["kernel", "cancelled", "timedOut", "output", "started", "finishing", "terminal", "context_preparation", "context_work", "context_ready", "script_phone_started", "script_phone_finished", "model_stream", "model_response", "tool_finished", "agent_event"],
+        "reason": ["kernel", "cancelled", "timedOut", "output", "started", "finishing", "terminal", "context_preparation", "context_work", "context_ready", "script_runtimeReady", "script_processStarted", "script_outputGrew", "script_phone_started", "script_phone_finished", "model_stream", "model_response", "tool_finished", "agent_event"],
         "connectionStage": ["initial_tcp_connect", "rp_tunnel_handshake"],
         "connectionError": ["connection_refused", "no_route", "tunnel_failed"],
         "method": ["GET", "POST", "DELETE"],

@@ -36,7 +36,15 @@ conversation before selecting the newest 12 matching run files. Read at most
 16 KiB per candidate for attribution, 512 KiB of each file's tail, and 4 MiB of
 tail input in total. Reserve one tail for the standalone connection log in recent
 exports. Omit incomplete or malformed records; report limits, skips and truncation.
+Directory enumeration is not chronological: above its entry cap even the latest
+runs can be absent. The UI and manifest warn about this limit; an empty scoped
+export does not establish that no matching runs exist beyond the scan.
 Use no-follow directory/file opens and accept only regular log files.
+
+The allowlists retain the actual notification phase names, prepared-connection
+lifecycle events and script progress reasons emitted by the current loggers.
+The privacy regression exercises these values through the exported archive;
+script reasons are derived from the real `ScriptStage` cases in the fixture.
 
 ZIP uses the standard stored format with CRC32 through system zlib, adding no
 dependency. A unique temporary directory is excluded from backup, mode 0700;

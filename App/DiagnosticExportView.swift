@@ -31,7 +31,7 @@ struct DiagnosticExportView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if result.truncated || result.skippedCount > 0 {
-                        Text("部分记录因大小限制、不完整或无法识别而未包含；诊断包内附有范围说明。")
+                        Text("部分记录因数量、大小限制、不完整或无法识别而未包含。达到目录扫描上限时可能遗漏最新运行，详情见诊断包。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     ShareLink(item: result.url) {
