@@ -84,6 +84,13 @@ struct SettingsView: View {
                         LabeledContent("手机操作配置", value: engine.hasPreparedPhoneConnection ? "连接已保留" : device.connectionVerified ? "连接已验证" : device.hasPairing ? "待检查连接" : "待导入配对文件")
                     }.accessibilityIdentifier("phoneSetup")
                 } header: { Text("手机操作") }
+                Section("诊断") {
+                    NavigationLink {
+                        DiagnosticExportView(scope: .recent)
+                    } label: {
+                        Label("导出近期诊断包", systemImage: "square.and.arrow.up")
+                    }.accessibilityIdentifier("exportRecentDiagnostics")
+                }
             }.navigationTitle("设置")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成", action: close).accessibilityIdentifier("closeSettings") } }
                 .sheet(isPresented: $pickingFolder) {

@@ -40,6 +40,7 @@ extension Model {
             runID = UUID().uuidString
             logURL = documents.appendingPathComponent("run-\(runID).jsonl")
             runStamp = RunLogStamp(runID: runID, url: logURL)
+            log("run_context", ["conversationID": conversationID.uuidString, "backend": backend.rawValue])
             busy = true
             pendingAgentCancellation = false
             // The turn's single status and identity exist before the system can
