@@ -198,22 +198,25 @@ def prepare_idevice(root, spec):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--native-only', action='store_true')
+    parser.add_argument('--sdk', choices=['iphoneos', 'iphonesimulator'], default='iphoneos')
     args = parser.parse_args()
     specs = json.loads((ROOT / 'dependencies.json').read_text())
     src = prepare_idevice(ROOT, specs['idevice'])
-    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
+    rust_target = 'aarch64-apple-ios-sim' if args.sdk == 'iphonesimulator' else 'aarch64-apple-ios'
+    products = ROOT / '.build' / ('native-iphonesimulator' if args.sdk == 'iphonesimulator' else 'native')
+    cargo_target = ROOT / '.build' / ('rust-iphonesimulator' if args.sdk == 'iphonesimulator' else 'rust')
+    sdk = subprocess.check_output(['xcrun', '--sdk', args.sdk, '--show-sdk-path'], text=True).strip()
     env = os.environ.copy()
     env['SDKROOT'] = sdk
     env['IPHONEOS_DEPLOYMENT_TARGET'] = '26.0'
-    env['CARGO_TARGET_DIR'] = str(ROOT / '.build/rust')
+    env['CARGO_TARGET_DIR'] = str(cargo_target)
     env['RUSTFLAGS'] = f'--remap-path-prefix={ROOT}=. --remap-path-prefix={Path.home()}=/builder'
-    run(['rustup', 'target', 'add', 'aarch64-apple-ios'])
+    run(['rustup', 'target', 'add', rust_target])
     run(['cargo', 'build', '--manifest-path', src / 'Cargo.toml', '--locked',
-         '--release', '--target', 'aarch64-apple-ios', '-p', 'idevice-ffi',
+         '--release', '--target', rust_target, '-p', 'idevice-ffi',
          '--no-default-features', '--features', 'full,ring,display_stream'], env=env)
-    out = ROOT / '.build/native'
-    out.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / '.build/rust/aarch64-apple-ios/release/libidevice_ffi.a', out / 'libidevice_ffi.a')
+    products.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(cargo_target / rust_target / 'release/libidevice_ffi.a', products / 'libidevice_ffi.a')
     # Keep the header consumed by Swift in sync with the pinned generated ABI.
     shutil.copy2(src / 'ffi/idevice.h', ROOT / 'Native/idevice.h')
     metadata = json.loads(subprocess.check_output(

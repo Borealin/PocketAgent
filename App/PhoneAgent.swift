@@ -350,14 +350,36 @@ final class PhoneExecutor {
         self.onPreparation = onPreparation
         self.clipboardAllowed = clipboardAllowed
         control = backend == .ddi ? DDIControl(model) : WDAControl(model)
+        let idiom = UIDevice.current.userInterfaceIdiom
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first { $0.isKeyWindow }
-        if UIDevice.current.userInterfaceIdiom == .phone,
+        if idiom == .phone,
            let window, window.windowScene?.interfaceOrientation == .portrait,
            window.screen.bounds.width < window.screen.bounds.height,
            window.safeAreaInsets.top >= 59 {
             taskSurfaceGeometry = (window.screen.bounds, window.safeAreaInsets.top)
         } else { taskSurfaceGeometry = nil }
+        let captureReason: String
+        if taskSurfaceGeometry != nil { captureReason = "captured" }
+        else if idiom != .phone { captureReason = "not_phone" }
+        else if let window {
+            if window.windowScene?.interfaceOrientation != .portrait { captureReason = "not_portrait" }
+            else if !(window.screen.bounds.width < window.screen.bounds.height) { captureReason = "non_portrait_screen" }
+            else { captureReason = "top_inset_below_59" }
+        } else { captureReason = "no_foreground_key_window" }
+        var geometryFields: [String: Any] = [
+            "idiom": idiom.rawValue, "foregroundWindow": window != nil,
+            "orientation": (window?.windowScene?.interfaceOrientation ?? .unknown).rawValue,
+            "geometryCaptured": taskSurfaceGeometry != nil, "captureReason": captureReason]
+        if let window {
+            geometryFields["windowWidth"] = window.bounds.width
+            geometryFields["windowHeight"] = window.bounds.height
+            geometryFields["screenWidth"] = window.screen.bounds.width
+            geometryFields["screenHeight"] = window.screen.bounds.height
+            geometryFields["safeAreaTop"] = window.safeAreaInsets.top
+            geometryFields["safeAreaRight"] = window.safeAreaInsets.right
+        }
+        model.log("phone_task_surface_geometry", geometryFields)
     }
 
     var remainingTime: TimeInterval { deadline.remaining }

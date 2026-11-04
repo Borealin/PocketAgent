@@ -106,6 +106,7 @@ struct ChatComposer: View {
     var inputFocused: FocusState<Bool>.Binding
     let chooseModel: () -> Void
     let chooseWorkspace: () -> Void
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showCamera = false
@@ -194,7 +195,7 @@ struct ChatComposer: View {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(placeholder, text: Binding(get: { chat.selected?.draft ?? "" }, set: chat.setDraft),
                           axis: .vertical)
-                    .lineLimit(1...6)
+                    .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .focused(inputFocused)

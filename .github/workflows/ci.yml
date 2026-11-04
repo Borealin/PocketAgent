@@ -11,13 +11,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.2.app
       - name: Core regression tests
-        run: env -u SDKROOT swift test
+        run: env -u SDKROOT swift test --no-parallel
       - name: Distribution regression tests
         run: python3 -m unittest discover -s Tests/DistributionTests
       - name: Runtime host regression tests (patched hostfs confinement)

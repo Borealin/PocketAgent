@@ -1,9 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Chat screen: header with only the session-list icon, the renamable title
-/// and a new-conversation icon. Sessions and Settings live in a slide-over
-/// drawer opened by the icon or a leading-edge swipe.
+/// One adaptive navigation hierarchy across the outer display, inner display
+/// and Split View. The system owns column placement and asymmetric safe areas.
 struct ChatRootView: View {
     @ObservedObject var engine: Model
     @ObservedObject var chat: ChatController
@@ -12,8 +11,7 @@ struct ChatRootView: View {
     @ObservedObject var device: DeviceSettingsModel
     @ObservedObject var workspaces: WorkspaceStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var drawerOpen = false
-    @State private var drag: CGFloat = 0
+    @State private var compactColumn: NavigationSplitViewColumn = .detail
     @State private var showSettings = false
     @State private var showModels = false
     @State private var showWorkspaces = false
@@ -26,34 +24,14 @@ struct ChatRootView: View {
     @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = min(320, geometry.size.width * 0.84)
-            let offset = drawerOffset(width: width)
-            let progress = (offset + width) / width
-            ZStack(alignment: .leading) {
-                NavigationStack { main }
-                if progress > 0 {
-                    Color.black.opacity(0.28 * progress).ignoresSafeArea()
-                        .onTapGesture { closeDrawer() }
-                        .gesture(closeGesture(width: width))
-                        .accessibilityLabel("关闭会话列表").accessibilityAddTraits(.isButton)
-                        .accessibilityIdentifier("closeSessions")
-                }
-                SessionDrawer(chat: chat, providers: providers, close: closeDrawer,
-                              rename: startRename, openSettings: { closeDrawer(); showSettings = true },
-                              openMemory: { closeDrawer(); memoryPrefill = nil; showMemory = true })
-                    .frame(width: width)
-                    .offset(x: offset)
-                    .gesture(closeGesture(width: width))
-                    .accessibilityHidden(!drawerOpen)
-                if !drawerOpen {
-                    // Leading-edge swipe opens the drawer.
-                    // Below the header so the list button stays fully tappable.
-                    Color.clear.frame(width: 16).contentShape(Rectangle())
-                        .gesture(openGesture(width: width)).padding(.top, 56)
-                }
-            }
-            .animation(.snappy(duration: 0.25), value: drawerOpen)
+        NavigationSplitView(preferredCompactColumn: $compactColumn) {
+            SessionDrawer(chat: chat, providers: providers, close: closeSessions,
+                          rename: startRename, openSettings: { closeSessions(); showSettings = true },
+                          openMemory: { closeSessions(); memoryPrefill = nil; showMemory = true })
+                .navigationTitle("会话")
+                .navigationBarTitleDisplayMode(.inline)
+        } detail: {
+            main
         }
         .alert("重命名会话", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("会话标题", text: $newTitle)
@@ -129,10 +107,6 @@ struct ChatRootView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { openDrawer() } label: { Image(systemName: "list.bullet") }
-                    .accessibilityLabel("会话列表").accessibilityIdentifier("sessions")
-            }
             ToolbarItem(placement: .principal) {
                 Text(chat.isPrimary(chat.selectedID) ? ChatSession.primaryTitle : (chat.selected?.title ?? "手机助手"))
                     .font(.headline).lineLimit(1)
@@ -185,38 +159,14 @@ struct ChatRootView: View {
                      primaryButton: change, secondaryButton: .cancel(Text("取消")))
     }
 
-    // MARK: Drawer
-
-    private func drawerOffset(width: CGFloat) -> CGFloat {
-        let base: CGFloat = drawerOpen ? 0 : -width
-        return min(0, max(-width, base + drag))
-    }
-    private func openDrawer() { inputFocused = false; drag = 0; drawerOpen = true }
-    private func closeDrawer() { drag = 0; drawerOpen = false }
+    private func closeSessions() { inputFocused = false; compactColumn = .detail }
     private func startRename(_ id: UUID) {
         newTitle = chat.sessions.first { $0.id == id }?.title ?? ""
         renaming = id
     }
-    private func openGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in inputFocused = false; drag = max(0, min(width, value.translation.width)) }
-            .onEnded { value in
-                let open = value.predictedEndTranslation.width > width / 2 || value.translation.width > width / 3
-                withAnimation(.snappy(duration: 0.25)) { drag = 0; drawerOpen = open }
-            }
-    }
-    private func closeGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { value in if drawerOpen { drag = min(0, value.translation.width) } }
-            .onEnded { value in
-                let close = value.predictedEndTranslation.width < -width / 2 || value.translation.width < -width / 3
-                withAnimation(.snappy(duration: 0.25)) { drag = 0; if close { drawerOpen = false } }
-            }
-    }
 }
 
-/// Slide-over list: the assistant entry, memory, independent tasks/history
-/// (select, rename, delete, new task) and Settings.
+/// Sidebar or compact navigation list, retaining the same session actions.
 private struct SessionDrawer: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var providers: ProviderStore
