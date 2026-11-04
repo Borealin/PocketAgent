@@ -74,7 +74,10 @@ extension Model {
                                                     skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed,
                                                     memory: gates.assistant != nil)
                 let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed,
-                                          deadline: deadline, effectsBlocked: gates.effectsBlocked)
+                                          deadline: deadline, effectsBlocked: gates.effectsBlocked, onPreparation: { label in
+                    status.value.phonePreparation = label
+                    publish("phone_preparation"); onStatus?(status.value)
+                })
                 let turn = TurnTools(phone: phone, workspace: workspace, capabilities: capabilities,
                     onScriptStage: { stage in
                         status.value.applyScript(stage); publish("script_" + stage.rawValue); onStatus?(status.value)
@@ -338,10 +341,13 @@ final class PhoneExecutor {
     private var compactedTaskTitle: String?
     /// Effects of the phone call in progress (calls are serial).
     private var callEffects = PhoneCallEffects()
+    private let onPreparation: @MainActor (String?) -> Void
     init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool,
-         deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?) {
+         deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?,
+         onPreparation: @escaping @MainActor (String?) -> Void) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
         self.deadline = deadline; self.effectsBlocked = effectsBlocked
+        self.onPreparation = onPreparation
         self.clipboardAllowed = clipboardAllowed
         control = backend == .ddi ? DDIControl(model) : WDAControl(model)
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -435,7 +441,8 @@ final class PhoneExecutor {
     }
     func ready() async throws -> String {
         if let base { return base }
-        try await control.prepare()
+        defer { onPreparation(nil) }
+        try await control.prepare { self.onPreparation($0) }
         try checkDeadline()
         base = backend.rawValue
         return backend.rawValue

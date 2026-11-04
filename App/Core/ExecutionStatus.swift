@@ -57,6 +57,9 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     var currentApp: String?
     /// Human description of the running or last phone action.
     var currentAction: String?
+    /// Actual preparation before a phone tool can execute; display only, no
+    /// completed action or synthetic progress. Cleared when preparation ends.
+    var phonePreparation: String?
     var failure: String?
     /// Context maintenance outcome of the primary line (for example no summary this turn).
     var contextNote: String?
@@ -206,7 +209,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
             waitingForForeground ? "排队中：回到 App 后开始" : "排队中：第 \(rank) 位，等待手机空闲"
         case .connecting: modelResponses == 0 && phoneActions == 0 ? "正在连接模型" : "等待模型决定下一步"
         case .modelResponse: "模型正在回复"
-        case .phoneAction: "正在操作手机"
+        case .phoneAction: phonePreparation ?? "正在操作手机"
         case .workspaceTool: "正在读写项目文件"
         case .network: "正在请求网络"
         case .script: scriptPhoneActions > 0 ? "脚本运行中（已操作手机 \(scriptPhoneActions) 步）" : "脚本运行中"
@@ -223,6 +226,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
 
     /// Current app / action line, empty when nothing real is known.
     var activity: String {
+        if phase == .phoneAction, phonePreparation != nil { return "" }
         var parts: [String] = []
         if [.phoneAction, .workspaceTool, .network, .memoryTool].contains(phase), let currentAction { parts.append(currentAction) }
         if let currentApp, !currentApp.isEmpty { parts.append(ToolLabels.appName(currentApp)) }
@@ -250,6 +254,7 @@ nonisolated struct ExecutionStatus: Hashable, Sendable {
     /// Show the active action once; keep the full phase/app/step detail in chat.
     /// A completed action must not linger while the model chooses its next step.
     var systemTaskTitle: String {
+        if phase == .phoneAction, let phonePreparation { return phonePreparation }
         if [.phoneAction, .workspaceTool, .network, .memoryTool].contains(phase),
            let action = currentAction?.trimmingCharacters(in: .whitespacesAndNewlines), !action.isEmpty {
             return action

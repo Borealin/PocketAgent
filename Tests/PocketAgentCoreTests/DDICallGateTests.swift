@@ -36,6 +36,40 @@ struct DDICallGateTests {
         #expect(DDIImagePreparation.milliseconds(now.addingTimeInterval(0.25)) == 1_800_000_000_250)
     }
 
+    @Test(arguments: [false, true])
+    func imageReadinessUsesAFreshDirectory(imageMounted: Bool) async throws {
+        var steps: [String] = []
+        try await DDIImagePreparation.prepareServices(imageMounted: imageMounted, checkpoint: {},
+            mount: { steps.append("mount") }, refresh: { steps.append("fresh directory") })
+        // Cold startup mounts first. An already-mounted path never mounts
+        // again, but still reads current advertisements on the retained tunnel.
+        #expect(steps == (imageMounted ? ["fresh directory"] : ["mount", "fresh directory"]))
+    }
+
+    @Test func unconfirmedPreparationNeverRetriesAndTheNextRequestChecksAgain() async throws {
+        struct Timeout: Error {}
+        var steps: [String] = []
+        await #expect(throws: Timeout.self) {
+            try await DDIImagePreparation.prepareServices(imageMounted: false, checkpoint: {},
+                mount: { steps.append("mount"); throw Timeout() }, refresh: { steps.append("fresh directory") })
+        }
+        #expect(steps == ["mount"])
+        // A separate request has checked and found the image mounted. It gets
+        // a new service directory, never repeats the mount or a phone action.
+        steps.append("next request: installed")
+        try await DDIImagePreparation.prepareServices(imageMounted: true, checkpoint: {},
+            mount: { steps.append("mount") }, refresh: { steps.append("fresh directory") })
+        #expect(steps == ["mount", "next request: installed", "fresh directory"])
+        steps = []
+        var stopped = false
+        await #expect(throws: CancellationError.self) {
+            try await DDIImagePreparation.prepareServices(imageMounted: false,
+                checkpoint: { if stopped { throw CancellationError() } },
+                mount: { steps.append("mount"); stopped = true }, refresh: { steps.append("fresh directory") })
+        }
+        #expect(steps == ["mount"])
+    }
+
     @Test func theExpiryIsFixedOnTheWallClockBeforeTheHandoff() {
         let now = Date(timeIntervalSince1970: 1_800_000_000.25)
         #expect(DDICallBudget.expiry(now: now, seconds: 35) == 1_800_000_035_250)

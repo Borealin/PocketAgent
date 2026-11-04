@@ -1562,6 +1562,50 @@ pub unsafe extern "C" fn pocket_ddi_mount(
     }
 }
 
+/// Publish a new advertisement only after the whole handshake succeeds. A
+/// timed-out discovery socket is dropped; the old map is never used by setup
+/// after an error, and the next explicit request may discover again.
+async fn refresh_directory<S: ReadWrite>(
+    current: &mut RsdHandshake,
+    limit: Duration,
+    peer_uuid: uuid::Uuid,
+    stream: impl Future<Output = Result<S, IdeviceError>>,
+) -> Result<(), IdeviceError> {
+    let directory = within(limit, "DDI service directory refresh", async {
+        RsdHandshake::new_with_peer_uuid(stream.await?, peer_uuid).await
+    }).await?;
+    *current = directory;
+    Ok(())
+}
+
+/// # Safety
+/// Borrowed handles are serialized with all tunnel uses, and no control
+/// session is open. The original discovery port must have come from a tunnel
+/// constructor. At most 15 s of the passed wall-clock expiry is used.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_ddi_refresh_services(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    expires_at_ms: u64,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    let result = run_sync_local(async {
+        let limit = expiry_window(expires_at_ms, unix_ms(), IMAGE_CHECK_CAP_MS)?;
+        let a = unsafe { &mut (*a).0 };
+        let h = unsafe { &mut *h };
+        let (port, peer_uuid) = h.1.ok_or_else(|| error("RSD discovery context missing"))?;
+        refresh_directory(&mut h.0, limit, peer_uuid, async {
+            a.connect(port).await.map_err(|e| error(e.to_string()))
+        }).await
+    });
+    match result {
+        Ok(()) => null_mut(),
+        Err(e) => ffi_err!(e),
+    }
+}
+
 const APP_INVENTORY_CAP_MS: u64 = 15_000;
 /// # Safety
 /// As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
@@ -2033,6 +2077,71 @@ mod call_lifecycle_tests {
         // A clean channel is reused.
         channel.request(counting(&connects), &cancel, Wait::Raced, async |w| w.call(3, false).await).await.unwrap();
         assert_eq!(connects.load(Ordering::SeqCst), 1);
+    }
+    /// A wire-level peer that rejects a changed host identity on reconnect.
+    /// Reads the real HTTP/2 + XPC handshake emitted by the production client.
+    fn discovery_peer(peer_uuid: uuid::Uuid, port: Option<u16>) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (client, mut server) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            let mut magic = [0; 24];
+            server.read_exact(&mut magic).await.unwrap();
+            assert_eq!(&magic, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+            loop {
+                let mut header = [0; 9];
+                server.read_exact(&mut header).await.unwrap();
+                let length = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+                assert!(length <= 4096);
+                let mut payload = vec![0; length];
+                server.read_exact(&mut payload).await.unwrap();
+                if header[3] != 0 || header[5..9] != 1u32.to_be_bytes() { continue; }
+                let message = idevice::xpc::XPCMessage::decode(&payload).unwrap();
+                let Some(body) = message.message else { continue; };
+                let body = body.to_plist();
+                if body.as_dictionary().and_then(|d| d.get("MessageType")).and_then(Value::as_string) != Some("Handshake") { continue; }
+                assert_eq!(body.as_dictionary().unwrap()["UUID"].as_string(), Some(peer_uuid.to_string().as_str()));
+                let mut services = idevice::xpc::Dictionary::new();
+                if let Some(port) = port {
+                    services.insert("com.apple.coredevice.deviceinfo".into(), idevice::xpc!({
+                        "Entitlement": "test", "Port": port.to_string()
+                    }));
+                }
+                let reply = idevice::xpc::XPCMessage::new(None, Some(idevice::xpc!({
+                    "Services": idevice::xpc::XPCObject::Dictionary(services),
+                    "MessagingProtocolVersion": 7u64, "UUID": uuid::Uuid::nil(),
+                    "Properties": idevice::xpc::XPCObject::Dictionary(Default::default())
+                })), None).encode(0).unwrap();
+                let mut frame = (reply.len() as u32).to_be_bytes()[1..].to_vec();
+                frame.extend_from_slice(&[0, 0, 0, 0, 0, 1]);
+                frame.extend_from_slice(&reply);
+                server.write_all(&frame).await.unwrap();
+                // Keep the peer alive for the client's HTTP/2 acknowledgements.
+                let mut tail = [0; 256];
+                while server.read(&mut tail).await.unwrap() != 0 {}
+                break;
+            }
+        });
+        (client, peer)
+    }
+    #[tokio::test]
+    async fn directory_refresh_keeps_the_first_peer_identity_on_the_wire_and_publishes_only_success() {
+        let peer_uuid = uuid::Uuid::from_u128(1);
+        let (initial, peer) = discovery_peer(peer_uuid, None);
+        let mut current = RsdHandshake::new_with_peer_uuid(initial, peer_uuid).await.unwrap();
+        peer.await.unwrap();
+        assert!(current.services.is_empty());
+        let (refreshed, peer) = discovery_peer(peer_uuid, Some(42));
+        refresh_directory(&mut current, Duration::from_secs(1), peer_uuid, async { Ok(refreshed) }).await.unwrap();
+        peer.await.unwrap();
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let failed = refresh_directory::<tokio::io::DuplexStream>(&mut current, Duration::from_secs(1), peer_uuid,
+            async { Err(error("refused")) }).await;
+        assert!(failed.is_err());
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let expired = refresh_directory::<tokio::io::DuplexStream>(&mut current, Duration::from_millis(1), peer_uuid,
+            std::future::pending()).await;
+        assert_eq!(message(expired.unwrap_err()), "DDI service directory refresh timed out");
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
     }
     #[tokio::test]
     async fn a_desynchronised_client_confirms_nothing_until_replaced() {

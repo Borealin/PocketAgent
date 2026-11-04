@@ -33,6 +33,22 @@ nonisolated enum DDIImagePreparation {
         guard preparationEnd.timeIntervalSince(now) >= minimumMount else { return nil }
         return min(now.addingTimeInterval(mountLimit), preparationEnd)
     }
+    /// RSD is a snapshot taken when the tunnel opens. Before opening control
+    /// services, refresh it on that tunnel even if the image was already mounted
+    /// (a previous mount may have completed after its confirmation timed out).
+    /// No mount or phone action is retried. A failed/unknown mount stops here;
+    /// the next explicit request must first check the real image state again.
+    @MainActor
+    static func prepareServices(imageMounted: Bool, checkpoint: () throws -> Void,
+                                mount: () async throws -> Void, refresh: () async throws -> Void) async throws {
+        try checkpoint()
+        if !imageMounted {
+            try await mount()
+            try checkpoint()
+        }
+        try await refresh()
+        try checkpoint()
+    }
     /// The form native code takes: wall-clock Unix milliseconds.
     static func milliseconds(_ date: Date) -> UInt64 {
         UInt64((date.timeIntervalSince1970 * 1000).rounded(.down))

@@ -9891,6 +9891,16 @@ struct IdeviceFfiError *pocket_ddi_mount(struct AdapterHandle *a,
 
 /**
  * # Safety
+ * Borrowed handles are serialized with all tunnel uses, and no control
+ * session is open. The original discovery port must have come from a tunnel
+ * constructor. At most 15 s of the passed wall-clock expiry is used.
+ */
+struct IdeviceFfiError *pocket_ddi_refresh_services(struct AdapterHandle *a,
+                                                    struct RsdHandshakeHandle *h,
+                                                    uint64_t expires_at_ms);
+
+/**
+ * # Safety
  * As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
  * expiry reads nothing). The installed applications' InstallationProxy
  * records, unfiltered, as the plist array `installation_proxy_get_apps`

@@ -1460,6 +1460,62 @@ records and free as before). Stop, the deadline, a revoked script lease and stor
 are rechecked between steps. The bounds hold while the native code polls
 cooperatively; synchronous work (loading image assets) is not preempted.
 
+The 2026-11-04 Duo preparation failure exposed a separate directory-lifetime
+bug: RSD advertisements are a snapshot from tunnel creation, and mounting an
+image never updates that map. The mount confirmation timed out after 120 s;
+a subsequent image check reported installed, but repeated service opens on the
+same connection failed at the missing CoreDevice device-info lookup. A separate
+turn with a new tunnel reached ready services. These observations support stale
+service discovery as the repeated-open failure; they do not identify the mount's
+internal waiting stage or establish which preparation client completed mounting.
+The installed build is not proven identical to the inspected source.
+
+A subsequent real warm run of joint QA19.1.4 passed the installed-image check
+but failed the new directory refresh with `Socket/ConnectionReset` after 15 ms,
+before DDI service setup or AX reading. The pinned `send_device_handshake`
+generated a new host UUID on every RSD connection, so refresh changed the peer
+identity. The [pymobiledevice3 protocol implementation](https://github.com/doronz88/pymobiledevice3/blob/103647ae12ed50d955fa6910d7d3a9363cc36608/pymobiledevice3/remote/remotexpc.py#L76-L102)
+records that a changed peer UUID on the same tunnel makes remoted reattach and
+close its service listeners. Joint QA19.1.5, bound to PR #9 `4d37aa0` native
+inputs (`1c92e7e`, tree `e56f99…`), supports this peer-identity diagnosis: two
+consecutive fresh-RP warm observations and WDA launch → `press_home` → `wait` →
+normal cleanup stop passed, with the owned runner PID confirmed absent afterward.
+
+Before opening control services, preparation now re-reads RSD on the retained
+RP tunnel, using the discovery port and host peer UUID captured by its first
+RSD handshake. This UUID is distinct from the device UUID in the advertised
+map. Each new tunnel generates its peer UUID once; refresh sends that same
+identity. Existing generic RSD constructors retain their default behavior.
+This preserves a successfully prepared RP connection (including the cellular
+bootstrap route) and its pairing; it adds no second RP handshake. Both cold
+startup after mounting and an already-mounted image use fresh advertisements,
+since an earlier timed-out mount may have completed since discovery. The fresh
+map replaces the old one only after a successful handshake. The read gets at
+most 15 s under the turn's wall-clock deadline and resets the connection's app
+catalog before setup. Already-owned DDI sessions and WDA runners keep their
+original service ports through cleanup. A mount timeout still means unknown,
+stops that preparation and never triggers a retry: the next explicit tool
+request first checks the real image state, then discovers services again.
+Stop/deadline/lease/storage checks run between steps and before any action.
+The chat and system task now show the reached preparation stage (connection,
+image check/download/mount, directory refresh, inventory, control connection),
+rather than the pending screen-read label, without counting preparation as a
+completed phone action. Diagnostic export retains the three directory-refresh
+events and the fixed `phone_preparation` reason through its closed allowlists;
+arbitrary error text/reasons remain excluded. Core regressions cover helper step
+ordering for missing/already-mounted inputs, mount-failure/Stop propagation and
+preparation display. The fixture supplies the next request's installed state;
+it does not run an image check or a real check-to-refresh integration. The
+native wire regression decodes the initial and refresh HTTP/2/XPC handshakes,
+requires the same host peer UUID, and supplies changed service advertisements.
+Restoring the old refresh constructor makes it fail. Failure/timeout retains
+the old directory. This host peer fixture is not a real RP tunnel or an iOS
+remoted instance. No operator Stop was clicked, so the WDA result covers
+normal `stopRunner` cleanup, not button cancellation. Cold startup and
+same-connection real late-mount remain recommended unrun cases rather than
+revision blockers; the original 120-second mount-wait stage and original AX
+root cause remain unconfirmed.
+
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
 at most 35 s, checked natively before every stage and physical effect.

@@ -12,9 +12,12 @@ struct DiagnosticBundleTests {
         let secret = "TEST-SECRET-token.example.invalid/private"
         let runID = UUID(), conversationID = UUID()
         // Values emitted by Controller's scene notifications and PhoneAgent's
-        // script progress callback must survive the same privacy projection.
+        // script/preparation progress callbacks must survive the privacy projection.
         let phases = ["willResignActive", "didEnterBackground", "willEnterForeground", "didBecomeActive"]
-        let scriptReasons = [ScriptStage.runtimeReady, .processStarted, .outputGrew].map { "script_" + $0.rawValue }
+        let progressReasons = [ScriptStage.runtimeReady, .processStarted, .outputGrew].map { "script_" + $0.rawValue }
+            + ["phone_preparation"]
+        let directoryEvents = ["ddi_service_directory_refresh_started", "ddi_service_directory_refresh_failed",
+                               "ddi_service_directory_refreshed"]
         let preparedEvents = ["rp_tunnel_prepared", "rp_tunnel_prepared_expired", "rp_tunnel_prepared_released",
                               "rp_tunnel_prepared_rejected", "rp_tunnel_prepared_consumed"]
         try write([
@@ -25,9 +28,12 @@ struct DiagnosticBundleTests {
             ["event": "tool_started", "name": secret, "callID": secret],
             ["event": "tool_finished", "name": "observe_screen", "isError": false],
             ["event": "runner_launch_failed", "errorDomain": "PocketAgent", "errorCode": -1],
-            ["event": secret, "ms": 5]
+            ["event": secret, "ms": 5],
+            ["event": "task_progress", "reason": secret]
         ] + phases.map { ["event": "scene_phase", "phase": $0] }
-          + scriptReasons.map { ["event": "task_progress", "reason": $0] },
+          + progressReasons.map { ["event": "task_progress", "reason": $0] }
+          + directoryEvents.map { ["event": $0, "errorDomain": "PocketAgent", "errorCode": -1,
+                                    "error": secret, "reason": secret] },
           to: root.appendingPathComponent("run-\(runID).jsonl"))
         for name in ["history.json", "providers.json", "pairing.plist", "native.log", "screenshot.png"] {
             try Data(secret.utf8).write(to: root.appendingPathComponent(name))
@@ -56,9 +62,10 @@ struct DiagnosticBundleTests {
         #expect(contents.contains("\"errorCode\":-1"))
         #expect(contents.contains("\"connectionError\":\"connection_refused\""))
         for phase in phases { #expect(contents.contains("\"phase\":\"\(phase)\"")) }
-        for reason in scriptReasons { #expect(contents.contains("\"reason\":\"\(reason)\"")) }
+        for reason in progressReasons { #expect(contents.contains("\"reason\":\"\(reason)\"")) }
         for event in preparedEvents { #expect(contents.contains("\"event\":\"\(event)\"")) }
-        #expect(result.runCount == 1 && result.eventCount == 19 && result.skippedCount == 1)
+        for event in directoryEvents { #expect(contents.contains("\"event\":\"\(event)\"")) }
+        #expect(result.runCount == 1 && result.eventCount == 24 && result.skippedCount == 1)
         let names = try unzip(result.url, ["-Z1"])
         #expect(names == "manifest.json\nrun-01.jsonl\nphone-connection.jsonl\n")
     }
