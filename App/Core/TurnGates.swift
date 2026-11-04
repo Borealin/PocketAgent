@@ -82,6 +82,7 @@ nonisolated struct CommitGatedModel: AgentModelStreaming {
                         trace.finished(); observe?(trace)
                     } catch {
                         trace.failed(error, cancelled: Task.isCancelled); observe?(trace)
+                        if let rejection = ProviderAccessRejection.classify(error) { throw rejection }
                         throw ProviderContextLimit.classify(error, path: .main) ?? error
                     }
                     continuation.finish()
