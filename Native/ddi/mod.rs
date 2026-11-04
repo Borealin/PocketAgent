@@ -536,6 +536,27 @@ fn normalized_path(raw: &str) -> String {
     }
     String::from_utf8_lossy(&out).into_owned()
 }
+/// Fixed categories only: never include process IDs, executable paths, app
+/// identities or AX content in the opt-in native diagnostic file.
+fn trace_identity_miss(native_seq: u64, catalog_count: usize, path: Option<&str>, path_matches: usize) {
+    let path_kind = match path {
+        None => "unavailable",
+        Some(p) if p.contains(".appex/") => "app_extension",
+        Some(p) if p.contains(".xpc/") => "xpc_service",
+        Some(p) if p.contains(".app/") => "app_bundle",
+        Some(_) => "other",
+    };
+    let path_root = match path {
+        None => "unavailable",
+        Some(p) if p.starts_with("/var/containers/Bundle/Application/") => "app_container",
+        Some(p) if p.starts_with("/Applications/") => "builtin_apps",
+        Some(p) if p.starts_with("/System/") => "system",
+        Some(p) if p.starts_with("/private/preboot/") => "preboot",
+        Some(_) => "other",
+    };
+    tracing::warn!(native_seq, catalog_count, path_matches, path_kind, path_root,
+        "DDI foreground identity unresolved");
+}
 #[derive(Clone, Copy, PartialEq)]
 struct Geometry {
     x: f64,
@@ -823,7 +844,10 @@ impl PocketDDISession {
             .find(|p| p.pid as u64 == pid)
             .and_then(|p| p.executable_url.as_ref())
             .map(|p| normalized_path(&p.relative))
-            .ok_or_else(|| error("AX foreground process path unavailable"))?;
+            .ok_or_else(|| {
+                trace_identity_miss(self.cancel.progress.seq.load(Ordering::Relaxed), self.installed.len(), None, 0);
+                error("AX foreground process path unavailable")
+            })?;
         let matches: Vec<_> = self
             .installed
             .iter()
@@ -838,7 +862,10 @@ impl PocketDDISession {
                 Ok("com.apple.springboard".into())
             }
             "/Applications/Spotlight.app/Spotlight" => Ok("com.apple.Spotlight".into()),
-            _ => Err(error("AX foreground bundle identity unavailable")),
+            _ => {
+                trace_identity_miss(self.cancel.progress.seq.load(Ordering::Relaxed), self.installed.len(), Some(&path), matches.len());
+                Err(error("AX foreground bundle identity unavailable"))
+            }
         }
     }
     async fn active_hit(&mut self, g: Geometry) -> Result<(u64, f64, f64), IdeviceError> {
@@ -862,12 +889,17 @@ impl PocketDDISession {
                 points.push(point);
             }
         }
-        for (fx, fy) in points {
+        let point_count = points.len();
+        for (index, (fx, fy)) in points.into_iter().enumerate() {
             let x = g.x + g.width * fx;
             let y = g.y + g.height * fy;
             match self.ax().await?.hit(x, y).await {
                 Ok(token) => {
                     let (pid, _) = ax::identity(&token).map_err(error)?;
+                    tracing::info!(native_seq = self.cancel.progress.seq.load(Ordering::Relaxed),
+                        point_x = fx, point_y = fy, cached = self.hit_point == Some((fx, fy)),
+                        blank_points = index, screen_x = g.x, screen_y = g.y, width = g.width, height = g.height,
+                        "DDI AX hit selected");
                     self.hit_point = Some((fx, fy));
                     return Ok((pid, x, y));
                 }
@@ -877,6 +909,8 @@ impl PocketDDISession {
                 Err(e) => return Err(error(e)),
             }
         }
+        tracing::warn!(native_seq = self.cancel.progress.seq.load(Ordering::Relaxed), blank_points = point_count,
+            screen_x = g.x, screen_y = g.y, width = g.width, height = g.height, "DDI AX hit scan empty");
         Err(error("AX foreground has no readable hit point"))
     }
     /// A coordinate effect must land on the app of the snapshot observed for
@@ -1878,6 +1912,45 @@ mod call_lifecycle_tests {
             IdeviceError::InternalError(m) => m,
             other => other.to_string(),
         }
+    }
+    #[test]
+    fn identity_diagnostics_keep_match_metadata_without_process_or_app_identity() {
+        #[derive(Clone)]
+        struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Log {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let log = Log(Arc::new(std::sync::Mutex::new(vec![])));
+        let writer = log.clone();
+        let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false)
+            .with_writer(move || writer.clone()).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            trace_identity_miss(7, 3,
+                Some("/var/containers/Bundle/Application/private-marker/App.app/Binary"), 2);
+            trace_identity_miss(8, 3,
+                Some("/Applications/private-marker.app/PlugIns/Extension.appex/Binary"), 0);
+            trace_identity_miss(9, 3,
+                Some("/System/Library/private-marker.framework/Service.xpc/Binary"), 0);
+            trace_identity_miss(10, 3, None, 0);
+        });
+        let bytes = log.0.lock().unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 4);
+        for (line, expected) in lines.iter().zip([
+            ["native_seq=7", "path_matches=2", "path_kind=\"app_bundle\"", "path_root=\"app_container\""],
+            ["native_seq=8", "path_matches=0", "path_kind=\"app_extension\"", "path_root=\"builtin_apps\""],
+            ["native_seq=9", "path_matches=0", "path_kind=\"xpc_service\"", "path_root=\"system\""],
+            ["native_seq=10", "path_matches=0", "path_kind=\"unavailable\"", "path_root=\"unavailable\""],
+        ]) {
+            assert!(line.contains("catalog_count=3"));
+            for field in expected { assert!(line.contains(field), "missing {field}"); }
+        }
+        assert!(!text.contains("private-marker") && !text.contains("/"));
     }
     /// A device service that answers every request without tagging the reply:
     /// the next reply read is whatever the device queued first.
