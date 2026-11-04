@@ -1444,8 +1444,21 @@ service discovery as the repeated-open failure; they do not identify the mount's
 internal waiting stage or establish which preparation client completed mounting.
 The installed build is not proven identical to the inspected source.
 
+A subsequent real warm run of joint QA19.1.4 passed the installed-image check
+but failed the new directory refresh with `Socket/ConnectionReset` after 15 ms,
+before DDI service setup or AX reading. The pinned `send_device_handshake`
+generated a new host UUID on every RSD connection, so refresh changed the peer
+identity. The [pymobiledevice3 protocol implementation](https://github.com/doronz88/pymobiledevice3/blob/103647ae12ed50d955fa6910d7d3a9363cc36608/pymobiledevice3/remote/remotexpc.py#L76-L102)
+records that a changed peer UUID on the same tunnel makes remoted reattach and
+close its service listeners. This establishes a protocol defect consistent
+with the reset; proving that it caused this Duo failure still requires the
+rebuilt candidate's device run. No listening-port error is inferred from RST.
+
 Before opening control services, preparation now re-reads RSD on the retained
-RP tunnel, using the discovery port captured when that tunnel was created.
+RP tunnel, using the discovery port and host peer UUID captured by its first
+RSD handshake. This UUID is distinct from the device UUID in the advertised
+map. Each new tunnel generates its peer UUID once; refresh sends that same
+identity. Existing generic RSD constructors retain their default behavior.
 This preserves a successfully prepared RP connection (including the cellular
 bootstrap route) and its pairing; it adds no second RP handshake. Both cold
 startup after mounting and an already-mounted image use fresh advertisements,
@@ -1465,11 +1478,13 @@ events and the fixed `phone_preparation` reason through its closed allowlists;
 arbitrary error text/reasons remain excluded. Core regressions cover helper step
 ordering for missing/already-mounted inputs, mount-failure/Stop propagation and
 preparation display. The fixture supplies the next request's installed state;
-it does not run an image check or a real check-to-refresh integration. Native
-tests cover atomic directory replacement and retention of the old directory on
-failure/timeout using synthetic futures. Exact Duo cold-start, late-mount recovery
-and already-mounted runtime acceptance remain pending; host tests and builds
-cannot certify those paths.
+it does not run an image check or a real check-to-refresh integration. The
+native wire regression decodes the initial and refresh HTTP/2/XPC handshakes,
+requires the same host peer UUID, and supplies changed service advertisements.
+Restoring the old refresh constructor makes it fail. Failure/timeout retains
+the old directory. This host peer fixture is not a real RP tunnel or an iOS
+remoted instance. Exact Duo cold-start, late-mount recovery and already-mounted
+runtime acceptance remain pending; host tests and builds cannot certify them.
 
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,

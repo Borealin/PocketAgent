@@ -1,12 +1,16 @@
 diff --git a/ffi/Cargo.toml b/ffi/Cargo.toml
-index 93d2ca8..450b077 100644
+index 93d2ca8..35b29dc 100644
 --- a/ffi/Cargo.toml
 +++ b/ffi/Cargo.toml
-@@ -18,3 +18,3 @@ plist_ffi = { version = "0.1.6" }
+@@ -16,7 +16,7 @@ libc = "0.2.171"
+ plist = "1.7.1"
+ plist_ffi = { version = "0.1.6" }
  uuid = { version = "1.12", features = ["v4"], optional = true }
 -serde_json = { version = "1", optional = true }
 +serde_json = { version = "1", optional = true, features = ["float_roundtrip"] }
  mdns-sd = { version = "0.19", optional = true }
+ 
+ [target.'cfg(windows)'.dependencies]
 @@ -33,6 +33,7 @@ afc = ["idevice/afc"]
  amfi = ["idevice/amfi"]
  bt_packet_logger = ["idevice/bt_packet_logger"]
@@ -15,6 +19,15 @@ index 93d2ca8..450b077 100644
  core_device = ["idevice/core_device", "dep:futures", "dep:uuid", "rsd"]
  core_device_proxy = ["idevice/core_device_proxy", "idevice/tunnel_tcp_stack"]
  crashreportcopymobile = ["idevice/crashreportcopymobile", "afc"]
+@@ -66,7 +67,7 @@ restore = ["idevice/restore", "dep:futures"]
+ restore_recovery = ["restore", "idevice/restore_recovery"]
+ restore_service = ["idevice/restore_service", "rsd"]
+ remote_pairing = ["idevice/remote_pairing", "dep:mdns-sd"]
+-rsd = ["idevice/rsd"]
++rsd = ["idevice/rsd", "dep:uuid"]
+ syslog_relay = ["idevice/syslog_relay"]
+ tcp = ["idevice/tcp"]
+ tunnel_tcp_stack = [
 diff --git a/ffi/src/dvt/application_listing.rs b/ffi/src/dvt/application_listing.rs
 index f78ab57..9d39375 100644
 --- a/ffi/src/dvt/application_listing.rs
@@ -182,7 +195,7 @@ index 6e818c2..58dfcf0 100644
 +#[cfg(feature = "display_stream")]
 +pub mod pocket_ddi;
 diff --git a/ffi/src/rsd.rs b/ffi/src/rsd.rs
-index 20377cf..58f820b 100644
+index 20377cf..b3a1470 100644
 --- a/ffi/src/rsd.rs
 +++ b/ffi/src/rsd.rs
 @@ -11,7 +11,9 @@ use crate::{IdeviceFfiError, ReadWriteOpaque, ffi_err, run_sync};
@@ -190,9 +203,9 @@ index 20377cf..58f820b 100644
  /// Opaque handle to an RsdHandshake
  #[derive(Clone)]
 -pub struct RsdHandshakeHandle(pub RsdHandshake);
-+// The discovery port belongs to the tunnel, not to a service advertisement.
-+// Preserve it so callers can refresh the directory without another RP handshake.
-+pub struct RsdHandshakeHandle(pub RsdHandshake, pub Option<u16>);
++// Discovery port and host peer UUID belong to the tunnel, not its advertisement.
++// Refresh must retain both; the UUID in RsdHandshake itself is the device's.
++pub struct RsdHandshakeHandle(pub RsdHandshake, pub Option<(u16, uuid::Uuid)>);
  
  /// C-compatible representation of an RSD service
  #[repr(C)]
@@ -206,7 +219,7 @@ index 20377cf..58f820b 100644
              null_mut()
          }
 diff --git a/ffi/src/tunnel_provider.rs b/ffi/src/tunnel_provider.rs
-index 58dd1f8..aaf5d23 100644
+index 58dd1f8..f3dde3c 100644
 --- a/ffi/src/tunnel_provider.rs
 +++ b/ffi/src/tunnel_provider.rs
 @@ -36,16 +36,21 @@ async fn finish_tunnel(
@@ -234,18 +247,19 @@ index 58dd1f8..aaf5d23 100644
  
      let client_ip: std::net::IpAddr = tunnel
          .info
-@@ -69,20 +74,23 @@ async fn finish_tunnel(
+@@ -69,20 +74,24 @@ async fn finish_tunnel(
          .connect(rsd_port)
          .await
          .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
 -    let handshake = RsdHandshake::new(rsd_stream).await?;
 +    tracing::info!("PoC tunnel: RSD socket connected");
-+    let handshake = tokio::time::timeout(std::time::Duration::from_secs(30), RsdHandshake::new(rsd_stream))
++    let peer_uuid = uuid::Uuid::new_v4();
++    let handshake = tokio::time::timeout(std::time::Duration::from_secs(30), RsdHandshake::new_with_peer_uuid(rsd_stream, peer_uuid))
 +        .await.map_err(|_| IdeviceError::InternalError("RSD handshake timed out".into()))??;
 +    tracing::info!("PoC tunnel: RSD handshake complete");
  
 -    Ok((adapter, handshake))
-+    Ok((adapter, RsdHandshakeHandle(handshake, Some(rsd_port))))
++    Ok((adapter, RsdHandshakeHandle(handshake, Some((rsd_port, peer_uuid)))))
  }
  
  fn write_result(
@@ -262,16 +276,19 @@ index 58dd1f8..aaf5d23 100644
      }
  }
  
-@@ -114,7 +122,7 @@ pub unsafe extern "C" fn tunnel_create_usb(
+@@ -113,8 +122,9 @@ pub unsafe extern "C" fn tunnel_create_usb(
+             .connect(rsd_port)
              .await
              .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
-         let handshake = RsdHandshake::new(rsd_stream).await?;
+-        let handshake = RsdHandshake::new(rsd_stream).await?;
 -        Ok::<_, IdeviceError>((adapter, handshake))
-+        Ok::<_, IdeviceError>((adapter, RsdHandshakeHandle(handshake, Some(rsd_port))))
++        let peer_uuid = uuid::Uuid::new_v4();
++        let handshake = RsdHandshake::new_with_peer_uuid(rsd_stream, peer_uuid).await?;
++        Ok::<_, IdeviceError>((adapter, RsdHandshakeHandle(handshake, Some((rsd_port, peer_uuid)))))
      });
  
      match res {
-@@ -327,12 +335,14 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
+@@ -327,12 +337,14 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
          // Connect directly and use raw RPPairing protocol
          let stream = run_global_timeout(|| tokio::net::TcpStream::connect(socket_addr))
              .await
@@ -417,3 +434,48 @@ index 035d2f0..c9f2c94 100644
  /// Frees a handle
  ///
  /// # Arguments
+diff --git a/idevice/src/services/rsd.rs b/idevice/src/services/rsd.rs
+index a9ed724..6a737aa 100644
+--- a/idevice/src/services/rsd.rs
++++ b/idevice/src/services/rsd.rs
+@@ -33,9 +33,15 @@ pub struct RsdHandshake {
+ 
+ impl RsdHandshake {
+     pub async fn new(socket: impl ReadWrite) -> Result<Self, IdeviceError> {
++        Self::new_with_peer_uuid(socket, uuid::Uuid::new_v4()).await
++    }
++
++    /// Discover again without changing the identity sent by this tunnel's
++    /// first RSD connection. This is the host identity, not the device's UUID.
++    pub async fn new_with_peer_uuid(socket: impl ReadWrite, peer_uuid: uuid::Uuid) -> Result<Self, IdeviceError> {
+         let mut xpc_client = RemoteXpcClient::new(socket).await?;
+         xpc_client.do_handshake().await?;
+-        xpc_client.send_device_handshake().await?;
++        xpc_client.send_device_handshake_with_uuid(peer_uuid).await?;
+         let data = xpc_client.recv_root().await?;
+ 
+         let services_dict = match data
+diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
+index bd0c33f..4015eb9 100644
+--- a/idevice/src/xpc/mod.rs
++++ b/idevice/src/xpc/mod.rs
+@@ -89,12 +89,18 @@ impl<R: ReadWrite> RemoteXpcClient<R> {
+     ///
+     /// Send this only on the RSD/remoted control connection
+     pub async fn send_device_handshake(&mut self) -> Result<(), IdeviceError> {
++        self.send_device_handshake_with_uuid(uuid::Uuid::new_v4()).await
++    }
++
++    /// Reconnecting RSD on one tunnel must retain the peer identity; changing
++    /// it makes remoted reattach the peer and close its advertised listeners.
++    pub async fn send_device_handshake_with_uuid(&mut self, peer_uuid: uuid::Uuid) -> Result<(), IdeviceError> {
+         const REMOTE_XPC_VERSION_FLAGS: u64 = 0x0100_0000_0000_0006;
+ 
+         let msg = xpc!({
+             "MessageType": "Handshake",
+             "MessagingProtocolVersion": 7u64,
+-            "UUID": uuid::Uuid::new_v4(),
++            "UUID": peer_uuid,
+             "Properties": {
+                 "RemoteXPCVersionFlags": REMOTE_XPC_VERSION_FLAGS,
+                 "SensitivePropertiesVisible": true,
