@@ -723,7 +723,8 @@ deadline, a 45-second idle limit refreshed only by new real content, coalesced
 real progress and cancellation propagated as cancellation. A system expiry
 during maintenance ends the turn before its permit (draft returned or pending
 request held, nothing dispatched); progress reflects only real increments, so a
-provider that stays silent for about 30 seconds can still be expired by iOS. Host integration
+silent provider remains subject to system expiration. There is no fixed safe
+silence interval, and continued progress does not guarantee runtime. Host integration
 tests drive the real `consume` through a URL protocol stub; real summary folds
 also ran on the iPhone 12 mini (see the verification scope above).
 
@@ -2332,13 +2333,64 @@ cancels. An expiry before the turn body starts leaves a pending cancellation,
 so the body stops before any work and fails with the expiry cause. An expiration (system, or dismissal from the system task
 UI) ends an unsuccessful turn as failed with a send-a-new-message cause;
 a turn whose agent already completed successfully keeps its completed outcome.
-Remaining limit: iOS can expire a task with no observable progress, including
-a silent script or a provider that streams nothing. The earlier stall occurred
+Remaining limit: iOS can expire a task even with observable progress. A silent
+script or provider is one possible risk, not the only expiration cause. The earlier stall occurred
 at about 32 seconds without an update, but the later silent interval of
 90 seconds completed without expiration; no fixed threshold is claimed.
 The run_script descriptor
 tells the model to print real intermediate output from long scripts (for
 example after each finished chunk), never heartbeats or fake progress.
+
+### Continued-processing expiration boundary
+
+[Apple's long-running task guide](https://developer.apple.com/documentation/backgroundtasks/performing-long-running-tasks-on-ios-and-ipados)
+and [WWDC25](https://developer.apple.com/videos/play/wwdc2025/227/)
+require user-initiated foreground submission and timely, meaningful progress;
+they do not guarantee a runtime or publish a stall cadence. Dynamic launch-handler
+registration at user intent is supported for `BGContinuedProcessingTask` (also
+explicitly exempted from launch-time registration in the iOS 27.2 SDK header).
+The app's foreground-only serial queue, bundle-prefixed wildcard permission,
+unique concrete turn identifier and `.fail` submission follow that contract.
+The launch callback initializes the task's own progress and expiration handler
+before returning; later updates retain that progress object. These source checks
+do not establish how the system samples or evaluates the changing work counts.
+
+The expiration callback has no reason argument. System-interface cancellation
+uses the same callback as system expiration; the app's own Stop is a separate
+entry path. An expiration event therefore records the callback, not proof of
+progress-policy suspension or an identified human action. Cancellation drains
+terminal tool events, preserves an issued action's unknown result, returns to
+the assistant and stops the owned runner before `setTaskCompleted(success:)`.
+Failed work retains the background-ended cause; already completed agent work
+keeps its completed outcome. No interrupted action is automatically replayed.
+
+A private turn's submission log reports iOS 27.2. The following day's inventory
+reported iOS 27.3 and app 0.4.0 (19); that later inventory does not establish
+the failed turn's system or binary version. In the captured turn, expiration
+arrived 93 seconds after submission during a phone action, only 1.5 seconds
+after progress advanced to 22/23 on the same object. A preceding 25.4-second
+tool interval ended successfully and further actions completed before expiration.
+The callback preceded the app's cancellation request and the in-flight WDA
+request's URL cancellation (-999). Event drain, assistant return and runner stop
+finished about a second later; saved history retained failed status, the
+background-ended cause and an adjacent unknown-action result. The generic
+`PocketAgent:1` log after drain is a consequence of the incomplete run, not the
+originating failure. Startup connection refusals had already recovered.
+The separate slow-stream control continued reporting real work roughly every
+five seconds for over two minutes and completed. Neither capture proves a
+fixed runtime limit, a background deadlock or a missing-progress defect.
+
+The exact expiration trigger remains unresolved: the retained evidence has no
+matching system scheduler decision or recorded system-interface cancellation,
+and the installed binary is not verified against this source revision. Before
+another device exercise, reserve the device for one chat and record the exact
+artifact. Use a new harmless task with a finite real streamed response, switch
+to Settings once, and collect app progress plus contemporaneous scheduler logs;
+do not replay the interrupted goal. A separate fresh task cancelled once from
+the system interface distinguishes callback handling from the app's Stop path.
+Check saved cause, unknown versus unissued action results, cleanup and absence
+of later effects. Host reducer tests cover state semantics, not system policy
+or this device reproduction. No new device exercise was performed for this audit.
 
 A hosted CI cancellation test failed its two-second bound while measuring from
 before detached-task launch and the pre-cancellation wait. That interval could
