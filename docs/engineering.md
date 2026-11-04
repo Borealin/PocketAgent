@@ -1216,6 +1216,20 @@ Only verified portrait primary-display geometry is accepted; unsupported or
 unidentified surfaces fail before coordinate input. WDA still owns its runner PID
 and HTTP session, and is never selected automatically after an uncertain action.
 
+The 2026-11-03 saved DDI turn separates a refused node action from later
+foreground failures. Its recovery observation shows the target moved by four
+logical points; a separately planned tap then completed its native request,
+but its following observation could not identify the hit process. The saved
+log lacks that process/path match metadata, so the root cause remains open.
+Opt-in native logs now record the selected normalized hit point, cached-point
+use, preceding blank-point count and logical geometry; identity failures add
+catalog/match counts and fixed path-kind/root categories. `native_seq` joins
+these records to the existing call log's `nativeSeq` within that session.
+An exhausted hit scan records its blank count and geometry. No PID, path text,
+app identity or AX content is added. These diagnostics use existing replies,
+with no extra reads, action replay or change to identity/geometry admission.
+They are diagnostic preparation, not a repair or device acceptance of this turn.
+
 Native source lives in Native/ddi and bootstrap copies it into the pinned idevice
 FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
 new managed checkout instead of reapplying a new patch to the old patched tree;
