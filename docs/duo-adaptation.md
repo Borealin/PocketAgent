@@ -5,9 +5,13 @@ the outer display, open inner display, rotation, Split View and the keyboard,
 plus a task indicator that does not continually cover the target app.
 
 The UI uses one system `NavigationSplitView` for the session list and
-conversation. Retain its default sizing/style: a maximum sidebar width prevented
-the system from aligning the two columns with the active vertical fold; removing
-it restores the even division. Conversation, model and draft remain owned by
+conversation. Retain its default sizing/style: removing the maximum sidebar
+width restored an even division in the previously observed simulator pose with
+an active vertical fold; this is not a guarantee of equal columns in every pose.
+Candidate 19.1.7's current inner-display landscape layout was accepted, and
+manual new-session/return navigation restored the original session and draft,
+including its visible composer text; active-division alignment and the full
+system Split View matrix remain unaccepted. Conversation, model and draft remain owned by
 `ChatController` across layout changes. Existing native forms and sheets keep
 their safe-area handling. Compact vertical size classes display at most
 three draft lines (the full draft remains scrollable); other layouts retain six.
@@ -86,7 +90,7 @@ presentation timer. An isolated iOS 27.2 simulator probe fails with
 include portrait-created and landscape-created turns, including a
 landscape-created turn whose target subsequently returns to portrait.
 The full system Split View resizing matrix, remaining secondary screens and
-Duo DDI/WDA control remain unaccepted. Rotatable UI alone does not establish
+inner-display DDI/WDA control remain unaccepted. Rotatable UI alone does not establish
 phone-control acceptance. Revision-bound validation results and success
 artifacts are kept in the PR description and external evidence.
 
