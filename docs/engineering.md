@@ -33,6 +33,13 @@ portrait-only horizontal preparation gesture is unchanged. A connected physical
 Duo is required to reproduce and validate that reported obstruction. The UI
 adaptation and successful builds must not be presented as its repair.
 
+The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
+ZIP snapshots from Settings and conversation context menus. Only allowlisted
+opt-in metadata is exported; history, screenshots, credentials, pairing records
+and raw native text logs are excluded. The first opt-in `run_context` record
+associates new runs with a conversation; legacy logs are recent-only. Existing
+logging defaults, history format and no-replay behavior are unchanged.
+
 The [single-entry and long-term memory design](long-lived-assistant.md)
 records the user-confirmed 2026-10-14 direction, the public research behind it
 and the implemented P1–P4 contract: a default "你的助理" entry on the existing

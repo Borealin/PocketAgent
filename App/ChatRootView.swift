@@ -177,6 +177,7 @@ private struct SessionDrawer: View {
     @State private var pendingDelete: ChatSession?
     @State private var confirmClear = false
     @State private var clearBlocked: String?
+    @State private var diagnosticScope: DiagnosticExportScope?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -197,6 +198,9 @@ private struct SessionDrawer: View {
                         Button("清空", systemImage: "eraser") { requestClear() }.tint(.orange)
                     }
                     .contextMenu {
+                        Button("导出诊断包", systemImage: "square.and.arrow.up") {
+                            diagnosticScope = .conversation(chat.primaryID)
+                        }.accessibilityIdentifier("exportConversationDiagnostics")
                         Button("清空对话，保留记忆…", systemImage: "eraser", role: .destructive) { requestClear() }
                             .accessibilityIdentifier("clearAssistantConversation")
                     }
@@ -218,6 +222,9 @@ private struct SessionDrawer: View {
                                 Button("重命名") { rename(session.id) }.tint(.indigo)
                             }
                             .contextMenu {
+                                Button("导出诊断包", systemImage: "square.and.arrow.up") {
+                                    diagnosticScope = .conversation(session.id)
+                                }.accessibilityIdentifier("exportConversationDiagnostics")
                                 Button("重命名", systemImage: "pencil") { rename(session.id) }
                                 if chat.canDelete(session.id) {
                                     Button("删除", systemImage: "trash", role: .destructive) { pendingDelete = session }
@@ -259,6 +266,19 @@ private struct SessionDrawer: View {
         .alert("暂时不能清空", isPresented: Binding(get: { clearBlocked != nil }, set: { if !$0 { clearBlocked = nil } })) {
             Button("好", role: .cancel) { clearBlocked = nil }
         } message: { Text(clearBlocked ?? "") }
+        .sheet(item: $diagnosticScope) { scope in
+            NavigationStack {
+                DiagnosticExportView(scope: scope, conversationState: {
+                    guard case .conversation(let id) = scope else { return nil }
+                    return chat.sessions.first(where: { $0.id == id })?.state
+                }())
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("完成") { diagnosticScope = nil }
+                    }
+                }
+            }
+        }
     }
 
     /// Asks for confirmation, or explains what has to be stopped or handled first.
