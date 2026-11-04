@@ -370,6 +370,17 @@ binding. Keys and bindings are never included in portable snapshots. Diagnostic
 file output and screenshots default to off; the native log toggle takes effect
 on the next launch.
 
+HTTP 401/403 from main and summary requests use fixed Chinese access-rejection
+guidance before reaching status or history detail. The response body is dropped;
+opt-in stream diagnostics retain only the existing HTTP status metadata. A
+gateway may reject the client or relay an upstream rejection, so the message
+does not blame the entered Key or identify a failing layer. Check the provider
+address, protocol, Key group/model permissions and, when applicable, proxy
+authentication/forwarding and upstream credentials. Request authentication,
+queued configuration, retry policy and optional-summary failure policy are
+unchanged. This improves error presentation; it does not repair external
+credentials or establish the cause of an earlier installed build's rejection.
+
 Build an ordinary Xcode project from XcodeGen plus pinned dependencies. IPA
 artifacts carry no development profile, team identity, credential or device
 record. DDI is the default phone backend; the separate WDA companion IPA is
@@ -754,7 +765,8 @@ deadline, a 45-second idle limit refreshed only by new real content, coalesced
 real progress and cancellation propagated as cancellation. A system expiry
 during maintenance ends the turn before its permit (draft returned or pending
 request held, nothing dispatched); progress reflects only real increments, so a
-provider that stays silent for about 30 seconds can still be expired by iOS. Host integration
+silent provider remains subject to system expiration. There is no fixed safe
+silence interval, and continued progress does not guarantee runtime. Host integration
 tests drive the real `consume` through a URL protocol stub; real summary folds
 also ran on the iPhone 12 mini (see the verification scope above).
 
@@ -1247,6 +1259,20 @@ Only verified portrait primary-display geometry is accepted; unsupported or
 unidentified surfaces fail before coordinate input. WDA still owns its runner PID
 and HTTP session, and is never selected automatically after an uncertain action.
 
+The 2026-11-03 saved DDI turn separates a refused node action from later
+foreground failures. Its recovery observation shows the target moved by four
+logical points; a separately planned tap then completed its native request,
+but its following observation could not identify the hit process. The saved
+log lacks that process/path match metadata, so the root cause remains open.
+Opt-in native logs now record the selected normalized hit point, cached-point
+use, preceding blank-point count and logical geometry; identity failures add
+catalog/match counts and fixed path-kind/root categories. `native_seq` joins
+these records to the existing call log's `nativeSeq` within that session.
+An exhausted hit scan records its blank count and geometry. No PID, path text,
+app identity or AX content is added. These diagnostics use existing replies,
+with no extra reads, action replay or change to identity/geometry admission.
+They are diagnostic preparation, not a repair or device acceptance of this turn.
+
 Native source lives in Native/ddi and bootstrap copies it into the pinned idevice
 FFI checkout keyed by upstream revision and the patch digest. Upgrades create a
 new managed checkout instead of reapplying a new patch to the old patched tree;
@@ -1464,6 +1490,62 @@ next action checks the real state); the app inventory read, which now precedes
 records and free as before). Stop, the deadline, a revoked script lease and storage gates
 are rechecked between steps. The bounds hold while the native code polls
 cooperatively; synchronous work (loading image assets) is not preempted.
+
+The 2026-11-04 Duo preparation failure exposed a separate directory-lifetime
+bug: RSD advertisements are a snapshot from tunnel creation, and mounting an
+image never updates that map. The mount confirmation timed out after 120 s;
+a subsequent image check reported installed, but repeated service opens on the
+same connection failed at the missing CoreDevice device-info lookup. A separate
+turn with a new tunnel reached ready services. These observations support stale
+service discovery as the repeated-open failure; they do not identify the mount's
+internal waiting stage or establish which preparation client completed mounting.
+The installed build is not proven identical to the inspected source.
+
+A subsequent real warm run of joint QA19.1.4 passed the installed-image check
+but failed the new directory refresh with `Socket/ConnectionReset` after 15 ms,
+before DDI service setup or AX reading. The pinned `send_device_handshake`
+generated a new host UUID on every RSD connection, so refresh changed the peer
+identity. The [pymobiledevice3 protocol implementation](https://github.com/doronz88/pymobiledevice3/blob/103647ae12ed50d955fa6910d7d3a9363cc36608/pymobiledevice3/remote/remotexpc.py#L76-L102)
+records that a changed peer UUID on the same tunnel makes remoted reattach and
+close its service listeners. Joint QA19.1.5, bound to PR #9 `4d37aa0` native
+inputs (`1c92e7e`, tree `e56f99…`), supports this peer-identity diagnosis: two
+consecutive fresh-RP warm observations and WDA launch → `press_home` → `wait` →
+normal cleanup stop passed, with the owned runner PID confirmed absent afterward.
+
+Before opening control services, preparation now re-reads RSD on the retained
+RP tunnel, using the discovery port and host peer UUID captured by its first
+RSD handshake. This UUID is distinct from the device UUID in the advertised
+map. Each new tunnel generates its peer UUID once; refresh sends that same
+identity. Existing generic RSD constructors retain their default behavior.
+This preserves a successfully prepared RP connection (including the cellular
+bootstrap route) and its pairing; it adds no second RP handshake. Both cold
+startup after mounting and an already-mounted image use fresh advertisements,
+since an earlier timed-out mount may have completed since discovery. The fresh
+map replaces the old one only after a successful handshake. The read gets at
+most 15 s under the turn's wall-clock deadline and resets the connection's app
+catalog before setup. Already-owned DDI sessions and WDA runners keep their
+original service ports through cleanup. A mount timeout still means unknown,
+stops that preparation and never triggers a retry: the next explicit tool
+request first checks the real image state, then discovers services again.
+Stop/deadline/lease/storage checks run between steps and before any action.
+The chat and system task now show the reached preparation stage (connection,
+image check/download/mount, directory refresh, inventory, control connection),
+rather than the pending screen-read label, without counting preparation as a
+completed phone action. Diagnostic export retains the three directory-refresh
+events and the fixed `phone_preparation` reason through its closed allowlists;
+arbitrary error text/reasons remain excluded. Core regressions cover helper step
+ordering for missing/already-mounted inputs, mount-failure/Stop propagation and
+preparation display. The fixture supplies the next request's installed state;
+it does not run an image check or a real check-to-refresh integration. The
+native wire regression decodes the initial and refresh HTTP/2/XPC handshakes,
+requires the same host peer UUID, and supplies changed service advertisements.
+Restoring the old refresh constructor makes it fail. Failure/timeout retains
+the old directory. This host peer fixture is not a real RP tunnel or an iOS
+remoted instance. No operator Stop was clicked, so the WDA result covers
+normal `stopRunner` cleanup, not button cancellation. Cold startup and
+same-connection real late-mount remain recommended unrun cases rather than
+revision blockers; the original 120-second mount-wait stage and original AX
+root cause remain unconfirmed.
 
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
@@ -2363,13 +2445,64 @@ cancels. An expiry before the turn body starts leaves a pending cancellation,
 so the body stops before any work and fails with the expiry cause. An expiration (system, or dismissal from the system task
 UI) ends an unsuccessful turn as failed with a send-a-new-message cause;
 a turn whose agent already completed successfully keeps its completed outcome.
-Remaining limit: iOS can expire a task with no observable progress, including
-a silent script or a provider that streams nothing. The earlier stall occurred
+Remaining limit: iOS can expire a task even with observable progress. A silent
+script or provider is one possible risk, not the only expiration cause. The earlier stall occurred
 at about 32 seconds without an update, but the later silent interval of
 90 seconds completed without expiration; no fixed threshold is claimed.
 The run_script descriptor
 tells the model to print real intermediate output from long scripts (for
 example after each finished chunk), never heartbeats or fake progress.
+
+### Continued-processing expiration boundary
+
+[Apple's long-running task guide](https://developer.apple.com/documentation/backgroundtasks/performing-long-running-tasks-on-ios-and-ipados)
+and [WWDC25](https://developer.apple.com/videos/play/wwdc2025/227/)
+require user-initiated foreground submission and timely, meaningful progress;
+they do not guarantee a runtime or publish a stall cadence. Dynamic launch-handler
+registration at user intent is supported for `BGContinuedProcessingTask` (also
+explicitly exempted from launch-time registration in the iOS 27.2 SDK header).
+The app's foreground-only serial queue, bundle-prefixed wildcard permission,
+unique concrete turn identifier and `.fail` submission follow that contract.
+The launch callback initializes the task's own progress and expiration handler
+before returning; later updates retain that progress object. These source checks
+do not establish how the system samples or evaluates the changing work counts.
+
+The expiration callback has no reason argument. System-interface cancellation
+uses the same callback as system expiration; the app's own Stop is a separate
+entry path. An expiration event therefore records the callback, not proof of
+progress-policy suspension or an identified human action. Cancellation drains
+terminal tool events, preserves an issued action's unknown result, returns to
+the assistant and stops the owned runner before `setTaskCompleted(success:)`.
+Failed work retains the background-ended cause; already completed agent work
+keeps its completed outcome. No interrupted action is automatically replayed.
+
+A private turn's submission log reports iOS 27.2. The following day's inventory
+reported iOS 27.3 and app 0.4.0 (19); that later inventory does not establish
+the failed turn's system or binary version. In the captured turn, expiration
+arrived 93 seconds after submission during a phone action, only 1.5 seconds
+after progress advanced to 22/23 on the same object. A preceding 25.4-second
+tool interval ended successfully and further actions completed before expiration.
+The callback preceded the app's cancellation request and the in-flight WDA
+request's URL cancellation (-999). Event drain, assistant return and runner stop
+finished about a second later; saved history retained failed status, the
+background-ended cause and an adjacent unknown-action result. The generic
+`PocketAgent:1` log after drain is a consequence of the incomplete run, not the
+originating failure. Startup connection refusals had already recovered.
+The separate slow-stream control continued reporting real work roughly every
+five seconds for over two minutes and completed. Neither capture proves a
+fixed runtime limit, a background deadlock or a missing-progress defect.
+
+The exact expiration trigger remains unresolved: the retained evidence has no
+matching system scheduler decision or recorded system-interface cancellation,
+and the installed binary is not verified against this source revision. Before
+another device exercise, reserve the device for one chat and record the exact
+artifact. Use a new harmless task with a finite real streamed response, switch
+to Settings once, and collect app progress plus contemporaneous scheduler logs;
+do not replay the interrupted goal. A separate fresh task cancelled once from
+the system interface distinguishes callback handling from the app's Stop path.
+Check saved cause, unknown versus unissued action results, cleanup and absence
+of later effects. Host reducer tests cover state semantics, not system policy
+or this device reproduction. No new device exercise was performed for this audit.
 
 A hosted CI cancellation test failed its two-second bound while measuring from
 before detached-task launch and the pre-cancellation wait. That interval could

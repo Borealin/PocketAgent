@@ -536,6 +536,27 @@ fn normalized_path(raw: &str) -> String {
     }
     String::from_utf8_lossy(&out).into_owned()
 }
+/// Fixed categories only: never include process IDs, executable paths, app
+/// identities or AX content in the opt-in native diagnostic file.
+fn trace_identity_miss(native_seq: u64, catalog_count: usize, path: Option<&str>, path_matches: usize) {
+    let path_kind = match path {
+        None => "unavailable",
+        Some(p) if p.contains(".appex/") => "app_extension",
+        Some(p) if p.contains(".xpc/") => "xpc_service",
+        Some(p) if p.contains(".app/") => "app_bundle",
+        Some(_) => "other",
+    };
+    let path_root = match path {
+        None => "unavailable",
+        Some(p) if p.starts_with("/var/containers/Bundle/Application/") => "app_container",
+        Some(p) if p.starts_with("/Applications/") => "builtin_apps",
+        Some(p) if p.starts_with("/System/") => "system",
+        Some(p) if p.starts_with("/private/preboot/") => "preboot",
+        Some(_) => "other",
+    };
+    tracing::warn!(native_seq, catalog_count, path_matches, path_kind, path_root,
+        "DDI foreground identity unresolved");
+}
 #[derive(Clone, Copy, PartialEq)]
 struct Geometry {
     x: f64,
@@ -823,7 +844,10 @@ impl PocketDDISession {
             .find(|p| p.pid as u64 == pid)
             .and_then(|p| p.executable_url.as_ref())
             .map(|p| normalized_path(&p.relative))
-            .ok_or_else(|| error("AX foreground process path unavailable"))?;
+            .ok_or_else(|| {
+                trace_identity_miss(self.cancel.progress.seq.load(Ordering::Relaxed), self.installed.len(), None, 0);
+                error("AX foreground process path unavailable")
+            })?;
         let matches: Vec<_> = self
             .installed
             .iter()
@@ -838,7 +862,10 @@ impl PocketDDISession {
                 Ok("com.apple.springboard".into())
             }
             "/Applications/Spotlight.app/Spotlight" => Ok("com.apple.Spotlight".into()),
-            _ => Err(error("AX foreground bundle identity unavailable")),
+            _ => {
+                trace_identity_miss(self.cancel.progress.seq.load(Ordering::Relaxed), self.installed.len(), Some(&path), matches.len());
+                Err(error("AX foreground bundle identity unavailable"))
+            }
         }
     }
     async fn active_hit(&mut self, g: Geometry) -> Result<(u64, f64, f64), IdeviceError> {
@@ -862,12 +889,17 @@ impl PocketDDISession {
                 points.push(point);
             }
         }
-        for (fx, fy) in points {
+        let point_count = points.len();
+        for (index, (fx, fy)) in points.into_iter().enumerate() {
             let x = g.x + g.width * fx;
             let y = g.y + g.height * fy;
             match self.ax().await?.hit(x, y).await {
                 Ok(token) => {
                     let (pid, _) = ax::identity(&token).map_err(error)?;
+                    tracing::info!(native_seq = self.cancel.progress.seq.load(Ordering::Relaxed),
+                        point_x = fx, point_y = fy, cached = self.hit_point == Some((fx, fy)),
+                        blank_points = index, screen_x = g.x, screen_y = g.y, width = g.width, height = g.height,
+                        "DDI AX hit selected");
                     self.hit_point = Some((fx, fy));
                     return Ok((pid, x, y));
                 }
@@ -877,6 +909,8 @@ impl PocketDDISession {
                 Err(e) => return Err(error(e)),
             }
         }
+        tracing::warn!(native_seq = self.cancel.progress.seq.load(Ordering::Relaxed), blank_points = point_count,
+            screen_x = g.x, screen_y = g.y, width = g.width, height = g.height, "DDI AX hit scan empty");
         Err(error("AX foreground has no readable hit point"))
     }
     /// A coordinate effect must land on the app of the snapshot observed for
@@ -1528,6 +1562,50 @@ pub unsafe extern "C" fn pocket_ddi_mount(
     }
 }
 
+/// Publish a new advertisement only after the whole handshake succeeds. A
+/// timed-out discovery socket is dropped; the old map is never used by setup
+/// after an error, and the next explicit request may discover again.
+async fn refresh_directory<S: ReadWrite>(
+    current: &mut RsdHandshake,
+    limit: Duration,
+    peer_uuid: uuid::Uuid,
+    stream: impl Future<Output = Result<S, IdeviceError>>,
+) -> Result<(), IdeviceError> {
+    let directory = within(limit, "DDI service directory refresh", async {
+        RsdHandshake::new_with_peer_uuid(stream.await?, peer_uuid).await
+    }).await?;
+    *current = directory;
+    Ok(())
+}
+
+/// # Safety
+/// Borrowed handles are serialized with all tunnel uses, and no control
+/// session is open. The original discovery port must have come from a tunnel
+/// constructor. At most 15 s of the passed wall-clock expiry is used.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_ddi_refresh_services(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    expires_at_ms: u64,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    let result = run_sync_local(async {
+        let limit = expiry_window(expires_at_ms, unix_ms(), IMAGE_CHECK_CAP_MS)?;
+        let a = unsafe { &mut (*a).0 };
+        let h = unsafe { &mut *h };
+        let (port, peer_uuid) = h.1.ok_or_else(|| error("RSD discovery context missing"))?;
+        refresh_directory(&mut h.0, limit, peer_uuid, async {
+            a.connect(port).await.map_err(|e| error(e.to_string()))
+        }).await
+    });
+    match result {
+        Ok(()) => null_mut(),
+        Err(e) => ffi_err!(e),
+    }
+}
+
 const APP_INVENTORY_CAP_MS: u64 = 15_000;
 /// # Safety
 /// As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
@@ -1879,6 +1957,45 @@ mod call_lifecycle_tests {
             other => other.to_string(),
         }
     }
+    #[test]
+    fn identity_diagnostics_keep_match_metadata_without_process_or_app_identity() {
+        #[derive(Clone)]
+        struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Log {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let log = Log(Arc::new(std::sync::Mutex::new(vec![])));
+        let writer = log.clone();
+        let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false)
+            .with_writer(move || writer.clone()).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            trace_identity_miss(7, 3,
+                Some("/var/containers/Bundle/Application/private-marker/App.app/Binary"), 2);
+            trace_identity_miss(8, 3,
+                Some("/Applications/private-marker.app/PlugIns/Extension.appex/Binary"), 0);
+            trace_identity_miss(9, 3,
+                Some("/System/Library/private-marker.framework/Service.xpc/Binary"), 0);
+            trace_identity_miss(10, 3, None, 0);
+        });
+        let bytes = log.0.lock().unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 4);
+        for (line, expected) in lines.iter().zip([
+            ["native_seq=7", "path_matches=2", "path_kind=\"app_bundle\"", "path_root=\"app_container\""],
+            ["native_seq=8", "path_matches=0", "path_kind=\"app_extension\"", "path_root=\"builtin_apps\""],
+            ["native_seq=9", "path_matches=0", "path_kind=\"xpc_service\"", "path_root=\"system\""],
+            ["native_seq=10", "path_matches=0", "path_kind=\"unavailable\"", "path_root=\"unavailable\""],
+        ]) {
+            assert!(line.contains("catalog_count=3"));
+            for field in expected { assert!(line.contains(field), "missing {field}"); }
+        }
+        assert!(!text.contains("private-marker") && !text.contains("/"));
+    }
     /// A device service that answers every request without tagging the reply:
     /// the next reply read is whatever the device queued first.
     #[derive(Default)]
@@ -1960,6 +2077,71 @@ mod call_lifecycle_tests {
         // A clean channel is reused.
         channel.request(counting(&connects), &cancel, Wait::Raced, async |w| w.call(3, false).await).await.unwrap();
         assert_eq!(connects.load(Ordering::SeqCst), 1);
+    }
+    /// A wire-level peer that rejects a changed host identity on reconnect.
+    /// Reads the real HTTP/2 + XPC handshake emitted by the production client.
+    fn discovery_peer(peer_uuid: uuid::Uuid, port: Option<u16>) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (client, mut server) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            let mut magic = [0; 24];
+            server.read_exact(&mut magic).await.unwrap();
+            assert_eq!(&magic, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+            loop {
+                let mut header = [0; 9];
+                server.read_exact(&mut header).await.unwrap();
+                let length = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+                assert!(length <= 4096);
+                let mut payload = vec![0; length];
+                server.read_exact(&mut payload).await.unwrap();
+                if header[3] != 0 || header[5..9] != 1u32.to_be_bytes() { continue; }
+                let message = idevice::xpc::XPCMessage::decode(&payload).unwrap();
+                let Some(body) = message.message else { continue; };
+                let body = body.to_plist();
+                if body.as_dictionary().and_then(|d| d.get("MessageType")).and_then(Value::as_string) != Some("Handshake") { continue; }
+                assert_eq!(body.as_dictionary().unwrap()["UUID"].as_string(), Some(peer_uuid.to_string().as_str()));
+                let mut services = idevice::xpc::Dictionary::new();
+                if let Some(port) = port {
+                    services.insert("com.apple.coredevice.deviceinfo".into(), idevice::xpc!({
+                        "Entitlement": "test", "Port": port.to_string()
+                    }));
+                }
+                let reply = idevice::xpc::XPCMessage::new(None, Some(idevice::xpc!({
+                    "Services": idevice::xpc::XPCObject::Dictionary(services),
+                    "MessagingProtocolVersion": 7u64, "UUID": uuid::Uuid::nil(),
+                    "Properties": idevice::xpc::XPCObject::Dictionary(Default::default())
+                })), None).encode(0).unwrap();
+                let mut frame = (reply.len() as u32).to_be_bytes()[1..].to_vec();
+                frame.extend_from_slice(&[0, 0, 0, 0, 0, 1]);
+                frame.extend_from_slice(&reply);
+                server.write_all(&frame).await.unwrap();
+                // Keep the peer alive for the client's HTTP/2 acknowledgements.
+                let mut tail = [0; 256];
+                while server.read(&mut tail).await.unwrap() != 0 {}
+                break;
+            }
+        });
+        (client, peer)
+    }
+    #[tokio::test]
+    async fn directory_refresh_keeps_the_first_peer_identity_on_the_wire_and_publishes_only_success() {
+        let peer_uuid = uuid::Uuid::from_u128(1);
+        let (initial, peer) = discovery_peer(peer_uuid, None);
+        let mut current = RsdHandshake::new_with_peer_uuid(initial, peer_uuid).await.unwrap();
+        peer.await.unwrap();
+        assert!(current.services.is_empty());
+        let (refreshed, peer) = discovery_peer(peer_uuid, Some(42));
+        refresh_directory(&mut current, Duration::from_secs(1), peer_uuid, async { Ok(refreshed) }).await.unwrap();
+        peer.await.unwrap();
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let failed = refresh_directory::<tokio::io::DuplexStream>(&mut current, Duration::from_secs(1), peer_uuid,
+            async { Err(error("refused")) }).await;
+        assert!(failed.is_err());
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let expired = refresh_directory::<tokio::io::DuplexStream>(&mut current, Duration::from_millis(1), peer_uuid,
+            std::future::pending()).await;
+        assert_eq!(message(expired.unwrap_err()), "DDI service directory refresh timed out");
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
     }
     #[tokio::test]
     async fn a_desynchronised_client_confirms_nothing_until_replaced() {

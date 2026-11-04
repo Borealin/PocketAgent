@@ -9,12 +9,19 @@ private final class LimitProtocol: URLProtocol, @unchecked Sendable {
     struct Reply: Sendable { var status = 200; var contentType = "application/json"; var body = "" }
     static let reply = Mutex(Reply())
     static let requests = Mutex(0)
+    static let authentication = Mutex<[String: String]>([:])
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "limit.pocketagent.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let reply = Self.reply.withLock { $0 }
         Self.requests.withLock { $0 += 1 }
+        Self.authentication.withLock { headers in
+            headers = [:]
+            for name in ["Authorization", "x-api-key", "x-goog-api-key"] {
+                headers[name] = request.value(forHTTPHeaderField: name)
+            }
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": reply.contentType])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -27,14 +34,14 @@ private final class LimitProtocol: URLProtocol, @unchecked Sendable {
 /// A secret-looking value and an endpoint that must never reach the message.
 private let echoed = #""note":"PKATEST_SECRET_SENTINEL https://pkatest.invalid/v1""#
 
-private func client(_ format: ModelAPIFormat, _ reply: LimitProtocol.Reply) -> AgentProviderClient {
+private func client(_ format: ModelAPIFormat, _ reply: LimitProtocol.Reply, secret: String = "") -> AgentProviderClient {
     LimitProtocol.reply.withLock { $0 = reply }
     LimitProtocol.requests.withLock { $0 = 0 }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [LimitProtocol.self]
     return AgentProviderClient(
         provider: ModelProvider(name: "t", apiFormat: format, inferenceURL: "https://limit.pocketagent.test/v1/x"),
-        model: AIModel(id: "m"), secret: "", session: URLSession(configuration: configuration))
+        model: AIModel(id: "m"), secret: secret, session: URLSession(configuration: configuration))
 }
 
 private func http(_ status: Int, _ body: String) -> AgentProviderError { .http(status, body) }
@@ -120,6 +127,37 @@ struct ProviderContextLimitTests {
     }
 
     // MARK: Through the pinned provider client
+
+    @Test func accessRejectionsKeepAuthenticationButDoNotExposeTheResponseBodyOrRetry() async throws {
+        let formats: [(ModelAPIFormat, String, String)] = [
+            (.responses, "Authorization", "Bearer test-only"),
+            (.chatCompletions, "Authorization", "Bearer test-only"),
+            (.messages, "x-api-key", "test-only"),
+            (.generateContent, "x-goog-api-key", "test-only"),
+        ]
+        for (format, header, value) in formats {
+            for status in [401, 403] {
+                let base = client(format, .init(status: status, body: echoed), secret: "test-only")
+                let barrier = TranscriptCommitBarrier()
+                let prompt = AgentTranscriptMessage(role: .user, text: "x")
+                barrier.open(epoch: 1, seed: [prompt.id: try CommittedMessage(prompt)])
+                let model = CommitGatedModel(base: base, barrier: barrier, epoch: 1, promptID: prompt.id,
+                                             synthetic: { [] }, prepare: { $0 })
+                let runtime = AgentRuntime(model: model, tools: [], approval: AllowEverything(), configuration: AgentLoopConfiguration())
+                var failure: String?, terminal: AgentRunState?
+                for await event in await runtime.start(AgentRunRequest(conversationID: UUID(), promptID: prompt.id,
+                    prompt: prompt.text, permissionMode: .fullAccess, systemPrompt: "s", priorMessages: [])) {
+                    if case .failed(let reason) = event { failure = reason }
+                    if case .runFinished(let summary) = event { terminal = summary.state }
+                }
+                #expect(LimitProtocol.requests.withLock { $0 } == 1 && terminal == .failed)
+                #expect(LimitProtocol.authentication.withLock { $0 } == [header: value])
+                let text = try #require(failure)
+                #expect(text.contains("HTTP \(status)") && text.contains("模型服务") && text.contains("上游"))
+                #expect(!text.contains("PKATEST_SECRET_SENTINEL") && !text.contains("pkatest.invalid"))
+            }
+        }
+    }
 
     /// The real AgentProviderClient answers HTTP 400 context_length_exceeded;
     /// the main-model gate maps it, AgentRuntime sends nothing more and the
