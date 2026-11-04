@@ -16,9 +16,9 @@ Both landscape orientations are enabled without changing the iOS 26 minimum.
 The current system indicator is owned by `BGContinuedProcessingTask`, not a
 custom ActivityKit extension. The Xcode 27.2 public API exposes title, subtitle,
 progress and completion, but no presentation/collapse timer. Shorter titles or
-less frequent updates alone cannot establish an obstruction fix. Reproduce its
-presentation before changing the current preparation gesture. Do not replace
-continued execution with a shorter background allowance, fake progress, replay
+less frequent updates alone cannot establish an obstruction fix. Establish the
+captured geometry and preparation eligibility before changing the current gesture.
+Do not replace continued execution with a shorter background allowance, fake progress, replay
 phone effects or inject unverified gestures on a newly inferred Duo layout.
 
 The horizontal preparation gesture's implementation is unchanged, but the
@@ -31,6 +31,14 @@ is no resampling. With captured geometry, preparation still requires an exact
 match between the observed frame and the stored bounds, alongside its existing
 foreground and effect guards. Which Duo inner-display poses satisfy those
 conditions remains untested.
+
+At executor creation, existing opt-in run logging records one
+`phone_task_surface_geometry` event: UIKit idiom/orientation enum values,
+foreground-key-window presence, window/screen dimensions, top/right safe insets,
+and capture outcome with the first rejection reason in guard order. It records
+no window/scene identifiers or content and changes no admission or gesture.
+This event is excluded from the current diagnostic ZIP allowlist; inspect the
+local run log for this diagnostic. It cannot explain later preparation guards.
 
 Both native build scripts now accept `--sdk iphonesimulator`; `iphoneos` remains
 the default. The generated project selects `.build/native-iphonesimulator` and
@@ -59,8 +67,12 @@ ownership, rotated touch mapping and multi-display targeting require verified
 device metadata before relaxing that refusal. Preserve the existing
 fresh-observation, serial-action and no-replay contracts.
 
-The user reports system task-card obstruction on the closed outer display in
-portrait. Reproduction and repair in that condition remain required; the
+Physical acceptance of candidate 0.4.0 (19.1.6) confirms system task-card
+obstruction on the closed outer display in portrait: the expanded card covers
+Clock's title/navigation area through the wait phase and disappears after task
+completion. The matching run records neither a native `surface_drag` call nor a
+completed `phone_task_surface_gesture`; these records do not identify a specific
+failed eligibility check. Repair remains required, and the requested
 default-collapse/transient-expansion behavior is unimplemented. An isolated
 iOS 27.2 simulator probe fails with `BGTaskSchedulerErrorDomain` code 1:
 `BGTaskScheduler is not available on this platform.` Physical acceptance must

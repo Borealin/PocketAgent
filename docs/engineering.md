@@ -30,8 +30,17 @@ was captured, the observed frame must still match it before the gesture runs.
 DDI separately refuses rotated display geometry. Rotatable UI does not establish
 Duo phone-control acceptance, and inner-display guard behavior remains untested.
 
-The user reports task-card obstruction on the closed outer display in portrait;
-reproduction and repair under that condition remain required. The requested
+The existing opt-in run log records one anonymous `phone_task_surface_geometry`
+event at executor creation, covering the captured eligibility conditions and
+first rejection reason. This diagnostic changes no guard or gesture and is
+excluded from the current diagnostic ZIP allowlist; details are in the Duo design.
+
+Physical acceptance of candidate 0.4.0 (19.1.6) confirms task-card obstruction on
+the closed outer display in portrait. The expanded card covers Clock's
+title/navigation area through the wait phase and disappears after completion.
+The matching run records no native `surface_drag` call or completed
+`phone_task_surface_gesture`; the reason preparation did not complete remains
+unknown. Repair is still required. The requested
 default-collapse/transient-expansion behavior is unimplemented, and the public
 `BGContinuedProcessingTask` API supplies no presentation timer. The iOS 27.2
 simulator rejects this scheduler with code 1 (unavailable on this platform).
