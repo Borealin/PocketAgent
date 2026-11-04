@@ -30,19 +30,21 @@ was captured, the observed frame must still match it before the gesture runs.
 DDI separately refuses rotated display geometry. Rotatable UI does not establish
 Duo phone-control acceptance, and inner-display guard behavior remains untested.
 
-The existing opt-in run log records one anonymous `phone_task_surface_geometry`
-event at executor creation, covering the captured eligibility conditions and
-first rejection reason. This diagnostic changes no guard or gesture and is
-excluded from the current diagnostic ZIP allowlist; details are in the Duo design.
+Candidate 19.1.7 confirms why the closed outer display skips preparation in
+portrait: its safe insets are top 0/right 84 points, so the existing top-inset capture
+guard rejects it, so the app sent no preparation gesture. An external manual
+status-band horizontal probe at 4% of screen height did not collapse the card.
+External manual central upward swipes collapsed it while the task continued;
+this is not a candidate-app repair. Repeating that gesture after collapse would
+start on underlying app content, outside the existing native status-band guard.
 
-Physical acceptance of candidate 0.4.0 (19.1.6) confirms task-card obstruction on
-the closed outer display in portrait. The expanded card covers Clock's
-title/navigation area through the wait phase and disappears after completion.
-The matching run records no native `surface_drag` call or completed
-`phone_task_surface_gesture`; the reason preparation did not complete remains
-unknown. Repair is still required. The requested
-default-collapse/transient-expansion behavior is unimplemented, and the public
-`BGContinuedProcessingTask` API supplies no presentation timer. The iOS 27.2
+The observed explicit-PID `ActivityProgressUI` snapshot is readable but lacks
+verified app/task ownership and a screen mapping for its host frames. Visibility
+flags and generic phase titles cannot prove this task's expanded card covers
+the swipe start. Safe automatic
+collapse remains blocked, and the requested default-collapse/transient-expansion
+contract remains unimplemented. The public `BGContinuedProcessingTask` API
+supplies no presentation timer. The iOS 27.2
 simulator rejects this scheduler with code 1 (unavailable on this platform).
 Physical checks must cover portrait-created and landscape-created turns,
 including a landscape-created turn whose target subsequently returns to portrait.

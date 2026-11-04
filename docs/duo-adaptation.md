@@ -32,13 +32,9 @@ match between the observed frame and the stored bounds, alongside its existing
 foreground and effect guards. Which Duo inner-display poses satisfy those
 conditions remains untested.
 
-At executor creation, existing opt-in run logging records one
-`phone_task_surface_geometry` event: UIKit idiom/orientation enum values,
-foreground-key-window presence, window/screen dimensions, top/right safe insets,
-and capture outcome with the first rejection reason in guard order. It records
-no window/scene identifiers or content and changes no admission or gesture.
-This event is excluded from the current diagnostic ZIP allowlist; inspect the
-local run log for this diagnostic. It cannot explain later preparation guards.
+Existing opt-in run logging records one anonymous `phone_task_surface_geometry`
+event at executor creation, including capture eligibility and rejection reason.
+It changes no guard or gesture and is excluded from the diagnostic ZIP allowlist.
 
 Both native build scripts now accept `--sdk iphonesimulator`; `iphoneos` remains
 the default. The generated project selects `.build/native-iphonesimulator` and
@@ -67,14 +63,25 @@ ownership, rotated touch mapping and multi-display targeting require verified
 device metadata before relaxing that refusal. Preserve the existing
 fresh-observation, serial-action and no-replay contracts.
 
-Physical acceptance of candidate 0.4.0 (19.1.6) confirms system task-card
-obstruction on the closed outer display in portrait: the expanded card covers
-Clock's title/navigation area through the wait phase and disappears after task
-completion. The matching run records neither a native `surface_drag` call nor a
-completed `phone_task_surface_gesture`; these records do not identify a specific
-failed eligibility check. Repair remains required, and the requested
-default-collapse/transient-expansion behavior is unimplemented. An isolated
-iOS 27.2 simulator probe fails with `BGTaskSchedulerErrorDomain` code 1:
+Closed-outer-display portrait exercise of candidate 19.1.7 identifies the
+capture failure: the foreground phone window is portrait, but its safe insets
+are top 0/right 84 points, so the existing top-inset guard captures no geometry.
+The expanded task card covers Clock's title/navigation area. An external manual
+status-band horizontal probe at 4% of screen height did not collapse it; the
+candidate app's guard skipped its own preparation gesture. Two controlled external
+central upward swipes collapsed the card while the task continued; these manual
+probes do not establish a candidate-app repair. The effective swipe starts below the native
+top-5% band and would start on underlying app content after the card collapses,
+so it cannot be added as unconditional action preparation.
+
+The observed explicit-PID native snapshot can read `ActivityProgressUI`, but
+lacks verified app/task ownership and a screen mapping for its host frames.
+Visibility flags and a generic phase title cannot establish that this task's
+expanded card covers the swipe start. Safe automatic collapse remains blocked.
+The requested default-collapse/transient-expansion contract is unimplemented;
+the public task API supplies no
+presentation timer. An isolated iOS 27.2 simulator probe fails with
+`BGTaskSchedulerErrorDomain` code 1:
 `BGTaskScheduler is not available on this platform.` Physical acceptance must
 include portrait-created and landscape-created turns, including a
 landscape-created turn whose target subsequently returns to portrait.
