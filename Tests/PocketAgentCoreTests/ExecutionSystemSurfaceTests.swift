@@ -53,6 +53,22 @@ import Testing
         #expect(status.phoneActions == 1 && status.scriptPhoneActions == 1 && status.progressUnits == (2, 3))
     }
 
+    @Test func phonePreparationShowsItsRealStageWithoutCountingAnAction() {
+        for scripted in [false, true] {
+            var status = ExecutionStatus()
+            let call = invocation("observe_screen", "o")
+            if scripted { status.applyScript(.started(call.call)) }
+            else { status.apply(.toolStarted(call)) }
+            let title = status.systemTaskTitle, units = status.progressUnits
+            status.phonePreparation = "正在挂载开发者映像"
+            #expect(status.systemTaskTitle == "正在挂载开发者映像")
+            #expect(status.subtitle.contains("正在挂载开发者映像") && !status.subtitle.contains("读取屏幕"))
+            #expect(status.phoneActions == 0 && status.progressUnits == units)
+            status.phonePreparation = nil
+            #expect(status.systemTaskTitle == title)
+        }
+    }
+
     @Test func fallbackCoversLifecycleWithoutCarryingStaleActionOrModelIdentity() {
         let phases: [ExecutionPhase] = [.queued(rank: 2, waitingForForeground: false),
             .queued(rank: 1, waitingForForeground: true), .connecting, .modelResponse,

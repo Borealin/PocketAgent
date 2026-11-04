@@ -181,12 +181,40 @@ index 6e818c2..58dfcf0 100644
 +
 +#[cfg(feature = "display_stream")]
 +pub mod pocket_ddi;
+diff --git a/ffi/src/rsd.rs b/ffi/src/rsd.rs
+index 20377cf..58f820b 100644
+--- a/ffi/src/rsd.rs
++++ b/ffi/src/rsd.rs
+@@ -11,7 +11,9 @@ use crate::{IdeviceFfiError, ReadWriteOpaque, ffi_err, run_sync};
+ 
+ /// Opaque handle to an RsdHandshake
+ #[derive(Clone)]
+-pub struct RsdHandshakeHandle(pub RsdHandshake);
++// The discovery port belongs to the tunnel, not to a service advertisement.
++// Preserve it so callers can refresh the directory without another RP handshake.
++pub struct RsdHandshakeHandle(pub RsdHandshake, pub Option<u16>);
+ 
+ /// C-compatible representation of an RSD service
+ #[repr(C)]
+@@ -74,7 +76,7 @@ pub unsafe extern "C" fn rsd_handshake_new(
+ 
+     match res {
+         Ok(handshake) => {
+-            let boxed = Box::new(RsdHandshakeHandle(handshake));
++            let boxed = Box::new(RsdHandshakeHandle(handshake, None));
+             unsafe { *handle = Box::into_raw(boxed) };
+             null_mut()
+         }
 diff --git a/ffi/src/tunnel_provider.rs b/ffi/src/tunnel_provider.rs
-index 58dd1f8..b75611b 100644
+index 58dd1f8..aaf5d23 100644
 --- a/ffi/src/tunnel_provider.rs
 +++ b/ffi/src/tunnel_provider.rs
-@@ -39,13 +39,18 @@ async fn finish_tunnel(
- ) -> Result<(idevice::tcp::handle::AdapterHandle, RsdHandshake), IdeviceError> {
+@@ -36,16 +36,21 @@ async fn finish_tunnel(
+         impl idevice::remote_pairing::RpPairingSocketProvider,
+     >,
+     connect_addr: std::net::SocketAddr,
+-) -> Result<(idevice::tcp::handle::AdapterHandle, RsdHandshake), IdeviceError> {
++) -> Result<(idevice::tcp::handle::AdapterHandle, RsdHandshakeHandle), IdeviceError> {
      use idevice::remote_pairing::connect_tls_psk_tunnel_native;
  
 -    let tunnel_port = rpc.create_tcp_listener().await?;
@@ -206,7 +234,7 @@ index 58dd1f8..b75611b 100644
  
      let client_ip: std::net::IpAddr = tunnel
          .info
-@@ -69,7 +74,10 @@ async fn finish_tunnel(
+@@ -69,20 +74,23 @@ async fn finish_tunnel(
          .connect(rsd_port)
          .await
          .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
@@ -216,8 +244,33 @@ index 58dd1f8..b75611b 100644
 +        .await.map_err(|_| IdeviceError::InternalError("RSD handshake timed out".into()))??;
 +    tracing::info!("PoC tunnel: RSD handshake complete");
  
-     Ok((adapter, handshake))
+-    Ok((adapter, handshake))
++    Ok((adapter, RsdHandshakeHandle(handshake, Some(rsd_port))))
  }
+ 
+ fn write_result(
+     adapter: idevice::tcp::handle::AdapterHandle,
+-    handshake: RsdHandshake,
++    handshake: RsdHandshakeHandle,
+     out_adapter: *mut *mut AdapterHandle,
+     out_handshake: *mut *mut RsdHandshakeHandle,
+ ) {
+     unsafe {
+         *out_adapter = Box::into_raw(Box::new(AdapterHandle(adapter)));
+-        *out_handshake = Box::into_raw(Box::new(RsdHandshakeHandle(handshake)));
++        *out_handshake = Box::into_raw(Box::new(handshake));
+     }
+ }
+ 
+@@ -114,7 +122,7 @@ pub unsafe extern "C" fn tunnel_create_usb(
+             .await
+             .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
+         let handshake = RsdHandshake::new(rsd_stream).await?;
+-        Ok::<_, IdeviceError>((adapter, handshake))
++        Ok::<_, IdeviceError>((adapter, RsdHandshakeHandle(handshake, Some(rsd_port))))
+     });
+ 
+     match res {
 @@ -327,12 +335,14 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
          // Connect directly and use raw RPPairing protocol
          let stream = run_global_timeout(|| tokio::net::TcpStream::connect(socket_addr))

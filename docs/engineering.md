@@ -1434,6 +1434,37 @@ records and free as before). Stop, the deadline, a revoked script lease and stor
 are rechecked between steps. The bounds hold while the native code polls
 cooperatively; synchronous work (loading image assets) is not preempted.
 
+The 2026-11-04 Duo preparation failure exposed a separate directory-lifetime
+bug: RSD advertisements are a snapshot from tunnel creation, and mounting an
+image never updates that map. The mount confirmation timed out after 120 s;
+a subsequent image check reported installed, but repeated service opens on the
+same connection failed at the missing CoreDevice device-info lookup. A separate
+turn with a new tunnel reached ready services. These observations support stale
+service discovery as the repeated-open failure; they do not identify the mount's
+internal waiting stage or establish which preparation client completed mounting.
+The installed build is not proven identical to the inspected source.
+
+Before opening control services, preparation now re-reads RSD on the retained
+RP tunnel, using the discovery port captured when that tunnel was created.
+This preserves a successfully prepared RP connection (including the cellular
+bootstrap route) and its pairing; it adds no second RP handshake. Both cold
+startup after mounting and an already-mounted image use fresh advertisements,
+since an earlier timed-out mount may have completed since discovery. The fresh
+map replaces the old one only after a successful handshake. The read gets at
+most 15 s under the turn's wall-clock deadline and resets the connection's app
+catalog before setup. Already-owned DDI sessions and WDA runners keep their
+original service ports through cleanup. A mount timeout still means unknown,
+stops that preparation and never triggers a retry: the next explicit tool
+request first checks the real image state, then discovers services again.
+Stop/deadline/lease/storage checks run between steps and before any action.
+The chat and system task now show the reached preparation stage (connection,
+image check/download/mount, directory refresh, inventory, control connection),
+rather than the pending screen-read label, without counting preparation as a
+completed phone action. Core/native regressions cover cold and mounted paths,
+late-mount recovery ordering, failed refresh publication, mount failure/Stop and
+display. Exact Duo cold-start, late-mount recovery and already-mounted runtime
+acceptance remain pending; host tests and builds cannot certify those paths.
+
 DDI calls carry the same kind of expiry (`expires_at_ms` in the request, a
 screenshot ABI parameter): the turn's remaining time less a 22 s cleanup reserve,
 at most 35 s, checked natively before every stage and physical effect.

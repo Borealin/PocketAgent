@@ -1528,6 +1528,48 @@ pub unsafe extern "C" fn pocket_ddi_mount(
     }
 }
 
+/// Publish a new advertisement only after the whole handshake succeeds. A
+/// timed-out discovery socket is dropped; the old map is never used by setup
+/// after an error, and the next explicit request may discover again.
+async fn refresh_directory(
+    current: &mut RsdHandshake,
+    limit: Duration,
+    fresh: impl Future<Output = Result<RsdHandshake, IdeviceError>>,
+) -> Result<(), IdeviceError> {
+    let directory = within(limit, "DDI service directory refresh", fresh).await?;
+    *current = directory;
+    Ok(())
+}
+
+/// # Safety
+/// Borrowed handles are serialized with all tunnel uses, and no control
+/// session is open. The original discovery port must have come from a tunnel
+/// constructor. At most 15 s of the passed wall-clock expiry is used.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pocket_ddi_refresh_services(
+    a: *mut AdapterHandle,
+    h: *mut RsdHandshakeHandle,
+    expires_at_ms: u64,
+) -> *mut IdeviceFfiError {
+    if a.is_null() || h.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+    let result = run_sync_local(async {
+        let limit = expiry_window(expires_at_ms, unix_ms(), IMAGE_CHECK_CAP_MS)?;
+        let a = unsafe { &mut (*a).0 };
+        let h = unsafe { &mut *h };
+        let port = h.1.ok_or_else(|| error("RSD discovery port missing"))?;
+        refresh_directory(&mut h.0, limit, async {
+            let stream = a.connect(port).await.map_err(|e| error(e.to_string()))?;
+            RsdHandshake::new(stream).await
+        }).await
+    });
+    match result {
+        Ok(()) => null_mut(),
+        Err(e) => ffi_err!(e),
+    }
+}
+
 const APP_INVENTORY_CAP_MS: u64 = 15_000;
 /// # Safety
 /// As `pocket_ddi_installed` (at most 15 s of the expiry is used; a passed
@@ -1960,6 +2002,30 @@ mod call_lifecycle_tests {
         // A clean channel is reused.
         channel.request(counting(&connects), &cancel, Wait::Raced, async |w| w.call(3, false).await).await.unwrap();
         assert_eq!(connects.load(Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn directory_refresh_replaces_stale_advertisements_only_after_confirmation() {
+        let directory = |port| {
+            let mut services = std::collections::HashMap::new();
+            if let Some(port) = port {
+                services.insert("com.apple.coredevice.deviceinfo".into(), idevice::rsd::RsdService {
+                    entitlement: String::new(), port, uses_remote_xpc: true,
+                    features: None, service_version: None,
+                });
+            }
+            RsdHandshake { services, protocol_version: 1, properties: Default::default(), uuid: String::new() }
+        };
+        let mut current = directory(None);
+        refresh_directory(&mut current, Duration::from_secs(1), async { Ok(directory(Some(42))) }).await.unwrap();
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let failed = refresh_directory(&mut current, Duration::from_secs(1), async { Err(error("refused")) }).await;
+        assert!(failed.is_err());
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        let expired = refresh_directory(&mut current, Duration::from_millis(1), std::future::pending()).await;
+        assert_eq!(message(expired.unwrap_err()), "DDI service directory refresh timed out");
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 42);
+        refresh_directory(&mut current, Duration::from_secs(1), async { Ok(directory(Some(43))) }).await.unwrap();
+        assert_eq!(current.services["com.apple.coredevice.deviceinfo"].port, 43);
     }
     #[tokio::test]
     async fn a_desynchronised_client_confirms_nothing_until_replaced() {

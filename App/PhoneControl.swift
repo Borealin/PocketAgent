@@ -18,7 +18,7 @@ protocol PhoneControl: AnyObject {
     var dispatchedCalls: Int { get }
     /// What native calls reported about effects so far (DDI; WDA reports none).
     var nativeEffects: NativeEffectReports { get }
-    func prepare() async throws
+    func prepare(progress: @escaping @MainActor (String) -> Void) async throws
     func activeApp() async throws -> String
     func readTree() async throws -> PhoneTree
     func screenshot() async throws -> Data
@@ -54,9 +54,9 @@ final class WDAControl: PhoneControl {
     var dispatchedCalls: Int { 0 }
     var nativeEffects: NativeEffectReports { NativeEffectReports() }
     init(_ model: Model) { self.model = model }
-    func prepare() async throws {
+    func prepare(progress: @escaping @MainActor (String) -> Void) async throws {
         guard let turnEnd else { throw PhonePreparationStopped() }
-        if base == nil { base = try await model.prepareWDA(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true } }
+        if base == nil { base = try await model.prepareWDA(turnEnd: turnEnd, progress: progress) { [weak self] in self?.stopRequested ?? true } }
     }
     /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
     private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
@@ -149,9 +149,9 @@ final class DDIControl: PhoneControl {
     static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
                                                "ax_replace", "home"]
     init(_ model: Model) { self.model = model }
-    func prepare() async throws {
+    func prepare(progress: @escaping @MainActor (String) -> Void) async throws {
         guard let turnEnd else { throw PhonePreparationStopped() }
-        try await model.prepareDDI(turnEnd: turnEnd) { [weak self] in self?.stopRequested ?? true }
+        try await model.prepareDDI(turnEnd: turnEnd, progress: progress) { [weak self] in self?.stopRequested ?? true }
     }
     /// The executor's check failed: Stop, deadline, revoked lease or storage gate.
     private var stopRequested: Bool { cancellationCheck.map { (try? $0()) == nil } ?? false }
