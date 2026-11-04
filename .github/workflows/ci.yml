@@ -17,7 +17,7 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.2.app
       - name: Core regression tests
-        run: env -u SDKROOT swift test
+        run: env -u SDKROOT swift test --no-parallel
       - name: Distribution regression tests
         run: python3 -m unittest discover -s Tests/DistributionTests
       - name: Runtime host regression tests (patched hostfs confinement)
