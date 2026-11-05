@@ -72,6 +72,7 @@ final class ChatController: ObservableObject {
     let providers: ProviderStore
     let workspaces: WorkspaceStore
     let owner: HistoryOwner
+    let dictation = DictationController()
     let storage: HistoryStorage
     /// The production writer (nil in the read-only viewer); held only for
     /// the local acceptance fault injection.
@@ -161,7 +162,8 @@ final class ChatController: ObservableObject {
                 if let hydration { created.adopt(hydration) }
             }
         }
-        owner.onChange = { [weak self] in self?.revision &+= 1 }
+        owner.onChange = { [weak self] in self?.historyChanged() }
+        dictation.onFinal = { [weak self] in self?.appendDictation(generation: $0) }
         owner.onStorageFailure = { [weak self] error in self?.storageFailed(error) }
         if DeviceSettings.dirtyAfterFirstScriptCall {
             // Local acceptance only: one failing write of an unchanged run event,
@@ -204,7 +206,7 @@ final class ChatController: ObservableObject {
         owner = HistoryOwner(file: file, health: .loadBlocked("只读量测视图，不写入"),
                              writer: { _ in writerCalls(); throw CocoaError(.featureUnsupported) })
         unsavedRecovery = nil
-        owner.onChange = { [weak self] in self?.revision &+= 1 }
+        owner.onChange = { [weak self] in self?.historyChanged() }
     }
 
     /// The primary line without a model uses the Settings default model;
@@ -331,6 +333,7 @@ final class ChatController: ObservableObject {
     /// Storage became dirty: stop every active turn at its next boundary.
     /// Already issued effects keep their real or unknown results; nothing resumes on its own.
     private func storageFailed(_ error: StorageCommitError) {
+        dictation.interrupt("历史尚未保存，听写已停止；已识别文字保留，恢复后可重试。")
         for job in jobs.values where !job.cancelled {
             job.cancelled = true; job.ready = false
         }
@@ -346,6 +349,25 @@ final class ChatController: ObservableObject {
     }
 
     // MARK: Sessions
+
+    private func historyChanged() {
+        revision &+= 1
+        if let id = dictation.input.sessionID, id != selectedID || owner.file.session(id) == nil { dictation.cancel() }
+    }
+
+    func startDictation() {
+        guard storageReady, foreground, let id = selectedID else { return }
+        dictation.start(in: id)
+    }
+
+    func appendDictation(generation: UUID) {
+        let input = dictation.input
+        guard storageReady, input.generation == generation, input.canAppend,
+              input.sessionID == selectedID, let id = input.sessionID else { return }
+        guard transact({ try $0.appendDictation(input) }) else { return }
+        noteDraftEdit(id)
+        dictation.cancel() // Consume only after the atomic write succeeds.
+    }
 
     func setDraft(_ text: String) {
         guard let id = selectedID, storageReady else { return }

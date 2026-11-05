@@ -18,6 +18,19 @@ nonisolated enum HistoryEditError: LocalizedError, Equatable {
 /// transaction or record so that messages, scope membership and run state
 /// change in the same write.
 nonisolated extension HistoryFile {
+    /// Completed dictation appends to the latest draft; no message, pending
+    /// request, memory or attachment is created or replaced.
+    mutating func appendDictation(_ input: DictationInput) throws {
+        guard input.canAppend, let id = input.sessionID else {
+            throw HistoryEditError.invalid("没有可追加的听写文字。")
+        }
+        let text = input.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        try editSession(id) { session in
+            let separator = session.draft.isEmpty || session.draft.last?.isWhitespace == true ? "" : "\n"
+            session.draft += separator + text
+        }
+    }
+
     mutating func editSession(_ id: UUID, touch: Bool = true, _ change: (inout ChatSession) throws -> Void) throws {
         guard let index = sessionIndex(id) else { throw HistoryEditError.missingSession }
         try change(&sessions[index])

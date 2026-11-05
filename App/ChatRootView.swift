@@ -68,9 +68,14 @@ struct ChatRootView: View {
                 }
             }
         }
-        .onAppear { chat.foregroundChanged(scenePhase == .active); if scenePhase == .active { sync.foreground() } }
+        .onAppear {
+            chat.foregroundChanged(scenePhase == .active)
+            if scenePhase == .background { chat.dictation.enteredBackground() }
+            if scenePhase == .active { sync.foreground() }
+        }
         .onChange(of: scenePhase) { _, phase in
             chat.foregroundChanged(phase == .active)
+            if phase == .background { chat.dictation.enteredBackground() }
             if phase == .active { sync.foreground() } else { chat.persist() }
         }
         .onChange(of: engine.busy) { _, _ in chat.foregroundChanged(scenePhase == .active) }
@@ -96,7 +101,7 @@ struct ChatRootView: View {
                         if let selected = chat.selected {
                             VStack(spacing: 0) {
                                 ExecutionStrip(chat: chat, session: selected)
-                                ChatComposer(chat: chat, providers: providers, workspaces: workspaces, session: selected,
+                                ChatComposer(chat: chat, dictation: chat.dictation, providers: providers, workspaces: workspaces, session: selected,
                                              inputFocused: $inputFocused, chooseModel: { inputFocused = false; showModels = true },
                                              chooseWorkspace: { inputFocused = false; showWorkspaces = true })
                             }

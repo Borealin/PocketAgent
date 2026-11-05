@@ -2,6 +2,36 @@
 
 ## Requirements and scope
 
+The [voice input and Live plan](plans/voice-input-and-live.md) separates local
+dictation from the later Live PR. Tap the input-row microphone to start, then
+stop to automatically append finalized text once to the original conversation's
+latest draft through HistoryOwner. Existing text/images survive; sending,
+steering, next requests and memory saving remain manual. There is no normal
+preview/confirmation surface. Preparing/finishing show a spinner, with Cancel
+at the send position; language is a local preference in Settings. While busy,
+the same input bubble is read-only and displays the existing draft, finalized
+speech and secondary-colored volatile text. These updates never enter the
+editable binding or history writer. A native waveform animation indicates
+recording, becomes static with Reduce Motion, and does not measure audio level.
+Stop stays at the microphone position with a red 44-point target. Only failed
+writes expose copyable recognized text and retry/discard. A ready-phase gate
+rejects duplicate finalization without another writer or delivery ledger.
+
+Dictation uses iOS 26 SpeechAnalyzer with runtime hardware/locale/assets checks
+and local DictationTranscriber fallback. Permission-alert inactive scenes do
+not cancel input. Backgrounding cancels preparation/recording; stopped input
+may complete within its existing limit, and failed-write text remains available.
+Cancel/session changes invalidate input without appending. Other interruptions
+append only already recognized final text with a short partial-result notice.
+Device route changes stop capture; setup category/configuration changes do not.
+Audio is bounded in memory, never written/logged/exported/synchronized. Three
+Core regressions and strict iOS 26 API/concurrency typechecks pass; full App/IPA/CI
+checks and exact-device acceptance must be repeated for this UI. The user
+confirmed direct draft append without confirmation in 20.1.3; that observation
+does not validate the new streaming display/animation or prove single-turn
+deduplication. No new device exercise was performed for this UI change.
+Live, cloud transcription, caret insertion and press-and-hold are separate scope.
+
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.
 It contains the 19.1.7 display/session/draft acceptance, remaining inner-display

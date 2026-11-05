@@ -100,6 +100,7 @@ struct ExecutionStrip: View {
 /// per-conversation model chip.
 struct ChatComposer: View {
     @ObservedObject var chat: ChatController
+    @ObservedObject var dictation: DictationController
     @ObservedObject var providers: ProviderStore
     @ObservedObject var workspaces: WorkspaceStore
     let session: ChatSession
@@ -164,6 +165,18 @@ struct ChatComposer: View {
                     .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("rememberModeHint")
             }
             if !session.draftAttachments.isEmpty || chat.isImporting(session.id) { draftImages }
+            if dictation.input.phase == .preview, let generation = dictation.input.generation {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("听写文字未写入草稿").foregroundStyle(.orange)
+                    ScrollView { Text(dictation.input.finalText).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+                        .frame(maxHeight: 80).accessibilityIdentifier("dictationRecovery")
+                    HStack {
+                        Button("重试") { chat.appendDictation(generation: generation) }.disabled(!chat.storageReady)
+                        Button("丢弃") { dictation.cancel() }
+                    }
+                }.font(.caption).buttonStyle(.borderless)
+            }
+            if !dictation.notice.isEmpty { Text(dictation.notice).font(.caption).foregroundStyle(.secondary) }
             HStack(spacing: 8) {
                 // Model first. On a narrow row the provider name goes, then the
                 // project name becomes its icon; neither is clipped mid-word.
@@ -193,14 +206,27 @@ struct ChatComposer: View {
             }
             .font(.body).buttonStyle(.borderless)
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: Binding(get: { chat.selected?.draft ?? "" }, set: chat.setDraft),
-                          axis: .vertical)
-                    .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .focused(inputFocused)
-                    .accessibilityIdentifier("chatInput")
-                if remembering {
+                Group {
+                    if dictation.input.busy {
+                        DictationInputDisplay(draft: session.draft, input: dictation.input,
+                                              compact: verticalSizeClass == .compact)
+                            .accessibilityIdentifier("dictationInput")
+                    } else {
+                        TextField(placeholder, text: Binding(get: { chat.selected?.draft ?? "" }, set: chat.setDraft),
+                                  axis: .vertical)
+                            .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
+                            .focused(inputFocused)
+                            .accessibilityIdentifier("chatInput")
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                dictationButton
+                if dictation.input.busy {
+                    Button { dictation.cancel() } label: {
+                        Image(systemName: "xmark").frame(width: 36, height: 36)
+                    }.buttonStyle(.plain).accessibilityLabel("取消听写").accessibilityIdentifier("cancelDictation")
+                } else if remembering {
                     Button { chat.beginRemember() } label: {
                         Image(systemName: "bookmark").font(.body.weight(.bold)).frame(width: 36, height: 36)
                             .background(chat.canRemember ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
@@ -243,6 +269,27 @@ struct ChatComposer: View {
                 else { chat.reportImportFailure(AttachmentError.unreadableImage.localizedDescription) }
             }.ignoresSafeArea()
         }
+    }
+
+    private var dictationButton: some View {
+        Button {
+            if dictation.input.phase == .recording { dictation.stop() }
+            else { inputFocused.wrappedValue = false; chat.startDictation() }
+        } label: {
+            Group {
+                if let download = dictation.download { ProgressView(download).labelsHidden().progressViewStyle(.circular) }
+                else if dictation.input.busy, dictation.input.phase != .recording { ProgressView().controlSize(.small) }
+                else { Image(systemName: dictation.input.phase == .recording ? "stop.fill" : "mic") }
+            }
+            .foregroundStyle(dictation.input.phase == .recording ? Color.red : Color.primary)
+            .frame(width: 44, height: 44)
+            .background(dictation.input.phase == .recording ? Color.red.opacity(0.12) : Color.clear, in: Circle())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled((dictation.input.phase != .idle && dictation.input.phase != .recording) || !chat.storageReady)
+        .accessibilityLabel(dictation.input.phase == .recording ? "停止听写" : dictation.input.busy ? "正在处理听写" : "语音输入")
+        .accessibilityIdentifier(dictation.input.phase == .recording ? "stopDictation" : "startDictation")
     }
 
     private func modelChip(provider showProvider: Bool) -> some View {
@@ -348,6 +395,42 @@ struct ChatComposer: View {
             }
             chat.completeImport(ticket, inputs: loaded, failures: loaded.isEmpty ? ["剪贴板中的图片无法读取。"] : [])
         }
+    }
+}
+
+/// A read-only rendering in the existing composer bubble. Streaming guesses
+/// never enter the editable binding or the history writer.
+private struct DictationInputDisplay: View {
+    let draft: String
+    let input: DictationInput
+    let compact: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var draftPrefix: String {
+        guard !draft.isEmpty, !input.finalText.isEmpty || !input.volatileText.isEmpty else { return draft }
+        return draft.last?.isWhitespace == true ? draft : draft + "\n"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if input.phase == .recording {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.red)
+                        .symbolEffect(.variableColor.iterative, isActive: !reduceMotion)
+                        .accessibilityHidden(true)
+                }
+                Text(input.phase == .preparing ? "正在准备听写…" : input.phase == .recording ? "正在录音" : "正在识别…")
+                    .foregroundStyle(.secondary)
+            }.font(.caption)
+            if draft.isEmpty, input.finalText.isEmpty, input.volatileText.isEmpty {
+                Text("开始说话…").foregroundStyle(.secondary)
+            } else {
+                Text("\(Text(draftPrefix + input.finalText))\(Text(input.volatileText).foregroundColor(.secondary))")
+                    .lineLimit(compact ? 3 : 6).truncationMode(.head)
+                    .accessibilityIdentifier("dictationStreamingText")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
