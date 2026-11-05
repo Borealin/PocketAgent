@@ -31,7 +31,7 @@ nonisolated struct TurnDeadline: Sendable {
 
 @MainActor
 extension Model {
-    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, clipboardAllowed: Bool, goal: String, images: [AgentImageAttachment],
+    func executePhoneAgent(config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind, clipboardAllowed: Bool, duoPane: DuoPane? = nil, goal: String, images: [AgentImageAttachment],
                            task: BGContinuedProcessingTask, progress: Progress, status: TurnStatus,
                            conversationID: UUID, promptID: UUID,
                            priorMessages: [AgentTranscriptMessage], gates: TurnGates,
@@ -72,8 +72,8 @@ extension Model {
                 }.value
                 let capabilities = ToolCapabilities(workspace: workspace != nil, scripts: ScriptRuntime.shared.isBundled,
                                                     skills: !rules.skills.isEmpty, phoneBackend: backend, clipboardAllowed: clipboardAllowed,
-                                                    memory: gates.assistant != nil)
-                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed,
+                                                    memory: gates.assistant != nil, duoPane: duoPane)
+                let phone = PhoneExecutor(model: self, task: task, config: config, backend: backend, clipboardAllowed: clipboardAllowed, duoPane: duoPane,
                                           deadline: deadline, effectsBlocked: gates.effectsBlocked, onPreparation: { label in
                     status.value.phonePreparation = label
                     publish("phone_preparation"); onStatus?(status.value)
@@ -323,7 +323,8 @@ final class PhoneExecutor {
     let control: any PhoneControl
     let backend: PhoneBackendKind
     let clipboardAllowed: Bool
-    var inputCapabilities: ToolCapabilities { ToolCapabilities(phoneBackend: backend, clipboardAllowed: clipboardAllowed) }
+    let duoPane: DuoPane?
+    var inputCapabilities: ToolCapabilities { ToolCapabilities(phoneBackend: backend, clipboardAllowed: clipboardAllowed, duoPane: duoPane) }
     var requests = 0
     var calls = 0
     var snapshotID = 0
@@ -342,18 +343,19 @@ final class PhoneExecutor {
     /// Effects of the phone call in progress (calls are serial).
     private var callEffects = PhoneCallEffects()
     private let onPreparation: @MainActor (String?) -> Void
-    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool,
+    init(model: Model, task: BGContinuedProcessingTask, config: RunConfiguration, backend: PhoneBackendKind, clipboardAllowed: Bool, duoPane: DuoPane? = nil,
          deadline: TurnDeadline, effectsBlocked: @escaping @MainActor () -> String?,
          onPreparation: @escaping @MainActor (String?) -> Void) {
         self.model = model; self.task = task; self.config = config; self.backend = backend
         self.deadline = deadline; self.effectsBlocked = effectsBlocked
         self.onPreparation = onPreparation
         self.clipboardAllowed = clipboardAllowed
-        control = backend == .ddi ? DDIControl(model) : WDAControl(model)
+        self.duoPane = duoPane
+        control = backend == .ddi ? DDIControl(model, duoPane: duoPane) : WDAControl(model)
         let idiom = UIDevice.current.userInterfaceIdiom
         let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .filter { $0.activationState == .foregroundActive }.flatMap(\.windows).first { $0.isKeyWindow }
-        if idiom == .phone,
+        if duoPane == nil, idiom == .phone,
            let window, window.windowScene?.interfaceOrientation == .portrait,
            window.screen.bounds.width < window.screen.bounds.height,
            window.safeAreaInsets.top >= 59 {
@@ -462,6 +464,7 @@ final class PhoneExecutor {
         guard !deadline.expired else { throw failure("本轮已达到 10 分钟上限；请发送新消息继续。") }
     }
     func ready() async throws -> String {
+        if duoPane != nil, backend != .ddi || !config.supportsImages { throw failure("Duo 单侧模式需要 DDI 和支持图片的模型。") }
         if let base { return base }
         defer { onPreparation(nil) }
         try await control.prepare { self.onPreparation($0) }
@@ -596,6 +599,13 @@ final class PhoneExecutor {
         var state: [String: Any] = ["snapshot_id": snapshotID, "app": appID,
             "screen": ["width": screen.width, "height": screen.height], "elements": elements,
             "truncated": observed.nodes.count > nodes.count]
+        if let duoPane {
+            state["control_pane"] = duoPane.rawValue
+            state["coordinate_space"] = "pane-local-points"
+            state["application_binding"] = "unresolved"
+            state["shared_system_surfaces"] = true
+            state["app_identity_verified"] = false
+        }
         if observed.outsideAppElements > 0 {
             state["outside_app_elements"] = observed.outsideAppElements
             state["outside_app_note"] = "屏幕上有由其他系统进程提供的界面（如键盘建议栏），未读取，不在 elements 中，不能按节点操作。"
@@ -664,6 +674,14 @@ final class PhoneExecutor {
             try proceed()
             // Refused before anything is sent: an earlier input release was not confirmed.
             if model.inputReleaseUnconfirmed { throw InputReleaseUnconfirmed() }
+            if duoPane != nil {
+                // Last Swift-side preparation before dispatch, before marking
+                // an effect. This fresh gutter check is not atomic with input
+                // and does not establish a window/app or modal owner.
+                _ = try await control.readTree()
+                _ = try await control.screenshot()
+                try proceed()
+            }
             let before = callEffects.beginAction()
             let dispatched = control.dispatchedCalls
             let reports = control.nativeEffects
@@ -767,7 +785,11 @@ final class PhoneExecutor {
                 try proceed()
                 try await requireApp(appID, base: base, proceed: proceed)
                 try proceed()
-                try await effect { try await control.tap(x, y, seconds: nil) }
+                let hold = args["seconds"]?.numberValue
+                if let raw = args["seconds"], raw != .null {
+                    guard let hold, hold.isFinite, (0.5...3).contains(hold) else { throw failure("长按时间应在 0.5–3 秒。") }
+                }
+                try await effect { try await control.tap(x, y, seconds: hold) }
             case "swipe":
                 try await reference(args, base: base, proceed: proceed)
                 try proceed()
@@ -879,6 +901,12 @@ final class PhoneExecutor {
             let state = try await observe(proceed: proceed, prepareSurface: textInput?.method != .ax)
             try proceed()
             var result: [String: Any] = ["ok": true, "screen": state]
+            if duoPane != nil {
+                result["action_issued"] = issued
+                result["action_outcome"] = issued ? "submitted" : "not_started"
+                result["postcondition_verified"] = false
+                result["replay_allowed"] = false
+            }
             if submittedKeys {
                 result["input_method"] = "physical_keys"
                 result["input_verified"] = false

@@ -20,6 +20,7 @@ nonisolated struct ToolCapabilities: Hashable, Sendable {
     var clipboardAllowed = true
     /// Primary line: read-only memory_search/session_search are registered.
     var memory = false
+    var duoPane: DuoPane? = nil
 }
 
 nonisolated enum ToolDecision: Equatable, Sendable {
@@ -63,7 +64,7 @@ nonisolated enum ToolCatalog {
         phone("observe_screen", "Read actual foreground app, visible elements and screenshot. Returns fresh snapshot_id and node IDs.", [:]),
         phone("open_app", "Open an app using a bundle_id verified in this device's installed-app list. Use find_apps first; never invent a bundle ID. Prefer open_app_by_name for a user-provided app name.", ["bundle_id": string]),
         phone("tap", "Tap one observed node from latest snapshot; returns actual screen after action.", ["node": integer, "snapshot_id": integer]),
-        phone("tap_point", "Tap screen coordinates in logical points from latest screenshot, when no accessibility node exists.", ["x": number, "y": number, "snapshot_id": integer]),
+        phone("tap_point", "Tap coordinates in logical points from latest screenshot. Optional seconds holds for 0.5–3 seconds; omitted means a tap.", ["x": number, "y": number, "snapshot_id": integer, "seconds": number], required: ["x", "y", "snapshot_id"]),
         phone("long_press", "Long press an observed node for 0.5–3 seconds; returns actual screen.", ["node": integer, "seconds": number, "snapshot_id": integer]),
         phone("swipe", "Swipe finger across screen. up shows lower content; down shows upper content. Returns fresh screen.", ["direction": options(["up", "down", "left", "right"]), "snapshot_id": integer]),
         phone("type_text", "Type text into an observed field. clear=true replaces existing text; false appends. Optional method defaults to paste; DDI also supports method=ax for nonempty whole-field replacement in an ordinary TextField or SearchField.", ["node": integer, "text": string, "clear": boolean, "snapshot_id": integer,
@@ -140,6 +141,10 @@ nonisolated enum ToolCatalog {
     /// per-step confirmation; tools whose capability is absent are refused.
     static func decision(for name: String, capabilities: ToolCapabilities) -> ToolDecision {
         guard let spec = spec(name) else { return .deny("未知工具 \(name)") }
+        if capabilities.duoPane != nil, spec.kind == .phone {
+            if capabilities.phoneBackend != .ddi { return .deny("Duo 单侧模式只支持 DDI。") }
+            if DuoPane.unavailableTools.contains(name) { return .deny(DuoPane.unavailableReason) }
+        }
         if name == "press_keys", capabilities.phoneBackend != .ddi { return .deny("press_keys 当前只支持 DDI。") }
         switch spec.kind {
         case .phone, .network: return .allow
@@ -162,8 +167,14 @@ nonisolated enum ToolCatalog {
     /// Capability section of the system prompt, generated from the same list.
     static func prompt(_ capabilities: ToolCapabilities, workspaceName: String?) -> String {
         var lines = ["## 本轮可用能力"]
-        lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
-        if capabilities.phoneBackend == .ddi {
+        if capabilities.duoPane == nil {
+            lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
+        }
+        if let pane = capabilities.duoPane {
+            lines.append("- 本轮限定 Duo 内屏\(pane.label)。截图只包含该侧，所有坐标都是截图内 469×669 逻辑点；不能操作另一侧。app 字段只是控制侧标识，不是当前应用身份；elements 为空，不提供 AX 节点。")
+            lines.append("- 用 observe_screen 看实际截图，tap_point（可用 seconds 长按）、swipe / swipe_from_to 操作，press_home 仅返回该侧主屏幕。启动应用需从该侧主屏幕截图点击图标；open_app 系列不可用。动作提交不等于界面已达到目标，须检查新截图。")
+            lines.append("- 文本、硬件键盘、剪贴板及 AX 输入不可用。键盘和系统弹窗会跨越两侧；看到共享键盘、系统许可或其他覆盖界面时停止操作，告知用户处理，不点击它们，不尝试换侧或使用其他工具绕过限制。PocketAgent 留在另一侧，结束时不切换应用。")
+        } else if capabilities.phoneBackend == .ddi {
             lines.append(capabilities.clipboardAllowed
                 ? "- DDI type_text 默认使用 paste：会替换系统剪贴板并粘贴，目标可能要求许可。method=ax 可对普通 TextField/SearchField 执行非空整字段替换；只用于确需避免剪贴板时，观察返回屏幕和业务结果。AX 与 paste 的目标回调可能不同；失败后不得自动改用另一种方式。"
                 : "- 本轮 DDI 禁止剪贴板：type_text 默认 paste 被执行层拒绝；可显式 method=ax 对普通 TextField/SearchField 做非空整字段替换。AX 与 paste 的目标回调可能不同；检查返回屏幕和业务结果，失败后不得自动改用另一种方式。复制、剪切、粘贴组合键也被执行层拒绝。")

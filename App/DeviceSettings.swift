@@ -10,6 +10,7 @@ enum DeviceSettings {
     static let defaultTunnelEndpoint = "10.7.0.1:49152"
     private static let runnerKey = "runnerBundleID", tunnelKey = "tunnelEndpoint"
     private static let screenshotsKey = "saveDiagnosticScreenshots", logsKey = "saveDiagnosticLogs"
+    private static let duoPaneKey = "duoPane"
 
     static var pairingDirectory: URL { applicationSupport.appendingPathComponent("Pairing", isDirectory: true) }
     static var pairingURL: URL { pairingDirectory.appendingPathComponent("rp_pairing_file.plist") }
@@ -34,6 +35,10 @@ enum DeviceSettings {
     static var assistantBundleID: String { Bundle.main.bundleIdentifier ?? "" }
     static var phoneBackend: PhoneBackendKind {
         UserDefaults.standard.string(forKey: "phoneControlBackend").flatMap(PhoneBackendKind.init(rawValue:)) ?? .defaultBackend
+    }
+    /// Optional local Duo target side; absent means ordinary full-screen phone control.
+    static var duoPane: DuoPane? {
+        UserDefaults.standard.string(forKey: duoPaneKey).flatMap(DuoPane.init(rawValue:))
     }
     /// Preserve existing text behavior on upgrade; this policy is device-local.
     static var clipboardAllowed: Bool { UserDefaults.standard.object(forKey: "phoneClipboardAllowed") as? Bool ?? true }
@@ -268,6 +273,7 @@ enum DeviceSettings {
 @MainActor
 final class DeviceSettingsModel: ObservableObject {
     @Published var backend = DeviceSettings.phoneBackend
+    @Published var duoPane = DeviceSettings.duoPane
     @Published var clipboardAllowed = DeviceSettings.clipboardAllowed
     @Published var runner = UserDefaults.standard.string(forKey: "runnerBundleID") ?? ""
     @Published var tunnel = UserDefaults.standard.string(forKey: "tunnelEndpoint") ?? ""
@@ -295,6 +301,21 @@ final class DeviceSettingsModel: ObservableObject {
         generation += 1
         connectionVerified = false
         status = backend == .ddi ? "已选择 DDI，无需安装 Automation。" : "已选择 WDA，请安装匹配的 Automation。"
+    }
+
+    func saveDuoPane() {
+        guard engine.beginDeviceConfigurationChange() else {
+            duoPane = DeviceSettings.duoPane
+            status = "请等待当前连接检查、准备或手机任务结束后再更改 Duo 分屏目标侧。"
+            return
+        }
+        defer { engine.endDeviceConfigurationChange() }
+        if let duoPane {
+            UserDefaults.standard.set(duoPane.rawValue, forKey: "duoPane")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "duoPane")
+        }
+        status = duoPane.map { "后续回合将操作 Duo 分屏的\($0.label)。" } ?? "已关闭 Duo 分屏操作。"
     }
 
     func saveClipboardPolicy() {

@@ -22,7 +22,7 @@ extension Model {
     /// `images` were hydrated from the turn's frozen attachment references.
     /// Every refusal ends through `onFinished`, never silently.
     func beginAgent(goal: String, images: [AgentImageAttachment], config: RunConfiguration, workspace: WorkspaceSnapshot?, backend: PhoneBackendKind,
-                    clipboardAllowed: Bool,
+                    clipboardAllowed: Bool, duoPane: DuoPane? = nil,
                     conversationID: UUID, promptID: UUID, priorMessages: [AgentTranscriptMessage],
                     gates: TurnGates,
                     onEvent: (@MainActor (AgentEvent, ExecutionStatus) -> Void)?,
@@ -63,7 +63,7 @@ extension Model {
                     }
                 }
                 Task { @MainActor in
-                    self?.executePhoneAgent(config: config, workspace: workspace, backend: backend, clipboardAllowed: clipboardAllowed, goal: goal, images: images,
+                    self?.executePhoneAgent(config: config, workspace: workspace, backend: backend, clipboardAllowed: clipboardAllowed, duoPane: duoPane, goal: goal, images: images,
                         task: task, progress: progress, status: status,
                         conversationID: conversationID, promptID: promptID, priorMessages: priorMessages, gates: gates,
                         onEvent: onEvent, onStatus: onStatus, onFinished: onFinished)

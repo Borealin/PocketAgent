@@ -1,6 +1,7 @@
 //! PocketAgent's serial, turn-owned DDI services. No screen stream/XCTest.
 mod archive;
 mod ax;
+mod duo;
 use crate::{
     IdeviceFfiError, core_device_proxy::AdapterHandle, ffi_err, rsd::RsdHandshakeHandle,
     run_sync_local,
@@ -10,7 +11,7 @@ use idevice::{
     IdeviceError, ReadWrite, RemoteXpcClient, RsdService,
     core_device::{
         AppListEntry, AppServiceClient, ButtonState, CoreDeviceServiceClient, DataInclusionPolicy,
-        ImageFormat, IndigoHidClient, KeyboardUsage, MainKeyboardService, PasteboardServiceClient,
+        ImageFormat, IndigoHidClient, KeyboardUsage, MainKeyboardService, PasteboardServiceClient, build_touchscreen_report,
         ScreenCaptureServiceClient, UniversalHidServiceClient,
     },
     rsd::RsdHandshake,
@@ -200,6 +201,9 @@ pub struct PocketDDISession {
     /// Cleared when a snapshot starts and consumed by every screen effect, so a
     /// coordinate effect is always checked against the screen observed for it.
     observed: Option<(u64, usize)>,
+    duo_pane: Option<duo::Pane>,
+    duo_device_eligible: bool,
+    duo_observed: Option<Value>,
     hid: Channel<UniversalHidServiceClient<Box<dyn ReadWrite>>>,
     keyboard_hid: Option<Channel<UniversalHidServiceClient<Box<dyn ReadWrite>>>>,
     buttons: Channel<IndigoHidClient<Box<dyn ReadWrite>>>,
@@ -210,6 +214,8 @@ pub struct PocketDDISession {
     cancel: Arc<CancelState>,
     keyboard: Option<MainKeyboardService>,
     touch: Option<(u16, u16)>,
+    touch_service: u64,
+    touch_edge: bool,
     home_down: bool,
     poisoned: bool,
     /// Set right before this request's first physical effect (touch, button,
@@ -759,6 +765,9 @@ impl PocketDDISession {
                 .map(|s| s.port),
             hit_point: None,
             observed: None,
+            duo_pane: None,
+            duo_device_eligible: duo::device_eligible(&h.properties),
+            duo_observed: None,
             info: Channel::new(info, info_port, channel::INFO),
             apps: Channel::new(apps, apps_port, channel::APPS),
             installed,
@@ -769,6 +778,8 @@ impl PocketDDISession {
             capture: Channel::new(capture, capture_port, channel::CAPTURE),
             keyboard: None,
             touch: None,
+            touch_service: 0x101,
+            touch_edge: false,
             home_down: false,
             poisoned: false,
             effect_started: false,
@@ -813,7 +824,7 @@ impl PocketDDISession {
             Ok("not_observed")
         }
     }
-    async fn geometry(&mut self) -> Result<Geometry, IdeviceError> {
+    async fn display_info(&mut self) -> Result<Value, IdeviceError> {
         let cancel = self.cancel.clone();
         let stall = take_stall(self.stall, &mut self.injected, stage::GEOMETRY);
         cancel.progress.enter(stage::GEOMETRY, 0);
@@ -830,7 +841,66 @@ impl PocketDDISession {
             .await
         })
         .await?;
-        Geometry::from(&info)
+        Ok(info)
+    }
+    async fn geometry(&mut self) -> Result<Geometry, IdeviceError> {
+        Geometry::from(&self.display_info().await?)
+    }
+    async fn duo_display(&mut self) -> Result<Value, IdeviceError> {
+        if !self.duo_device_eligible { return Err(error("DDI Duo requires verified iPhone19,4 / 24C5037i RSD metadata")); }
+        let info = self.display_info().await?;
+        let d = info.as_dictionary().ok_or_else(|| error(duo::PROFILE))?;
+        if d.get("orientation").and_then(Value::as_dictionary)
+            .and_then(|d| d.get("currentDeviceOrientation")).and_then(Value::as_string) != Some("landscapeRight") {
+            return Err(error(duo::PROFILE));
+        }
+        let displays = d.get("displays").and_then(Value::as_array).ok_or_else(|| error(duo::DISPLAY))?;
+        duo::select_active_display(displays)?;
+        Ok(info)
+    }
+    async fn duo_call(&mut self, op: &str, v: &Json, pane: duo::Pane) -> Result<Json, IdeviceError> {
+        if op == "apps" {
+            return Ok(json!({"apps":self.installed.iter().map(|a|json!({"bundle_id":a.bundle_identifier,"name":a.name})).collect::<Vec<_>>()}));
+        }
+        if !["foreground", "snapshot", "tap", "hold", "drag", "home"].contains(&op) {
+            return Err(error("DDI Duo operation has no verified pane isolation; not sent"));
+        }
+        let observed = if ["tap", "hold", "drag", "home"].contains(&op) { self.duo_observed.take() } else { None };
+        if op == "snapshot" { self.duo_observed = None; }
+        let before = self.duo_display().await?;
+        if op == "foreground" { return Ok(json!({"app":pane.app(),"application_binding":"unresolved"})); }
+        let frame = Geometry { x:0., y:0., width:duo::WIDTH, height:duo::HEIGHT };
+        if op == "snapshot" {
+            self.duo_observed = Some(before);
+            return Ok(json!({"app":pane.app(),"frame":frame.json(),"nodes":[],"source":"ddi_duo",
+                "outside_app_elements":0,"atomic":false,"application_binding":"unresolved"}));
+        }
+        if observed.as_ref() != Some(&before) { return Err(error("DDI Duo display changed or has no fresh observation; not tapped")); }
+        if v.get("expected_frame").is_some() && json_geometry(&v["expected_frame"], "DDI Duo expected frame invalid")? != frame {
+            return Err(error("DDI display changed before effect"));
+        }
+        let d = before.as_dictionary().and_then(|d| d.get("displays")).and_then(Value::as_array)
+            .ok_or_else(|| error(duo::DISPLAY))?;
+        let display = duo::select_active_display(d)?;
+        let id = display.as_dictionary().and_then(|d| d.get("uniqueId")).and_then(Value::as_string)
+            .ok_or_else(|| error(duo::DISPLAY))?;
+        let cancel = self.cancel.clone();
+        cancel.progress.enter(stage::TOUCH, 0);
+        let surfaces = self.hid.request(connector(&mut self.adapter), &cancel, Wait::Raced,
+            async |c| bounded_call(&cancel, c.list_connected_services()).await).await?;
+        let service = duo::select_touchscreen_service(&surfaces, id)?;
+        if self.duo_display().await? != before { return Err(error("DDI display changed before effect")); }
+        let num = |key: &str| v[key].as_f64().ok_or_else(|| error("DDI Duo coordinate missing"));
+        let (from, to, seconds) = if op == "home" {
+            (duo::native_point(pane,duo::WIDTH/2.,665.)?, duo::native_point(pane,duo::WIDTH/2.,482.)?,0.3)
+        } else {
+            let from = duo::native_point(pane,num("x")?,num("y")?)?;
+            let to = if op == "drag" { duo::native_point(pane,num("to_x")?,num("to_y")?)? } else { from };
+            (from,to,if op == "tap" { 0.05 } else { num("seconds")? })
+        };
+        self.proceed()?;
+        self.touch_on_surface(from,to,seconds,op == "drag" || op == "home",service,op == "home").await?;
+        Ok(json!({"submitted":true,"postcondition_verified":false,"application_binding":"unresolved"}))
     }
     async fn bundle_for_pid(&mut self, pid: u64) -> Result<String, IdeviceError> {
         let cancel = self.cancel.clone();
@@ -981,17 +1051,19 @@ impl PocketDDISession {
         .await?;
         self.proceed()
     }
-    async fn touch(
+    async fn touch_on_surface(
         &mut self,
         from: (u16, u16),
         to: (u16, u16),
         seconds: f64,
         drag: bool,
+        service: u64,
+        edge: bool,
     ) -> Result<(), IdeviceError> {
         if !seconds.is_finite() || !(0.05..=3.0).contains(&seconds) {
             return Err(error("DDI gesture duration invalid"));
         }
-        let steps = if drag {
+        let steps = if edge { 12 } else if drag {
             (seconds * 60.0).ceil() as u32
         } else {
             1
@@ -1014,13 +1086,21 @@ impl PocketDDISession {
             self.proceed()?;
             self.effect_started = true;
             self.touch = Some(p); // Before write: failure may have delivered contact.
-            self.hid.exchange(async |c| bounded(c.send_touchscreen(0xC2, p.0, p.1, None)).await).await?;
+            self.touch_service = service;
+            self.touch_edge = edge;
+            let report = if edge { duo::edge_report(p.0, p.1, true, true, duo::mach_timestamp()) }
+                else if self.duo_pane.is_some() { duo::touch_report(p.0, p.1, true, true) }
+                else { build_touchscreen_report(0xC2, p.0, p.1, None) };
+            self.hid.exchange(async |c| bounded(c.send_report(service, report)).await).await?;
             if i < steps {
                 self.wait((seconds * 1000.0 / steps as f64).round() as u64)
                     .await?;
             }
         }
         Ok(())
+    }
+    async fn touch(&mut self, from: (u16,u16), to: (u16,u16), seconds: f64, drag: bool) -> Result<(), IdeviceError> {
+        self.touch_on_surface(from, to, seconds, drag, 0x101, false).await
     }
     async fn key(&mut self, codes: &[u16], expected: Option<&str>) -> Result<(), IdeviceError> {
         self.proceed()?;
@@ -1085,7 +1165,11 @@ impl PocketDDISession {
         if let Some((x, y)) = self.touch {
             cancel.progress.enter(stage::CLEANUP_TOUCH, 0);
             let dirty_before = self.hid.dirty;
-            let sent = self.hid.exchange(async |c| bounded(c.send_touchscreen(0x02, x, y, None)).await).await;
+            let service = self.touch_service;
+            let report = if self.touch_edge { duo::edge_report(x, y, false, false, duo::mach_timestamp()) }
+                else if self.duo_pane.is_some() { duo::touch_report(x, y, false, false) }
+                else { build_touchscreen_report(0x02, x, y, None) };
+            let sent = self.hid.exchange(async |c| bounded(c.send_report(service, report)).await).await;
             // Local acceptance: the release went out; only its confirmation is dropped.
             let dropped = sent.is_ok() && take_stall(self.drop_release.then_some(stage::CLEANUP_TOUCH),
                 &mut self.injected, stage::CLEANUP_TOUCH);
@@ -1159,12 +1243,22 @@ impl PocketDDISession {
         let op = v["op"]
             .as_str()
             .ok_or_else(|| error("DDI operation missing"))?;
+        if let Some(value) = v.get("duo_pane") {
+            let pane = duo::Pane::parse(value.as_str().ok_or_else(|| error("DDI Duo pane invalid"))?)?;
+            if self.duo_pane.is_some_and(|previous| previous != pane) {
+                return Err(error("DDI Duo control side cannot change during a turn"));
+            }
+            self.duo_pane = Some(pane);
+        } else if self.duo_pane.is_some() && !["stop_observing", "return"].contains(&op) {
+            return Err(error("DDI Duo control scope missing"));
+        }
         if op == "stop_observing" {
             let stop = self.close_ax().await?;
             return Ok(json!({"subscription_stop": stop,
                 "subscription_acknowledged": stop == "acknowledged", "connection_closed": true}));
         }
         if op == "return" {
+            if self.duo_pane.is_some() { return Ok(json!({"activation_skipped":"duo-pane-retained"})); }
             let bundle = v["bundle_id"]
                 .as_str()
                 .ok_or_else(|| error("DDI return bundle missing"))?;
@@ -1184,6 +1278,7 @@ impl PocketDDISession {
                 "DDI input is disabled after an uncertain effect; observe and send a new turn",
             ));
         }
+        if let Some(pane) = self.duo_pane { return self.duo_call(op,v,pane).await; }
         let expected = v["expected_app"].as_str();
         // Every screen effect consumes the observed scope; the next coordinate
         // effect needs a fresh successful snapshot.
@@ -1411,15 +1506,23 @@ impl PocketDDISession {
     }
     async fn screenshot(&mut self, stall: bool) -> Result<Vec<u8>, IdeviceError> {
         self.proceed()?;
+        let before = if self.duo_pane.is_some() { Some(self.duo_display().await?) } else { None };
+        let display_id = before.as_ref().and_then(Value::as_dictionary).and_then(|d| d.get("displays"))
+            .and_then(Value::as_array).and_then(|d| duo::select_active_display(d).ok())
+            .and_then(Value::as_dictionary).and_then(|d| d.get("uniqueId")).and_then(Value::as_string);
         let cancel = self.cancel.clone();
         cancel.progress.enter(stage::SCREENSHOT, 0);
-        self.capture.request(connector(&mut self.adapter), &cancel, Wait::Raced, async |c| {
+        let data = self.capture.request(connector(&mut self.adapter), &cancel, Wait::Raced, async |c| {
             if stall {
                 return cancellable(&cancel, std::future::pending::<Result<Vec<u8>, IdeviceError>>()).await;
             }
-            bounded_call(&cancel, c.take_screenshot(None, ImageFormat::Png)).await
+            bounded_call(&cancel, c.take_screenshot(display_id, ImageFormat::Png)).await
         })
-        .await
+        .await?;
+        if let Some(before) = before {
+            if self.duo_display().await? != before { return Err(error("DDI display changed during capture")); }
+        }
+        Ok(data)
     }
 }
 

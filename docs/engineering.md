@@ -36,7 +36,16 @@ The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.
 It contains the 19.1.7 display/session/draft acceptance, remaining inner-display
 DDI/WDA and layout limits, and the separate follow-up for the original automatic
-task-card collapse contract.
+task-card collapse contract. Its November 5 host-side DDI probe also records
+active-versus-primary display selection, window-local AX frames, shared keyboard
+and paste-prompt limits, and app activation replacing the unintended pane. Further
+command exploration was delegated to ipbtools, which subsequently implemented
+and exercised physical DDI primitives. The current opt-in integration freezes a
+user-selected side, crops its screenshot, and supports coordinate touch and
+single-side Home in the measured profile. AX node input, text/keyboard and
+automatic app activation remain disabled in this mode; application/window
+ownership is unresolved. Ordinary phone guards remain in place. See that
+document for the exact profile, shared-system-surface limits and validation gate.
 
 The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
 ZIP snapshots from Settings and conversation context menus. Only allowlisted
@@ -1260,7 +1269,7 @@ Foreground identity comes from a bounded read-only hit scan and a unique
 process/app-path match. A blank centre point returned AX error 8 while the same
 app's visible input-field point returned its complete tree; the selected point is
 reused and checked again after graph traversal. Unknown process paths still fail.
-Only verified portrait primary-display geometry is accepted; unsupported or
+Ordinary phone control accepts only verified portrait primary-display geometry; unsupported or
 unidentified surfaces fail before coordinate input. WDA still owns its runner PID
 and HTTP session, and is never selected automatically after an uncertain action.
 
@@ -1301,7 +1310,16 @@ failed AX socket is closed before fresh read-only recovery. Cancellation has a
 separate atomic handle. Touch/button releases and empty key reports precede queue
 release; the turn owns its virtual keyboard until cancellation or finalization,
 then confirms its removal. No media stream is opened. Finalization returns to the
-assistant and closes owned DDI services before releasing the tunnel.
+assistant and closes owned DDI services before releasing the tunnel. Opt-in Duo
+side mode skips that activation to avoid replacing the retained occupant. It
+does not use AX hit/root frames as a window map: observations have no node IDs,
+the app field identifies the selected geometric pane, and screenshot-local
+coordinates are mapped through live active-display metadata and its uniquely
+associated touchscreen descriptor. The native session refuses a side change,
+missing scope, uncertain input, unobserved effects and unknown profile. Its held
+contact retains the service and report kind through release. Before marking a
+requested effect as issued, the serial executor obtains a fresh screenshot and
+checks the calibrated gutter; this is not an app/window or modal-ownership proof.
 
 Native calls now return effect-phase metadata through FFI. Pre-effect refusals
 remain eligible for read-only recovery and a separately planned action; an uncertain
