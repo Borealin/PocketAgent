@@ -8,7 +8,12 @@ stop to automatically append finalized text once to the original conversation's
 latest draft through HistoryOwner. Existing text/images survive; sending,
 steering, next requests and memory saving remain manual. There is no normal
 preview/confirmation surface. Preparing/finishing show a spinner, with Cancel
-at the send position; language is a local preference in Settings. Only failed
+at the send position; language is a local preference in Settings. While busy,
+the same input bubble is read-only and displays the existing draft, finalized
+speech and secondary-colored volatile text. These updates never enter the
+editable binding or history writer. A native waveform animation indicates
+recording, becomes static with Reduce Motion, and does not measure audio level.
+Stop stays at the microphone position with a red 44-point target. Only failed
 writes expose copyable recognized text and retry/discard. A ready-phase gate
 rejects duplicate finalization without another writer or delivery ledger.
 
@@ -21,8 +26,10 @@ append only already recognized final text with a short partial-result notice.
 Device route changes stop capture; setup category/configuration changes do not.
 Audio is bounded in memory, never written/logged/exported/synchronized. Three
 Core regressions and strict iOS 26 API/concurrency typechecks pass; full App/IPA/CI
-checks and exact-device acceptance must be repeated for this simpler UX. The old
-candidate's microphone/Mandarin output does not accept the replacement flow.
+checks and exact-device acceptance must be repeated for this UI. The user
+confirmed direct draft append without confirmation in 20.1.3; that observation
+does not validate the new streaming display/animation or prove single-turn
+deduplication. No new device exercise was performed for this UI change.
 Live, cloud transcription, caret insertion and press-and-hold are separate scope.
 
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of

@@ -117,9 +117,6 @@ struct ChatComposer: View {
     private var target: InputTarget { chat.inputTarget(session.id) }
     private var remembering: Bool { primary && chat.rememberMode }
     private var placeholder: String {
-        if dictation.input.phase == .recording { return "正在听写，点麦克风停止…" }
-        if dictation.input.phase == .preparing { return "正在准备听写…" }
-        if dictation.input.phase == .finishing { return "正在识别…" }
         if remembering { return "输入要记住的内容，确认后才保存…" }
         return switch target {
         case .steer: "追加到本轮…"
@@ -209,13 +206,21 @@ struct ChatComposer: View {
             }
             .font(.body).buttonStyle(.borderless)
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: Binding(get: { chat.selected?.draft ?? "" }, set: chat.setDraft),
-                          axis: .vertical)
-                    .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .focused(inputFocused)
-                    .accessibilityIdentifier("chatInput")
+                Group {
+                    if dictation.input.busy {
+                        DictationInputDisplay(draft: session.draft, input: dictation.input,
+                                              compact: verticalSizeClass == .compact)
+                            .accessibilityIdentifier("dictationInput")
+                    } else {
+                        TextField(placeholder, text: Binding(get: { chat.selected?.draft ?? "" }, set: chat.setDraft),
+                                  axis: .vertical)
+                            .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
+                            .focused(inputFocused)
+                            .accessibilityIdentifier("chatInput")
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 dictationButton
                 if dictation.input.busy {
                     Button { dictation.cancel() } label: {
@@ -274,8 +279,12 @@ struct ChatComposer: View {
             Group {
                 if let download = dictation.download { ProgressView(download).labelsHidden().progressViewStyle(.circular) }
                 else if dictation.input.busy, dictation.input.phase != .recording { ProgressView().controlSize(.small) }
-                else { Image(systemName: dictation.input.phase == .recording ? "stop.circle.fill" : "mic") }
-            }.frame(width: 28, height: 36)
+                else { Image(systemName: dictation.input.phase == .recording ? "stop.fill" : "mic") }
+            }
+            .foregroundStyle(dictation.input.phase == .recording ? Color.red : Color.primary)
+            .frame(width: 44, height: 44)
+            .background(dictation.input.phase == .recording ? Color.red.opacity(0.12) : Color.clear, in: Circle())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled((dictation.input.phase != .idle && dictation.input.phase != .recording) || !chat.storageReady)
@@ -386,6 +395,42 @@ struct ChatComposer: View {
             }
             chat.completeImport(ticket, inputs: loaded, failures: loaded.isEmpty ? ["剪贴板中的图片无法读取。"] : [])
         }
+    }
+}
+
+/// A read-only rendering in the existing composer bubble. Streaming guesses
+/// never enter the editable binding or the history writer.
+private struct DictationInputDisplay: View {
+    let draft: String
+    let input: DictationInput
+    let compact: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var draftPrefix: String {
+        guard !draft.isEmpty, !input.finalText.isEmpty || !input.volatileText.isEmpty else { return draft }
+        return draft.last?.isWhitespace == true ? draft : draft + "\n"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if input.phase == .recording {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.red)
+                        .symbolEffect(.variableColor.iterative, isActive: !reduceMotion)
+                        .accessibilityHidden(true)
+                }
+                Text(input.phase == .preparing ? "正在准备听写…" : input.phase == .recording ? "正在录音" : "正在识别…")
+                    .foregroundStyle(.secondary)
+            }.font(.caption)
+            if draft.isEmpty, input.finalText.isEmpty, input.volatileText.isEmpty {
+                Text("开始说话…").foregroundStyle(.secondary)
+            } else {
+                Text("\(Text(draftPrefix + input.finalText))\(Text(input.volatileText).foregroundColor(.secondary))")
+                    .lineLimit(compact ? 3 : 6).truncationMode(.head)
+                    .accessibilityIdentifier("dictationStreamingText")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

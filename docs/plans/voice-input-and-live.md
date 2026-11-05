@@ -17,6 +17,16 @@ position becomes Cancel while input is busy. Cancel and switching conversation
 invalidate the generation and append nothing. Language selection lives in
 Settings, persisted in one local UserDefaults preference.
 
+During preparation, recording and finishing, the existing input bubble becomes
+read-only. It renders the current draft plus finalized speech and secondary
+volatile text, bounded to the composer's line allowance with recent text visible.
+Only presentation changes: partial results never enter the editable binding or
+HistoryOwner. Cancel restores the original draft display; Stop still uses the
+same onFinal transaction once. A native waveform symbol animates only during
+recording and stays static with Reduce Motion. It is a recording indicator, not
+an audio-level meter. Stop is red with a 44-point target at the microphone's
+position; preparation/finishing retain short status and spinner feedback.
+
 Recognition remains separate from the draft while recording. Audio-range
 revisions replace volatile guesses, preserving deliberately repeated final
 words. The existing ready phase is internal: a duplicate ready transition is
@@ -53,9 +63,11 @@ menu is added.
 
 Validation: three Core regressions pass, including the duplicate-ready guard;
 strict Swift 6 concurrency typechecking passes with an iOS 26 deployment target.
-Full App/IPA/CI checks must be repeated for this changed implementation. The
-previous candidate produced Mandarin text during user operation, but its UX was
-not accepted. No device acceptance of the replacement flow is claimed. Route,
+Full App/IPA/CI checks must be repeated for this UI change. The user confirmed
+20.1.3 directly appended to the draft without another confirmation. That covers
+the earlier static composer, not this streaming display/recording animation.
+The observed text alone does not establish the number of recording turns or
+prove single-turn deduplication. No new device exercise is claimed. Route,
 asset-download, permission, background finishing and storage-retry scenarios
 still need exact-device exercise. Logs/artifacts remain outside Git.
 
@@ -69,6 +81,9 @@ confirmation and the serial phone action queue.
 
 ## References
 
+- [Native symbol effects](https://developer.apple.com/documentation/swiftui/view/symboleffect(_:options:isactive:))
+  and the Reduce Motion environment provide the recording indicator without
+  timers, measured levels or an animation lifecycle.
 - [ChatGPT dictation](https://learn.chatgpt.com/docs/prompting#use-voice-dictation)
   documents editable composer text before sending; it does not establish every
   mobile button detail. [Claude mobile dictation](https://support.claude.com/en/articles/10065434-use-dictation-on-claude-mobile)
