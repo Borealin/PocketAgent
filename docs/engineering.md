@@ -36,7 +36,11 @@ The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.
 It contains the 19.1.7 display/session/draft acceptance, remaining inner-display
 DDI/WDA and layout limits, and the separate follow-up for the original automatic
-task-card collapse contract.
+task-card collapse contract. Its November 5 host-side DDI probe also records
+active-versus-primary display selection, window-local AX frames, shared keyboard
+and paste-prompt limits, and app activation replacing the unintended pane. Further
+command exploration is delegated to ipbtools on a Duo simulator; these findings
+do not relax the production executor's geometry or action-ownership guards.
 
 The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
 ZIP snapshots from Settings and conversation context menus. Only allowlisted

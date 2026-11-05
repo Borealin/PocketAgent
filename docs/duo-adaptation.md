@@ -67,11 +67,55 @@ Screenshots and logs stay outside Git. Simulator layout checks do not establish
 DDI/WDA control of a second app, hardware transitions or a signed physical Duo
 installation.
 
-DDI currently accepts only a single portrait primary display and rejects rotated
+PocketAgent's DDI adapter currently accepts only a single portrait primary display and rejects rotated
 display geometry independently of the app's UI orientation support. Pane
 ownership, rotated touch mapping and multi-display targeting require verified
 device metadata before relaxing that refusal. Preserve the existing
 fresh-observation, serial-action and no-replay contracts.
+
+## Fixed Split View control investigation (2026-11-05)
+
+A separate Mac-side ipb/CoreDevice probe exercised a physical Duo on iOS 27.3
+with DDI 27B52 and CoreDevice 651.32. PocketAgent 0.4.0 (20.1.2) was the retained
+conversation UI; its own executor was not the probe's controller. No app binary
+or production DDI guard was changed, and no XCTest/WDA runner was started by
+the probe. These observations do not establish on-phone executor acceptance.
+
+The expanded device continued to mark the inactive outer display as `primary`.
+Default screenshots returned that display's black image. Explicit inner-display
+capture worked, and HID descriptors exposed a separate touchscreen bound to
+that display. Selecting its descriptor and applying the measured
+`landscapeRight` device-orientation mapping produced the intended inner-screen
+tap; using the display's `rot90` content orientation instead did not. Service
+selection must follow live display metadata, rather than a fixed main-touchscreen
+ID or the first descriptor.
+
+The Home Screen app menu's Open in Split View action exposed an empty second
+pane. Standard app activation placed PocketAgent there beside Settings. Explicit
+PID reads returned each app's AX content. The right-hand app's child frames were
+relative to its own window; they omitted its offset in the full inner-display
+screenshot. The application root still reported portrait display dimensions.
+Neither the root frame nor an unadjusted child frame establishes pane ownership.
+
+A target-side Settings search tap and physical keyboard usage reached that
+search field while PocketAgent's existing draft remained exact. The software
+keyboard spanned both panes. Clipboard Unicode input produced a system paste
+prompt, but no exact target-field insertion was verified; a DDI tap at the prompt
+was followed by search dismissal, and the later prompt disappeared without a
+confirmed insertion. Do not treat sender success as text acceptance or replay
+the paste automatically.
+
+With both panes occupied and Settings' search field still focused on the left,
+standard activation of Calculator replaced PocketAgent on the right. Restoring
+PocketAgent preserved its draft. Keyboard focus therefore did not select the
+activation destination in this observed arrangement; arbitrary app launch into
+the intended pane remains unresolved.
+
+The user directed further command/protocol exploration to ipbtools using a Duo
+simulator before any more physical-device probing: app-side swapping, per-pane
+Home and app launch, then touch and content capture. Simulator results must
+identify their actual backend and remain separate from physical DDI acceptance.
+Raw screenshots, AX trees and local probes remain outside Git.
 
 Closed-outer-display portrait exercise of candidate 19.1.7 identifies the
 capture failure: the foreground phone window is portrait, but its safe insets
