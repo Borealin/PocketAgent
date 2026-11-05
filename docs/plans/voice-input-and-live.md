@@ -83,11 +83,24 @@ the provider's existing local credential-origin binding. No automatic provider,
 model, endpoint, protocol or credential fallback exists. The local optional
 ProviderFile setting remains version 1 and is excluded from portable sync;
 provider sync preserves it without granting a new key origin.
+The Start UI explains that audio, captions and selected phone-task results go
+to this Live provider for conversation/playback, which can differ from the task
+model's provider. Displayed pricing is the OpenAI standard reference; gateways
+use their provider's actual rates.
 
 Live shares only MicrophoneOwnership with dictation. One voiceChat audio engine
 with VoiceProcessing captures and plays mono PCM16LE at 24 kHz. The audio tap
-has eight owned buffers, the single WebSocket writer has sixteen packets, and
-playback is capped at two seconds. Overflow fails cleanly. Audio is uploaded
+and single WebSocket writer each hold at most 96 chunks/packets. With the
+requested 1,024-frame tap at a 48 kHz hardware rate, each nominal capture chunk
+covers about 21 ms, so each queue can accommodate roughly two seconds of
+normal scheduling/network jitter. Actual callback sizes/rates and network
+behavior remain unmeasured; this is not a timing guarantee. Playback has a
+60-second PCM memory ceiling (about 5.8 MB as Float), not a target latency or
+an assumption that the server paces output in real time. Overflow still fails
+cleanly. Audio packets bypass published logical state, and playback status only
+publishes Boolean changes; packet delivery no longer redraws the chat UI.
+Protocol/capacity failures retain their own sanitized cause instead of being
+reported as connection failures. Audio is uploaded
 only after session.started. Muting immediately invalidates old captured and
 unsent mic packets before queuing the server control; an already submitted
 network frame cannot be retracted. The mic mute retains the audio session and

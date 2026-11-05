@@ -25,6 +25,8 @@ struct LiveVoiceView: View {
                     Toggle("切换 App 后继续语音", isOn: $settings.continuesInBackground)
                     Text("使用此服务商本机 Key；兼容文字的服务不一定支持 GPT-Live。开始后配置冻结。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Text("开始后，音频、字幕及所选手机任务的结果会发送到你选定的 Live 服务，用于对话和播报；任务模型可能属于另一服务商。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }.disabled(voice.state.running)
                 Section {
                     if voice.state.running {
@@ -42,7 +44,7 @@ struct LiveVoiceView: View {
                     }
                     Text("静音仅暂停麦克风上传，仍保留音频会话与计费；结束语音才释放音频并关闭会话。已交给网络的在途音频无法撤回。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("语音 $0.05/分钟，静音及等待任务也计费；任务模型另计。\(voice.state.finalUsage ? "最终" : "最近")用量：\(voice.state.seconds, specifier: "%.1f") 秒。")
+                    Text("OpenAI 标准参考价 $0.05/分钟；网关以服务商实际计费为准。静音及等待任务也计费，任务模型另计。\(voice.state.finalUsage ? "最终" : "最近")用量：\(voice.state.seconds, specifier: "%.1f") 秒。")
                         .font(.caption).foregroundStyle(.secondary)
                     if chat.jobs[sessionID] != nil {
                         Button("停止手机执行", role: .destructive) { chat.cancel(sessionID) }

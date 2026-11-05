@@ -36,7 +36,14 @@ The separate Live change adds a user-started GPT-Live WebSocket session using
 personal BYOK, frozen HTTPS-to-WSS origin checks and the existing microphone
 lease. One voiceChat engine with VoiceProcessing owns bounded 24 kHz mono
 PCM capture/playback; one bounded writer and one receive loop handle Live's
-session protocol. No audio uploads before session.started. Mute invalidates
+session protocol. Capture/outgoing queues each allow 96 chunks/packets (roughly
+two seconds at the nominal 1,024-frame / 48 kHz tap, not a measured guarantee).
+Playback is limited to 60 seconds of PCM memory, without assuming real-time
+server pacing. Audio packets do not publish logical UI state; playing only
+publishes on a Boolean transition. Protocol/capacity errors keep their actual
+sanitized classification. The Start UI discloses audio/caption/task-result
+routing to the selected Live provider and labels OpenAI pricing as a reference.
+No audio uploads before session.started. Mute invalidates
 unsent audio immediately; End releases local audio and drains session.closed
 for final cumulative usage, otherwise reporting finalization unconfirmed.
 ProviderFile's optional Live selection/URL/background choice is local only;

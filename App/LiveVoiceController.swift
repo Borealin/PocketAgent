@@ -63,7 +63,7 @@ import Foundation
                         }
                     } catch {
                         guard let self, self.state.generation == token, self.state.running else { return }
-                        self.fail(self.connectionFailure(socket), token: token)
+                        self.fail((error as? LiveVoiceFailure)?.localizedDescription ?? self.connectionFailure(socket), token: token)
                     }
                 }
                 try enqueue(.command(LiveWire.start()), token: token)
@@ -76,12 +76,18 @@ import Foundation
     }
 
     private func receive(_ event: LiveWire.Received, token: UUID) throws {
+        // Primary audio has no event ID or logical state change. Do not publish
+        // the entire UI at audio-frame rate merely to check its admission gate.
+        if case .audio(let bytes) = event.event {
+            guard state.generation == token, state.phase == .active else { return }
+            try play(bytes, token: token)
+            return
+        }
         guard try state.receive(event, generation: token) else { return }
         switch event.event {
         case .started:
             timeout?.cancel(); timeout = nil
             enableInput(true)
-        case .audio(let bytes): try play(bytes, token: token)
         case .delegation(let id):
             sendContext("用户尚未检查并确认任务卡，没有执行手机操作。", delegation: id, spoken: false)
         case .muted:
@@ -99,7 +105,7 @@ import Foundation
 
     private func enqueue(_ packet: Packet, token: UUID) throws {
         guard state.generation == token, state.running else { return }
-        guard outgoing.count < 16 else { throw LiveVoiceFailure.capacity }
+        guard outgoing.count < 96 else { throw LiveVoiceFailure.capacity }
         outgoing.append(packet)
         guard writer == nil, let socket else { return }
         writer = Task { [weak self] in
@@ -145,7 +151,7 @@ import Foundation
         if active {
             do { try enqueue(.command(LiveWire.command("session.close")), token: token) }
             catch { fail(message, token: token); return }
-            setTimeout(token, seconds: 15, message: message + " 最终用量未确认。")
+            setTimeout(token, seconds: 15, message: message)
         } else { state.finish(); releaseTransport() }
     }
 
@@ -222,7 +228,7 @@ import Foundation
         engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
         let natural = engine.inputNode.outputFormat(forBus: 0)
         guard natural.sampleRate > 0, natural.channelCount > 0 else { throw LiveVoiceFailure.microphone }
-        let (stream, continuation) = AsyncThrowingStream<LiveCaptureSource.Chunk, Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
+        let (stream, continuation) = AsyncThrowingStream<LiveCaptureSource.Chunk, Error>.makeStream(bufferingPolicy: .bufferingOldest(96))
         audioContinuation = continuation
         guard let source = LiveCaptureSource(from: natural, to: pcm, continuation: continuation) else { throw LiveVoiceFailure.microphone }
         self.source = source
@@ -251,7 +257,8 @@ import Foundation
 
     private func play(_ bytes: Data, token: UUID) throws {
         let frames = bytes.count / 2
-        guard scheduledFrames + frames <= 48_000, let player,
+        // Memory ceiling, not a target latency or an assumed server pacing rate.
+        guard scheduledFrames + frames <= 1_440_000, let player,
               let format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
               let samples = buffer.floatChannelData?[0] else { throw LiveVoiceFailure.capacity }
@@ -262,12 +269,14 @@ import Foundation
                 samples[index] = Float(Int16(littleEndian: value)) / 32768
             }
         }
-        scheduledFrames += frames; playing = true
+        scheduledFrames += frames
+        if !playing { playing = true }
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state.generation == token, self.state.phase == .active else { return }
                 self.scheduledFrames = max(0, self.scheduledFrames - frames)
-                self.playing = self.scheduledFrames > 0
+                let hasAudio = self.scheduledFrames > 0
+                if self.playing != hasAudio { self.playing = hasAudio }
             }
         }
     }
@@ -276,7 +285,8 @@ import Foundation
         enableInput(false)
         source = nil; audioContinuation?.finish(); audioContinuation = nil
         capture?.cancel(); capture = nil
-        player?.stop(); player = nil; scheduledFrames = 0; playing = false
+        player?.stop(); player = nil; scheduledFrames = 0
+        if playing { playing = false }
         if let engine { engine.stop(); engine.inputNode.removeTap(onBus: 0); self.engine = nil }
         observers.forEach(NotificationCenter.default.removeObserver); observers = []
         if let lease {
