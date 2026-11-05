@@ -100,6 +100,7 @@ struct ExecutionStrip: View {
 /// per-conversation model chip.
 struct ChatComposer: View {
     @ObservedObject var chat: ChatController
+    @ObservedObject var dictation: DictationController
     @ObservedObject var providers: ProviderStore
     @ObservedObject var workspaces: WorkspaceStore
     let session: ChatSession
@@ -164,6 +165,7 @@ struct ChatComposer: View {
                     .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("rememberModeHint")
             }
             if !session.draftAttachments.isEmpty || chat.isImporting(session.id) { draftImages }
+            dictationControls
             HStack(spacing: 8) {
                 // Model first. On a narrow row the provider name goes, then the
                 // project name becomes its icon; neither is clipped mid-word.
@@ -206,7 +208,7 @@ struct ChatComposer: View {
                             .background(chat.canRemember ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
                             .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain).disabled(!chat.canRemember)
+                    .buttonStyle(.plain).disabled(!chat.canRemember || dictation.input.busy)
                     .accessibilityLabel("保存为记忆…").accessibilityIdentifier("rememberMessage")
                 } else {
                     Button { chat.send() } label: {
@@ -215,7 +217,7 @@ struct ChatComposer: View {
                             .background(chat.canSend ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
                             .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain).disabled(!chat.canSend)
+                    .buttonStyle(.plain).disabled(!chat.canSend || dictation.input.busy)
                     .accessibilityLabel(target == .steer ? "追加指令" : (target == .next ? "加入下一件事" : "发送")).accessibilityIdentifier("sendMessage")
                 }
             }
@@ -243,6 +245,49 @@ struct ChatComposer: View {
                 else { chat.reportImportFailure(AttachmentError.unreadableImage.localizedDescription) }
             }.ignoresSafeArea()
         }
+    }
+
+    private var dictationControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if dictation.input.phase == .recording {
+                    Button { dictation.stop() } label: { Label("停止听写", systemImage: "stop.circle.fill") }
+                        .accessibilityIdentifier("stopDictation")
+                    Text("最长 60 秒").foregroundStyle(.secondary)
+                } else {
+                    Button { chat.startDictation() } label: { Label("语音输入", systemImage: "mic") }
+                        .disabled(dictation.input.phase != .idle || !chat.storageReady)
+                        .accessibilityIdentifier("startDictation")
+                    Picker("听写语言", selection: $dictation.localeID) {
+                        Text("普通话").tag("zh-CN")
+                        Text("English").tag("en-US")
+                    }.pickerStyle(.menu).disabled(dictation.input.phase != .idle)
+                }
+                Spacer(minLength: 0)
+                if dictation.input.phase != .idle {
+                    Button("取消") { dictation.cancel() }.accessibilityIdentifier("cancelDictation")
+                }
+            }
+            if let download = dictation.download { ProgressView(download) }
+            else if dictation.input.phase == .preparing { ProgressView("正在准备本机听写…") }
+            else if dictation.input.phase == .finishing { ProgressView("正在完成听写…") }
+            if !dictation.language.isEmpty, dictation.input.phase != .idle {
+                Text(dictation.language).foregroundStyle(.secondary)
+            }
+            if !dictation.input.finalText.isEmpty || !dictation.input.volatileText.isEmpty {
+                ScrollView {
+                    (Text(dictation.input.finalText) + Text(dictation.input.volatileText).foregroundColor(.secondary))
+                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }.frame(maxHeight: 120).accessibilityIdentifier("dictationPreview")
+            }
+            if dictation.input.phase == .preview, let generation = dictation.input.generation {
+                Button("确认追加到草稿末尾") { chat.appendDictation(generation: generation) }
+                    .disabled(!dictation.input.canAppend || !chat.storageReady)
+                    .accessibilityIdentifier("appendDictation")
+                Text("确认后仍需点击发送。离开会话或取消会丢弃未追加的听写。").foregroundStyle(.secondary)
+            }
+            if !dictation.notice.isEmpty { Text(dictation.notice).foregroundStyle(.secondary) }
+        }.font(.caption).buttonStyle(.borderless)
     }
 
     private func modelChip(provider showProvider: Bool) -> some View {

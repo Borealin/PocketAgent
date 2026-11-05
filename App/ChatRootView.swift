@@ -96,7 +96,7 @@ struct ChatRootView: View {
                         if let selected = chat.selected {
                             VStack(spacing: 0) {
                                 ExecutionStrip(chat: chat, session: selected)
-                                ChatComposer(chat: chat, providers: providers, workspaces: workspaces, session: selected,
+                                ChatComposer(chat: chat, dictation: chat.dictation, providers: providers, workspaces: workspaces, session: selected,
                                              inputFocused: $inputFocused, chooseModel: { inputFocused = false; showModels = true },
                                              chooseWorkspace: { inputFocused = false; showWorkspaces = true })
                             }

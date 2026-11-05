@@ -2,6 +2,21 @@
 
 ## Requirements and scope
 
+The [voice input and Live plan](plans/voice-input-and-live.md) separates local
+dictation from the later Live PR. Dictation uses iOS 26 SpeechAnalyzer with
+runtime hardware/locale/asset checks and local DictationTranscriber fallback.
+The microphone starts only after explicit permission and preparation. Stop
+produces a separate preview; explicit confirmation appends finalized text once
+to the original conversation's latest draft through HistoryOwner, preserving
+keyboard edits and attachments. It never sends, steers, queues or saves memory.
+Cancel, session changes, leaving the foreground and audio interruptions stop
+capture without automatic resumption. Raw audio is bounded in memory, never
+written/logged/exported/synchronized; preview state is local and transient.
+Storage failure stops capture while retaining finalized preview for retry or
+copying. Core regression and strict iOS 26 API/concurrency typechecks pass;
+complete App/IPA/CI and exact-device speech acceptance remain pending. Live,
+cloud transcription, caret insertion and press-and-hold are not implemented.
+
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.
 It contains the 19.1.7 display/session/draft acceptance, remaining inner-display
