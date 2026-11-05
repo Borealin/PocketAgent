@@ -8,6 +8,7 @@ struct FrozenTurn {
     let workspace: WorkspaceSnapshot?
     let backend: PhoneBackendKind
     let clipboardAllowed: Bool
+    var duoPane: DuoPane? = nil
     let references: [HistoryReference]
 }
 
@@ -36,6 +37,7 @@ final class ChatJob {
     let config: RunConfiguration
     let phoneBackend: PhoneBackendKind
     let clipboardAllowed: Bool
+    let duoPane: DuoPane?
     /// Project directory frozen at acceptance, like the model configuration.
     let workspace: WorkspaceSnapshot?
     let scope: WorkScope
@@ -66,6 +68,7 @@ final class ChatJob {
         self.sessionID = sessionID; self.epoch = epoch; self.ordinal = ordinal
         self.prompt = ChatSession.forHistory(prompt); promptAttachments = attachments; self.origin = origin
         config = frozen.config; phoneBackend = frozen.backend; clipboardAllowed = frozen.clipboardAllowed
+        duoPane = frozen.duoPane
         workspace = frozen.workspace; scope = WorkScope(workspaceID: frozen.workspace?.id)
         references = frozen.references; self.primary = primary
     }
@@ -129,12 +132,24 @@ extension ChatController {
     }
 
     /// Captures provider, endpoint, format, model, capability, key, budget,
-    /// project, backend and clipboard policy now. Nil after reporting why not.
+    /// project, backend, clipboard policy and Duo pane now. Nil after reporting why not.
     func freeze(selection: ModelSelection?, workspaceID: UUID?, sessionID: UUID, text: String,
                 images: [ChatAttachment], references: [HistoryReference] = []) -> FrozenTurn? {
         let config: RunConfiguration
         do { config = try providers.configuration(for: selection) }
         catch { notice = error.localizedDescription; return nil }
+        let backend = DeviceSettings.phoneBackend
+        let duoPane = DeviceSettings.duoPane
+        if duoPane != nil {
+            guard backend == .ddi else {
+                notice = "Duo 分屏操作需要选择 DDI 控制方式。请在手机操作配置中切换为 DDI。"
+                return nil
+            }
+            guard config.supportsImages else {
+                notice = "Duo 分屏操作需要支持图片输入的模型，才能查看目标侧截图。请更换模型或关闭 Duo 分屏。"
+                return nil
+            }
+        }
         switch ImageCapability.check(supportsImages: config.supportsImages, hasText: !text.isEmpty, imageCount: images.count) {
         case .ok: break
         case .warnDropImages, .blockImageOnly:
@@ -152,8 +167,8 @@ extension ChatController {
             }
             workspace = snapshot
         }
-        return FrozenTurn(config: config, workspace: workspace, backend: DeviceSettings.phoneBackend,
-                          clipboardAllowed: DeviceSettings.clipboardAllowed, references: references)
+        return FrozenTurn(config: config, workspace: workspace, backend: backend,
+                          clipboardAllowed: DeviceSettings.clipboardAllowed, duoPane: duoPane, references: references)
     }
 
     func takeOrdinal() -> UInt64 { nextOrdinal += 1; return nextOrdinal }
@@ -426,7 +441,7 @@ extension ChatController {
                               },
                               assistant: job.primary ? assistantSupport(for: job) : nil)
         engine.beginAgent(goal: job.prompt.text, images: promptImages, config: job.config, workspace: job.workspace,
-            backend: job.phoneBackend, clipboardAllowed: job.clipboardAllowed,
+            backend: job.phoneBackend, clipboardAllowed: job.clipboardAllowed, duoPane: job.duoPane,
             conversationID: job.sessionID, promptID: job.prompt.id, priorMessages: prior, gates: gates,
             onEvent: { [weak self, weak job] event, status in
                 guard let self, let job else { return }; handle(event, status: status, job: job)

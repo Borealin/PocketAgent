@@ -58,6 +58,7 @@
 		8886708D7E4580012E54CC6A /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D84987315C6121941984C15 /* Attachments.swift */; };
 		89ECD0E2CE9A7E5C8422A5C2 /* ClearPrimary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */; };
 		8D5FA38C18C49A9452D70D8F /* PhoneControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A30E3059701B9B77BA06A7D /* PhoneControl.swift */; };
+		8F8E702D57E238BDAA9CCB65 /* DuoPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = D343FEC35DFF2926EF27CFCD /* DuoPane.swift */; };
 		912F67CF842F58B926EDF9F6 /* ModelStreamTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 410A91C32A04B283EE32A8C8 /* ModelStreamTrace.swift */; };
 		929798B97DAF31AF1DBA1088 /* WDARequestDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65594612732E3288F588504 /* WDARequestDiagnostics.swift */; };
 		954F84FD21FFD7D4A19C3375 /* ChatMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EA1370AD3A250D19122214 /* ChatMemory.swift */; };
@@ -186,6 +187,7 @@
 		CA980E5232B7922545B0CBAB /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		CC78893A183661157A2CB031 /* Markdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Markdown.swift; sourceTree = "<group>"; };
 		CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalDigest.swift; sourceTree = "<group>"; };
+		D343FEC35DFF2926EF27CFCD /* DuoPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPane.swift; sourceTree = "<group>"; };
 		D61AC91A09838169F172CE15 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		DA199D65896D97BCD8EAFCE2 /* TranscriptWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptWindow.swift; sourceTree = "<group>"; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
@@ -274,6 +276,7 @@
 				9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */,
 				F59CB77CCF90A3F6BA7ED38F /* DiagnosticBundle.swift */,
 				5ACB2E2F212D5C005601B0C0 /* DictationInput.swift */,
+				D343FEC35DFF2926EF27CFCD /* DuoPane.swift */,
 				3C7A20D6613095C37851886A /* ExecutionStatus.swift */,
 				3E9A10C8DD7C93A6042D56E8 /* HistoryEdits.swift */,
 				AB7EFB69606E772345D1071F /* HistoryFileEncoder.swift */,
@@ -503,6 +506,7 @@
 				9D7D84689FEFC4218E9CA3C1 /* DiagnosticExportView.swift in Sources */,
 				5EBFBA177EE37D11C58AC647 /* DictationController.swift in Sources */,
 				E1FB2D15B0B9E78166CC7160 /* DictationInput.swift in Sources */,
+				8F8E702D57E238BDAA9CCB65 /* DuoPane.swift in Sources */,
 				A2C16E0EC1BF15DB7EA56FF6 /* ExecutionStatus.swift in Sources */,
 				55B82475773826EC3588D3F4 /* HTTPTool.swift in Sources */,
 				44F4187565D0FE5BDA5973E5 /* HistoryEdits.swift in Sources */,

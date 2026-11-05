@@ -479,3 +479,24 @@ index bd0c33f..4015eb9 100644
              "Properties": {
                  "RemoteXPCVersionFlags": REMOTE_XPC_VERSION_FLAGS,
                  "SensitivePropertiesVisible": true,
+             },
+             "Services": XPCObject::Dictionary(Dictionary::new())
+         });
+ 
+         self.send_object(msg, false).await
+     }
+
+diff --git a/idevice/src/services/core_device/hid.rs b/idevice/src/services/core_device/hid.rs
+index 4f8109b..0000000 100644
+--- a/idevice/src/services/core_device/hid.rs
++++ b/idevice/src/services/core_device/hid.rs
+@@ -709,3 +709,9 @@ pub struct HidSurface {
+     #[serde(rename = "PrimaryUsagePage")]
+     pub primary_usage_page: Option<u64>,
++    /// Live display association for built-in touchscreens, when advertised.
++    #[serde(rename = "displayUUID")]
++    pub display_uuid: Option<String>,
++    /// Typed mirror retains properties omitted from the compact public fields.
++    #[serde(rename = "_CoreDevice_codablePropertyStorage")]
++    pub codable_property_storage: Option<plist::Dictionary>,
+ }

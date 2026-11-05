@@ -91,6 +91,22 @@ struct SettingsView: View {
                         LabeledContent("手机操作配置", value: engine.hasPreparedPhoneConnection ? "连接已保留" : device.connectionVerified ? "连接已验证" : device.hasPairing ? "待检查连接" : "待导入配对文件")
                     }.accessibilityIdentifier("phoneSetup")
                 } header: { Text("手机操作") }
+                Section {
+                    Picker("目标侧", selection: $device.duoPane) {
+                        Text("关闭").tag(nil as DuoPane?)
+                        ForEach(DuoPane.allCases, id: \.self) { pane in
+                            Text(pane.label).tag(pane as DuoPane?)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(settingsBusy)
+                    .accessibilityIdentifier("duoPane")
+                    .onChange(of: device.duoPane) { device.saveDuoPane() }
+                    Text("实验功能：先将 Duo 内屏固定为左右等分，并让 PocketAgent 留在另一侧。支持目标侧截图、坐标触摸/滑动和返回该侧主屏幕；启动 App 从主屏幕截图点击图标。文字、键盘和按界面元素定位暂不可用。系统键盘和弹窗会跨屏，需先手动关闭。需要 DDI 和支持图片输入的模型；未验证的姿态会拒绝操作。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: { Text("Duo 分屏") } footer: {
+                    Text("选择后仅影响之后接受的新回合；排队中的回合保留接受时的设置。")
+                }
                 Section("诊断") {
                     NavigationLink {
                         DiagnosticExportView(scope: .recent)
@@ -113,6 +129,10 @@ struct SettingsView: View {
                     }
                 }
         }
+    }
+
+    private var settingsBusy: Bool {
+        engine.busy || engine.deviceConnectionBusy || device.checking || device.importing
     }
 }
 

@@ -130,6 +130,7 @@ struct InputReleaseUnconfirmed: LocalizedError {
 @MainActor
 final class DDIControl: PhoneControl {
     let model: Model
+    let duoPane: DuoPane?
     var cancellationCheck: (() throws -> Void)?
     var budget: (() -> TimeInterval?)?
     var turnEnd: Date?
@@ -148,7 +149,7 @@ final class DDIControl: PhoneControl {
     /// Operations that send input to the phone.
     static let inputOperations: Set<String> = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys",
                                                "ax_replace", "home"]
-    init(_ model: Model) { self.model = model }
+    init(_ model: Model, duoPane: DuoPane? = nil) { self.model = model; self.duoPane = duoPane }
     func prepare(progress: @escaping @MainActor (String) -> Void) async throws {
         guard let turnEnd else { throw PhonePreparationStopped() }
         try await model.prepareDDI(turnEnd: turnEnd, progress: progress) { [weak self] in self?.stopRequested ?? true }
@@ -230,6 +231,7 @@ final class DDIControl: PhoneControl {
     private func call(_ object: [String: Any]) async throws -> [String: Any] {
         let op = object["op"] as? String ?? "request"
         var requestObject = object
+        if let duoPane { requestObject["duo_pane"] = duoPane.rawValue }
         if ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(op) {
             if let observedApp { requestObject["expected_app"] = observedApp }
             if let frame = observedFrame { requestObject["expected_frame"] = ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height] }
@@ -300,7 +302,9 @@ final class DDIControl: PhoneControl {
         guard let frame = result["frame"] as? [String: Double], let raw = result["nodes"] as? [[String: Any]] else { throw failure("DDI 界面树缺少坐标。") }
         tree.bundleID = result["app"] as? String
         tree.frame = CGRect(x: frame["x"] ?? 0, y: frame["y"] ?? 0, width: frame["width"] ?? 0, height: frame["height"] ?? 0)
-        tree.nodes = try raw.compactMap { try DDINodeMapping.attributes($0) }
+        // Duo AX frames have unresolved mixed window coordinates. Never issue
+        // node IDs from them, even if a future native reply contains nodes.
+        tree.nodes = duoPane == nil ? try raw.compactMap { try DDINodeMapping.attributes($0) } : []
         tree.outsideAppElements = try DDINodeMapping.outsideAppElements(result)
         observedFrame = tree.frame; observedApp = tree.bundleID
         guard tree.frame.width > 0, tree.frame.height > 0 else { throw failure("DDI 屏幕尺寸无效。") }
@@ -315,10 +319,13 @@ final class DDIControl: PhoneControl {
             defer { pocket_ddi_bytes_free(bytes, count) }
             return Data(bytes: bytes, count: Int(count))
         }
-        try cancellationCheck?(); return result
+        try cancellationCheck?()
+        return try duoPane.map { try DuoScreenCapture.cropPNG(result, pane: $0) } ?? result
     }
     func activate(_ bundle: String) async throws { _ = try await call(["op": "activate", "bundle_id": bundle]) }
-    func tap(_ x: Double, _ y: Double, seconds: Double?) async throws { _ = try await call(["op": seconds == nil ? "tap" : "hold", "x": x, "y": y, "seconds": seconds ?? 0.05]) }
+    func tap(_ x: Double, _ y: Double, seconds: Double?) async throws {
+        _ = try await call(["op": seconds == nil ? "tap" : "hold", "x": x, "y": y, "seconds": seconds ?? 0.05])
+    }
     func drag(_ x: Double, _ y: Double, _ toX: Double, _ toY: Double, seconds: Double) async throws {
         _ = try await call(["op": "drag", "x": x, "y": y, "to_x": toX, "to_y": toY, "seconds": seconds])
     }
@@ -385,5 +392,7 @@ final class DDIControl: PhoneControl {
                            "clipboard_allowed": sequence.clipboardAllowed])
     }
     func dismissKeyboard() async throws { _ = try await call(["op": "key", "key": "escape"]) }
-    func home() async throws { _ = try await call(["op": "home"]) }
+    func home() async throws {
+        _ = try await call(["op": "home"])
+    }
 }

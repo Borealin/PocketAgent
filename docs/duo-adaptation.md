@@ -67,13 +67,61 @@ Screenshots and logs stay outside Git. Simulator layout checks do not establish
 DDI/WDA control of a second app, hardware transitions or a signed physical Duo
 installation.
 
-PocketAgent's DDI adapter currently accepts only a single portrait primary display and rejects rotated
-display geometry independently of the app's UI orientation support. Pane
-ownership, rotated touch mapping and multi-display targeting require verified
-device metadata before relaxing that refusal. Preserve the existing
-fresh-observation, serial-action and no-replay contracts.
+PocketAgent's ordinary DDI path accepts only a single portrait primary display
+and rejects rotated geometry independently of UI orientation support. The
+explicit experimental side mode below uses a separate verified-profile path;
+it does not remove the ordinary path's ownership checks. Fresh observations,
+serial actions and no replay remain required.
 
 ## Fixed Split View control investigation (2026-11-05)
+
+### Scoped DDI implementation and validation plan
+
+The user authorized a first on-phone integration after ipb's separate physical
+command investigation. Freeze an explicit left/right control-side setting with
+each accepted turn; PocketAgent must occupy the opposite side. Keep
+the existing ordinary-phone path. Support only the measured inner-display pose,
+resolve its active display and associated HID descriptor live, and reject a
+changed/unknown pose or missing split gutter before input.
+
+The first integration implements a cropped side screenshot and side-local point
+actions, including the verified edge-report Home gesture. It does not label raw
+AX coordinates as side-local nodes or infer a visible application from a PID.
+Text, keyboard, AX node actions and automatic app activation remain unavailable
+in this mode: ordinary activation previously replaced PocketAgent, and a Home
+submission alone cannot prove an empty destination. Apps can instead be opened
+by tapping their observed icons in that side's Home screen. System keyboards
+and dialogs remain shared surfaces; the selected side is a geometric boundary,
+not a separate modal or input-focus domain. Completion does not activate the
+assistant and risk replacing the other occupant.
+
+The setting is local and defaults to off. It is frozen at turn acceptance along
+with the provider/backend; WDA and models without image support are refused.
+Native admission requires target RSD `ProductType=iPhone19,4`,
+`BuildVersion=24C5037i`, unique active display with native1878×2670,
+bounds2007×2853/scale3, rot0→rot90 and device landscapeRight. The rendered
+image must be2853×2007 with the calibrated dark centre gutter before a coordinate
+effect. Pane images are1407×2007, coordinates469×669; right x-origin482 is applied
+only to screenshot-local points, never to AX frames. Touchscreen selection comes
+from the matching descriptor's `displayUUID`, including its typed Codable mirror.
+The source for RSD property keys is
+[pymobiledevice3's RSD implementation](https://github.com/doronz88/pymobiledevice3/blob/master/pymobiledevice3/remote/remote_service_discovery.py).
+Unknown/missing metadata fails closed. This is a narrow seed/pose profile, not
+general Duo, rotation or scene support.
+
+Validate scope freezing and policy through Core tests, profile/descriptor/input
+mapping and release semantics through native tests, then build and inspect the
+IPA. Exact-device exercise of this PocketAgent revision is a separate gate;
+ipb's physical command acceptance cannot substitute for it.
+
+Candidate 0.4.0 (20.2.2) has not passed that on-phone executor gate. Host-assisted
+setup reached left PocketAgent/right Calculator and saved the right-side setting,
+but no controlled model turn was submitted before the device returned to its
+outer display. The user deferred the physical test and requested the candidate;
+stop device operations at that handoff. Resume with a fresh layout/profile check,
+then exercise capture, point actions and single-side Home through PocketAgent
+itself. Composer preparation and ipb setup are not acceptance of those actions
+or of pane-isolated text input.
 
 A separate Mac-side ipb/CoreDevice probe exercised a physical Duo on iOS 27.3
 with DDI 27B52 and CoreDevice 651.32. PocketAgent 0.4.0 (20.1.2) was the retained
