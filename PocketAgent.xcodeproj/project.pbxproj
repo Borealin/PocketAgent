@@ -37,6 +37,7 @@
 		5BA9A2FB10F9F4683CD3D9A3 /* PhoneToolResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA287EE426C153B9DCAD7DF /* PhoneToolResult.swift */; };
 		5EBFBA177EE37D11C58AC647 /* DictationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF21C7228B415F14064E7FB5 /* DictationController.swift */; };
 		6310CDFC25B8F19D1BAE638E /* AgentContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B2149D605EB4681C28AA432 /* AgentContextBuilder.swift */; };
+		661F2BE5884964B8DB9FCB3C /* CellularConnectionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF0AF9330894168C23676A0F /* CellularConnectionPolicy.swift */; };
 		674FA12F51B753BAA27C34FB /* Markdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC78893A183661157A2CB031 /* Markdown.swift */; };
 		675D3CF2870105A39B860779 /* LongHistoryBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */; };
 		68FF19DDFDD6EF2DCBBD408A /* CanonicalDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */; };
@@ -190,6 +191,7 @@
 		DA199D65896D97BCD8EAFCE2 /* TranscriptWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptWindow.swift; sourceTree = "<group>"; };
 		DAAF33FE982E09F9E44343CC /* ProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStore.swift; sourceTree = "<group>"; };
 		DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearPrimary.swift; sourceTree = "<group>"; };
+		DF0AF9330894168C23676A0F /* CellularConnectionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellularConnectionPolicy.swift; sourceTree = "<group>"; };
 		E39E07338DA36C6016FB8828 /* PhoneBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneBackend.swift; sourceTree = "<group>"; };
 		E41AD2E861E03F72BF30BBCA /* ToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCatalog.swift; sourceTree = "<group>"; };
 		E53F96B6F3F454BD229C1E52 /* iSHLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = iSHLicenses; path = App/Resources/iSHLicenses; sourceTree = SOURCE_ROOT; };
@@ -265,6 +267,7 @@
 				532A0E3415F99019452AA442 /* AssistantState.swift */,
 				8D84987315C6121941984C15 /* Attachments.swift */,
 				CE957DBF1A9495AD8DB3F1AD /* CanonicalDigest.swift */,
+				DF0AF9330894168C23676A0F /* CellularConnectionPolicy.swift */,
 				59F24A784103BF8F2532963F /* ChatHistory.swift */,
 				19938EABD2390F0D02B28600 /* ChatPolicies.swift */,
 				DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */,
@@ -483,6 +486,7 @@
 				CE20ABAE4B66E96F070C260B /* AssistantViews.swift in Sources */,
 				8886708D7E4580012E54CC6A /* Attachments.swift in Sources */,
 				68FF19DDFDD6EF2DCBBD408A /* CanonicalDigest.swift in Sources */,
+				661F2BE5884964B8DB9FCB3C /* CellularConnectionPolicy.swift in Sources */,
 				19E055FEF0DFB946A9B19067 /* ChatComposer.swift in Sources */,
 				FCCC162084BB697E860049D0 /* ChatHistory.swift in Sources */,
 				954F84FD21FFD7D4A19C3375 /* ChatMemory.swift in Sources */,

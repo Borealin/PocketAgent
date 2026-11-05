@@ -68,12 +68,34 @@ struct ChatRootView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            if engine.cellularConnection.showsReminder && !engine.busy {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("蜂窝网络下多次连接失败", systemImage: "antenna.radiowaves.left.and.right.slash")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Button { engine.dismissCellularConnectionReminder() } label: {
+                            Image(systemName: "xmark").frame(width: 44, height: 44)
+                        }.accessibilityLabel("收起蜂窝连接提示")
+                    }
+                    Text("请临时关闭蜂窝数据并断开 Wi-Fi，保持 LocalDevVPN 连接和手机解锁。回到本 App 后会自动重连；连接成功后再开回蜂窝数据。")
+                        .font(.caption)
+                    Button("查看连接设置") { showSettings = true }
+                }
+                .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 6, y: 2).padding()
+                .accessibilityIdentifier("cellularConnectionReminder")
+            }
+        }
         .onAppear {
+            engine.phoneConnectionSceneChanged(scenePhase)
             chat.foregroundChanged(scenePhase == .active)
             if scenePhase == .background { chat.dictation.enteredBackground() }
             if scenePhase == .active { sync.foreground() }
         }
         .onChange(of: scenePhase) { _, phase in
+            engine.phoneConnectionSceneChanged(phase)
             chat.foregroundChanged(phase == .active)
             if phase == .background { chat.dictation.enteredBackground() }
             if phase == .active { sync.foreground() } else { chat.persist() }
