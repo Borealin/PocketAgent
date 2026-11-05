@@ -1093,19 +1093,37 @@ embedded default. Only the independent test app's setting was changed and
 restored; the original SideStore app's preferences are unchanged. The fix ships
 with the 0.3.6 candidate.
 
-The App recovery implementation is pending device acceptance. Model owns a
-short-lived prepared RP connection shared with its next phone action; ordinary
-connection checks still release their temporary tunnel. Settings instructs the
-user to disable cellular, disconnect Wi-Fi, keep LocalDevVPN connected, prepare
-the connection, restore cellular, then send a new request. Preparation starts
-no WDA or phone actions. A 120-second lease and the system's shorter background
-allowance limit retention. First phone use consumes the real handles and runs
-normal DDI/runner/WDA verification; completion releases that turn's resources.
-Pure chat/file/network turns retain an unconsumed connection until its deadline.
-Expiry, Stop, explicit release and device configuration changes invalidate it.
-An expired handle is never reused; tool attempts rejected for expiry stay
-rejected in the same turn, while an explicit new turn or successful ordinary
-connection check clears stale recovery state. No phone action is replayed.
+The [cellular maintenance plan](plans/cellular-connection-maintenance.md)
+replaces the old 120-second foreground lease. Model automatically prepares an
+RP-only tunnel when paired, foreground, idle and using cellular. Failed attempts
+back off for 2, 5, 10, then 30 seconds; three consecutive failures show a
+dismissible in-app floating reminder to temporarily disable cellular and
+disconnect Wi-Fi while keeping LocalDevVPN connected and the phone unlocked.
+Recovery continues with data off, even when the default path is unsatisfied.
+Success resets the reminder episode. A local toggle disables maintenance.
+
+Idle retained connections get a bounded five-second, same-peer RSD directory
+read every 20 seconds and again before a turn borrows the handles. This starts
+no control sessions or phone actions. A failed borrow check fails that request;
+maintenance resumes only after the turn ends. Confirmed DDI/runner cleanup can
+return the RP handles for subsequent turns; control clients and owned runner
+processes never cross turns. Failed cleanup and unconfirmed input release
+discard the transport. Ordinary explicit checks still release their temporary
+tunnel. Stop and explicit release pause automatic connection until the next
+foreground entry or manual preparation; configuration changes invalidate old
+handles before any attempt with the new settings.
+
+Foreground retention has no fixed lease. The existing finite UIKit background
+assertion covers a temporary trip to Settings and ends on return; expiration
+invalidates idle/preparing handles. There is no permanent background/lock-screen
+connection guarantee or cross-app floating window. An expired handle is never
+reused; expiry rejection remains scoped to that turn until a new preparation or
+explicit later turn. No phone action is replayed. Initial cellular TCP refusal
+is still an external transport limitation, not repaired by retries. Core
+regressions cover retry backoff, reminder episodes, data-off/expired recovery
+and foreground/idle/pairing/consent gates. The new maintenance and cross-turn
+reuse have not been exercised on a physical device;
+cellular-only, unplugged and background behavior remain acceptance limits.
 Settings handshakes, configuration changes, startup and cleanup share a serial
 connection gate. Diagnostics record default path flags and TCP/RP failure stage
 in a protected, backup-excluded connection log with setup/active-turn context;

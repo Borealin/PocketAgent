@@ -114,6 +114,11 @@ final class DeviceConnection {
         if let server { remote_server_free(server) }
         process = nil; server = nil
     }
+    /// Only the RP transport crosses turns; control clients never do.
+    func releaseIdleControlClients() {
+        closeDVT()
+        catalogLoaded = false
+    }
     func connect(configuration: Configuration) throws {
         var pairing: OpaquePointer?
         let path = configuration.pairingPath
@@ -301,7 +306,9 @@ final class DeviceConnection {
 @MainActor
 final class Model: ObservableObject {
     @Published var status = ""
-    @Published var busy = false
+    @Published var busy = false {
+        didSet { if !busy { scheduleCellularMaintenance(immediate: true) } }
+    }
     var activeAgentRuntime: AgentRuntime?
     var activeMaintenance: PrecompactionTask?
     var pendingAgentCancellation = false
@@ -314,24 +321,29 @@ final class Model: ObservableObject {
     @Published private(set) var networkPath = PhoneNetworkPath()
     @Published private(set) var deviceConnectionBusy = false
     @Published private(set) var preparingPhoneConnection = false
-    @Published private(set) var preparedConnectionExpiresAt: Date?
     @Published private(set) var phonePreparationStatus = "尚未准备保留连接"
+    @Published private(set) var cellularConnection = CellularConnectionPolicy()
     private let pathMonitor = NWPathMonitor()
     private var connectionWaiters: [CheckedContinuation<Void, Never>] = []
     private var preparedConnection: DeviceConnection?
-    private var preparedConnectionDeadline: TimeInterval?
     private var preparedConnectionExpired = false
     private var preparedExpiryRejectedRunID: String?
     private var preparedConnectionInUse = false
     private var preparationGeneration = 0
     private var preparationJob: Task<Void, Never>?
-    private var preparedExpiryJob: Task<Void, Never>?
+    private var cellularMaintenanceJob: Task<Void, Never>?
+    private var connectionForeground = false
     private var preparationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     var hasPreparedPhoneConnection: Bool { preparedConnection != nil }
     init() {
         DeviceSettings.migrateLegacyPairing()
+        cellularConnection.enabled = UserDefaults.standard.object(forKey: "maintainCellularConnection") as? Bool ?? true
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            MainActor.assumeIsolated { self?.networkPath = PhoneNetworkPath(path) }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.networkPath = PhoneNetworkPath(path)
+                self.scheduleCellularMaintenance(immediate: true)
+            }
         }
         pathMonitor.start(queue: .main)
         for (name, phase) in [(UIApplication.willResignActiveNotification, "willResignActive"),
@@ -380,16 +392,86 @@ final class Model: ObservableObject {
         await withCheckedContinuation { connectionWaiters.append($0) }
     }
     private func releaseDeviceConnection() {
-        if connectionWaiters.isEmpty { deviceConnectionBusy = false }
+        if connectionWaiters.isEmpty {
+            deviceConnectionBusy = false
+            scheduleCellularMaintenance()
+        }
         else { connectionWaiters.removeFirst().resume() }
     }
     func beginDeviceConfigurationChange() -> Bool {
         guard !busy, !deviceConnectionBusy else { return false }
         deviceConnectionBusy = true
-        releasePreparedPhoneConnection(message: "设备设置已更改，请重新准备连接")
+        releasePreparedPhoneConnection(message: "设备设置已更改，请重新准备连接", pauseMaintenance: false)
+        cellularConnection.succeeded()
         return true
     }
     func endDeviceConfigurationChange() { releaseDeviceConnection() }
+
+    func setCellularConnectionEnabled(_ enabled: Bool) {
+        cellularConnection.enabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "maintainCellularConnection")
+        if enabled {
+            cellularConnection.paused = false
+            scheduleCellularMaintenance(immediate: true)
+        } else {
+            releasePreparedPhoneConnection(message: "已关闭自动保留蜂窝连接")
+        }
+    }
+    func dismissCellularConnectionReminder() { cellularConnection.dismissReminder() }
+
+    func phoneConnectionSceneChanged(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            if !connectionForeground { cellularConnection.paused = false }
+            connectionForeground = true
+            endPreparationBackgroundTask()
+            scheduleCellularMaintenance(immediate: true)
+        case .inactive:
+            if preparedConnection != nil || preparingPhoneConnection { beginPreparationBackgroundTask() }
+        case .background:
+            connectionForeground = false
+            cellularMaintenanceJob?.cancel(); cellularMaintenanceJob = nil
+            if preparedConnection != nil || preparingPhoneConnection { beginPreparationBackgroundTask() }
+        @unknown default: break
+        }
+    }
+
+    private var shouldMaintainCellularConnection: Bool {
+        cellularConnection.shouldMaintain(foreground: connectionForeground, paired: DeviceSettings.hasPairing,
+            busy: busy, cellular: networkPath.cellular, retained: preparedConnection != nil,
+            expired: preparedConnectionExpired || preparedExpiryRejectedRunID != nil)
+    }
+    private func scheduleCellularMaintenance(immediate: Bool = false) {
+        if immediate { cellularMaintenanceJob?.cancel(); cellularMaintenanceJob = nil }
+        guard cellularMaintenanceJob == nil, !deviceConnectionBusy, shouldMaintainCellularConnection else { return }
+        let generation = preparationGeneration
+        let delay = immediate ? 0 : cellularConnection.retryDelay
+        cellularMaintenanceJob = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, generation == self.preparationGeneration, !Task.isCancelled else { return }
+            self.cellularMaintenanceJob = nil
+            guard !self.deviceConnectionBusy, self.shouldMaintainCellularConnection else { return }
+            guard let device = self.preparedConnection else {
+                self.prepareCellularConnection(automatically: true)
+                return
+            }
+            self.deviceConnectionBusy = true
+            defer { self.releaseDeviceConnection() }
+            do {
+                // Same-peer RSD advertisement, not a phone action or new RP
+                // connection. Only idle handles are borrowed under this gate.
+                let expiry = DDIImagePreparation.milliseconds(Date().addingTimeInterval(5))
+                try await self.ffi { try device.refreshServices(expiresAt: expiry) }
+                guard generation == self.preparationGeneration else { return }
+                self.cellularConnection.succeeded()
+                self.phonePreparationStatus = "连接已保留，可跨轮使用；空闲时自动检查连接"
+            } catch {
+                guard generation == self.preparationGeneration else { return }
+                self.releasePreparedPhoneConnection(message: "保留连接已断开，正在等待重连", pauseMaintenance: false)
+                self.cellularConnection.failed()
+            }
+        }
+    }
 
     /// Setup has its own protected diagnostic file; it never borrows a previous
     /// turn's runID/logURL. Callers supply only the non-sensitive fields below.
@@ -440,6 +522,7 @@ final class Model: ObservableObject {
             throw diagnostic
         }
         logPhoneConnection("rp_tunnel_connect_succeeded", context: context, fields: networkPath.diagnosticFields)
+        cellularConnection.succeeded()
     }
 
     /// An ordinary check owns only a temporary tunnel and never preserves it.
@@ -458,28 +541,19 @@ final class Model: ObservableObject {
         preparedExpiryRejectedRunID = nil
     }
 
-    /// The manual recovery establishes RP only. WDA still starts under the
-    /// next turn's existing phone executor, after the user restores data.
-    func prepareCellularConnection() {
+    /// Manual and automatic preparation share the same RP-only ownership.
+    func prepareCellularConnection(automatically: Bool = false) {
         guard !busy, !deviceConnectionBusy else { return }
-        releasePreparedPhoneConnection(message: "正在准备连接…")
+        releasePreparedPhoneConnection(message: "正在准备连接…", expired: preparedConnectionExpired, pauseMaintenance: false)
+        cellularConnection.paused = false
         let configuration: DeviceConnection.Configuration
         do { configuration = try .current() }
         catch { phonePreparationStatus = error.localizedDescription; return }
         deviceConnectionBusy = true
         preparingPhoneConnection = true
         let generation = preparationGeneration
-        phonePreparationStatus = "正在建立 RP 隧道；请暂时保持蜂窝数据关闭"
-        preparationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PreparePhoneConnection") { [weak self] in
-            guard let self, self.preparationGeneration == generation else { return }
-            self.releasePreparedPhoneConnection(message: "系统后台保留时间已结束，请重新准备连接", expired: true)
-        }
-        guard preparationBackgroundTask != .invalid else {
-            phonePreparationStatus = "系统未提供后台保留时间，请回到 App 后重新准备连接"
-            preparingPhoneConnection = false
-            releaseDeviceConnection()
-            return
-        }
+        phonePreparationStatus = automatically ? "正在自动连接手机…" : "正在建立 RP 隧道；请暂时保持蜂窝数据关闭"
+        beginPreparationBackgroundTask()
         preparationJob = Task {
             defer {
                 preparingPhoneConnection = false
@@ -491,35 +565,42 @@ final class Model: ObservableObject {
                 try await connectPhone(device, configuration: configuration, context: .deviceSetup)
                 guard generation == preparationGeneration, !Task.isCancelled else { return }
                 preparedConnection = device
-                preparedConnectionDeadline = ProcessInfo.processInfo.systemUptime + 120
-                preparedConnectionExpiresAt = Date().addingTimeInterval(120)
-                phonePreparationStatus = "连接已保留。现在开回蜂窝数据，再发送新消息；下一次手机操作会使用它。"
+                preparedConnectionExpired = false
+                preparedExpiryRejectedRunID = nil
+                cellularConnection.succeeded()
+                phonePreparationStatus = "连接已保留，可开回蜂窝数据；后续手机任务会复用连接"
+                if connectionForeground { endPreparationBackgroundTask() }
                 logPhoneConnection("rp_tunnel_prepared", context: .deviceSetup, fields: networkPath.diagnosticFields)
-                preparedExpiryJob = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(120)) } catch { return }
-                    guard let self, self.preparationGeneration == generation else { return }
-                    self.releasePreparedPhoneConnection(message: "准备连接已过期，请重新准备", expired: true)
-                }
             } catch {
                 guard generation == preparationGeneration else { return }
-                phonePreparationStatus = error.localizedDescription
+                if automatically { cellularConnection.failed() }
+                phonePreparationStatus = automatically ? "连接未成功，稍后自动重试；请保持 LocalDevVPN 连接和手机解锁" : error.localizedDescription
                 endPreparationBackgroundTask()
             }
         }
     }
 
-    func releasePreparedPhoneConnection(message: String = "已释放准备连接", expired: Bool = false) {
+    private func beginPreparationBackgroundTask() {
+        guard preparationBackgroundTask == .invalid else { return }
+        let generation = preparationGeneration
+        preparationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PreparePhoneConnection") { [weak self] in
+            guard let self, self.preparationGeneration == generation else { return }
+            self.releasePreparedPhoneConnection(message: "系统后台保留时间已结束，回到 App 后自动恢复连接", expired: true, pauseMaintenance: false)
+        }
+    }
+
+    func releasePreparedPhoneConnection(message: String = "已释放准备连接，自动连接已暂停至下次回到前台", expired: Bool = false,
+                                       pauseMaintenance: Bool = true) {
         if preparedConnection != nil || preparingPhoneConnection {
             logPhoneConnection(expired ? "rp_tunnel_prepared_expired" : "rp_tunnel_prepared_released",
                                context: .deviceSetup, fields: networkPath.diagnosticFields)
         }
         preparationGeneration += 1
         preparationJob?.cancel()
-        preparedExpiryJob?.cancel(); preparedExpiryJob = nil
+        cellularMaintenanceJob?.cancel(); cellularMaintenanceJob = nil
+        if pauseMaintenance { cellularConnection.paused = true; cellularConnection.succeeded() }
         preparedConnection = nil
-        preparedConnectionDeadline = nil
         preparedConnectionExpired = expired
-        preparedConnectionExpiresAt = nil
         phonePreparationStatus = message
         endPreparationBackgroundTask()
     }
@@ -541,20 +622,12 @@ final class Model: ObservableObject {
         }
         if preparedConnectionExpired || preparedExpiryRejectedRunID == runID { try rejectExpiredConnection() }
         guard let device = preparedConnection else { return nil }
-        guard let deadline = preparedConnectionDeadline,
-              ProcessInfo.processInfo.systemUptime < deadline,
-              preparationBackgroundTask != .invalid else {
-            releasePreparedPhoneConnection(message: "准备连接已过期，请重新准备", expired: true)
-            try rejectExpiredConnection()
-        }
         preparedConnection = nil
         preparationGeneration += 1
-        preparedConnectionDeadline = nil
-        preparedConnectionExpiresAt = nil
-        preparedExpiryJob?.cancel(); preparedExpiryJob = nil
+        cellularMaintenanceJob?.cancel(); cellularMaintenanceJob = nil
         endPreparationBackgroundTask()
         preparedConnectionInUse = true
-        phonePreparationStatus = "本轮正在使用准备连接，结束后会释放"
+        phonePreparationStatus = "本轮正在使用保留连接"
         logPhoneConnection("rp_tunnel_prepared_consumed", context: .activeTurn, fields: networkPath.diagnosticFields)
         return device
     }
@@ -636,6 +709,16 @@ final class Model: ObservableObject {
             // Resume setup without replacing the object that owns its PID.
             device = existing
         } else if let prepared = try consumePreparedPhoneConnection() {
+            do {
+                let expiry = DDIImagePreparation.milliseconds(min(turnEnd, Date().addingTimeInterval(5)))
+                try await ffi { try prepared.refreshServices(expiresAt: expiry) }
+                cellularConnection.succeeded()
+            } catch {
+                preparedConnectionInUse = false
+                cellularConnection.failed()
+                phonePreparationStatus = "保留连接已断开，任务结束后自动重连"
+                throw failure("保留的手机连接已断开；未执行手机操作，不会自动重试本次请求。请等待连接恢复后发送新消息。")
+            }
             device = prepared
             connection = prepared
         } else {
@@ -858,15 +941,24 @@ final class Model: ObservableObject {
         await acquireDeviceConnection()
         log("finish_gate_acquired", ["waitedMs": elapsed()])
         defer { releaseDeviceConnection() }
+        var warnings: [String] = []
         defer {
-            wdaSessionBase = nil; connection = nil; installedApps = []
-            if preparedConnectionInUse {
-                preparedConnectionInUse = false
+            if let device = connection, warnings.isEmpty, !pendingAgentCancellation,
+               cellularConnection.enabled, !cellularConnection.paused,
+               networkPath.cellular || preparedConnectionInUse,
+               device.ddi == nil, !device.ownsRunner, !device.inputReleaseUnconfirmed {
+                device.releaseIdleControlClients()
+                preparedConnection = device
+                preparedConnectionExpired = false
+                if !connectionForeground { beginPreparationBackgroundTask() }
+                phonePreparationStatus = "连接已保留，下一轮手机任务可继续使用"
+            } else if preparedConnectionInUse {
                 phonePreparationStatus = "本轮已结束，使用的准备连接已释放"
             }
+            wdaSessionBase = nil; connection = nil; installedApps = []
+            preparedConnectionInUse = false
         }
         guard let device = connection else { return "" }
-        var warnings: [String] = []
         if device.ddi != nil {
             // End our AX subscription while its target is still foreground.
             // App activation can otherwise race late accessibility callbacks.

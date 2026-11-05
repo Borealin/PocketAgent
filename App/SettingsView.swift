@@ -209,7 +209,11 @@ struct PhoneSetupView: View {
                     : "检查已保存设置下的配对与 VPN，结束即释放连接，不会打开其他 App。首次运行手机操作时，iOS 可能要求输入解锁密码以启用 XCTest。")
             }
             Section {
-                Text("1. 临时关闭蜂窝数据，并断开 Wi-Fi；保持 LocalDevVPN 连接和手机解锁。\n2. 点下面的准备按钮，等待连接已保留。\n3. 开回蜂窝数据，回到聊天发送新消息。")
+                Toggle("自动保持蜂窝连接", isOn: Binding(
+                    get: { engine.cellularConnection.enabled },
+                    set: { engine.setCellularConnectionEnabled($0) }))
+                    .disabled(settingsBusy).accessibilityIdentifier("maintainCellularConnection")
+                Text("蜂窝网络下自动连接，空闲时检查连接；连续失败后会在聊天中提示。恢复时临时关闭蜂窝数据并断开 Wi-Fi，保持 LocalDevVPN 连接和手机解锁；回到本 App 等待连接已保留，再开回蜂窝数据。也可手动准备连接。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button { engine.prepareCellularConnection() } label: {
                     HStack {
@@ -220,18 +224,15 @@ struct PhoneSetupView: View {
                     .accessibilityIdentifier("prepareCellularConnection")
                 Text(engine.phonePreparationStatus).font(.caption)
                     .accessibilityIdentifier("phonePreparationStatus")
-                if let expiry = engine.preparedConnectionExpiresAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text("剩余 \(max(0, Int(expiry.timeIntervalSince(context.date)))) 秒；系统可能提前结束保留。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                if engine.hasPreparedPhoneConnection {
                     Button("释放已准备连接") { engine.releasePreparedPhoneConnection() }
+                        .disabled(settingsBusy)
                         .accessibilityIdentifier("releasePreparedConnection")
                 }
                 Text(engine.networkPath.description).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("phoneNetworkPath")
             } header: { Text("蜂窝连接恢复") } footer: {
-                Text("用于蜂窝开启时无法建立初始连接的情况。只建立并短暂保留 RP 隧道，下一次手机操作才会启动所选控制后端；不会自动执行或重试手机操作。默认网络路径状态不代表 VPN 是否可用。")
+                Text("前台连接可跨轮保留；切到后台只短暂保留，系统可能结束连接，回到 App 后自动恢复。自动重连只建立隧道，不会自动执行或重试手机操作。释放连接后暂停自动连接至下次回到前台。默认网络路径状态不代表 VPN 是否可用。")
             }
             Section {
                 DisclosureGroup("高级设备设置", isExpanded: $showAdvanced) {

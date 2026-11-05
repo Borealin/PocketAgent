@@ -137,16 +137,22 @@ Keep the local VPN connected and the phone unlocked. For WDA, iOS can require th
 device passcode when enabling UI automation; enter it only in the system page on
 the phone. DDI does not launch XCTest.
 
-If connection checks fail only on cellular, open Settings → 手机操作配置 →
-蜂窝连接恢复. Temporarily disable cellular and disconnect Wi-Fi while leaving
-LocalDevVPN connected, then tap **准备蜂窝模式连接**. After **连接已保留** appears,
-restore cellular and send a new message. The real RP tunnel is retained for at
-most 120 seconds (iOS may end the background allowance sooner) and is consumed
-by the next phone operation. Ordinary **检查连接** releases its temporary tunnel;
-it does not prepare a later turn. Pure chat/file/network turns do not consume
-the prepared connection. Expiry, Stop, explicit release and device-setting
-changes discard it. An expired phone operation is never replayed automatically.
-The default path label can show unavailable while the local VPN still works.
+**自动保持蜂窝连接** is enabled by default in Settings → 手机操作配置 →
+蜂窝连接恢复. While PocketAgent is foreground and idle, it attempts a cellular
+RP connection and checks retained tunnels every 20 seconds. Three consecutive
+failures show an in-app reminder: temporarily disable cellular and disconnect
+Wi-Fi while leaving LocalDevVPN connected, then return to PocketAgent for
+automatic recovery. **准备蜂窝模式连接** also starts preparation manually. After
+**连接已保留** appears, restore cellular and send a new message.
+
+The foreground tunnel has no fixed lease and can be reused across turns after
+control-service cleanup. Background retention is limited by iOS; returning to
+PocketAgent resumes recovery. Ordinary **检查连接** releases its temporary
+tunnel. Stop and explicit release pause automatic connection until the next
+foreground entry or manual preparation. Configuration changes and background
+expiration discard old handles. Reconnection never replays phone actions.
+The default path label can show unavailable while the local VPN still works;
+initial cellular-only connection failures may still require guided recovery.
 
 
 ## Your assistant, tasks and memory
