@@ -73,6 +73,15 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(merged['apps'][0]['versions'], [built, old])
         self.assertEqual(current['apps'][0]['versions'][0]['sha256'], 'a' * 64)
 
+    def test_publish_orders_dotted_builds_without_dropping_prior_artifacts(self):
+        entries = [dict(self.metadata(), version='0.4.0', buildVersion=b) for b in ['19', '19.1.7', '20']]
+        def source(versions):
+            return {'apps': [{'bundleIdentifier': 'test.app', 'versions': versions}]}
+        merged = publish.merge_published_source(source(entries[:1]), source(entries[1:2]))
+        self.assertEqual([v['buildVersion'] for v in merged['apps'][0]['versions']], ['19.1.7', '19'])
+        merged = publish.merge_published_source(merged, source(entries[2:]))
+        self.assertEqual([v['buildVersion'] for v in merged['apps'][0]['versions']], ['20', '19.1.7', '19'])
+
     def test_publish_bootstraps_feed_without_touching_dirty_build_checkout(self):
         real_run = subprocess.run
         with tempfile.TemporaryDirectory() as directory:
