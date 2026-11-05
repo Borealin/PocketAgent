@@ -72,15 +72,18 @@ nonisolated struct ProviderFile: Codable, Sendable {
     var keyOrigins: [String: [String]] = [:]
     /// Local context budget settings per provider/model; never synchronized.
     var budgetOverrides: [ContextBudgetOverride] = []
+    /// Local only, excluded from PortableSnapshot.
+    var liveVoice: LiveVoiceSettings?
 
     init(providers: [ProviderRecord] = [], defaultSelection: ModelSelection? = nil, deletedProviders: [Tombstone] = [],
          legacySecretPending: Bool = false, keyOrigins: [String: [String]] = [:],
-         budgetOverrides: [ContextBudgetOverride] = []) {
+         budgetOverrides: [ContextBudgetOverride] = [], liveVoice: LiveVoiceSettings? = nil) {
         self.providers = providers; self.defaultSelection = defaultSelection; self.deletedProviders = deletedProviders
         self.legacySecretPending = legacySecretPending; self.keyOrigins = keyOrigins; self.budgetOverrides = budgetOverrides
+        self.liveVoice = liveVoice
     }
     private enum CodingKeys: String, CodingKey {
-        case version, providers, defaultSelection, deletedProviders, legacySecretPending, keyOrigins, budgetOverrides
+        case version, providers, defaultSelection, deletedProviders, legacySecretPending, keyOrigins, budgetOverrides, liveVoice
     }
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -92,6 +95,7 @@ nonisolated struct ProviderFile: Codable, Sendable {
         legacySecretPending = try c.decodeIfPresent(Bool.self, forKey: .legacySecretPending) ?? false
         keyOrigins = try c.decodeIfPresent([String: [String]].self, forKey: .keyOrigins) ?? [:]
         budgetOverrides = try c.decodeIfPresent([ContextBudgetOverride].self, forKey: .budgetOverrides) ?? []
+        liveVoice = try c.decodeIfPresent(LiveVoiceSettings.self, forKey: .liveVoice)
         guard Set(providers.map(\.id)).count == providers.count else { throw ProviderError.invalidFile("重复服务商 ID") }
         guard Set(budgetOverrides.map { "\($0.providerID.uuidString)/\($0.modelID)" }).count == budgetOverrides.count else {
             throw ProviderError.invalidFile("重复上下文预算设置")
@@ -105,6 +109,7 @@ nonisolated struct ProviderFile: Codable, Sendable {
         try c.encode(deletedProviders, forKey: .deletedProviders)
         try c.encode(legacySecretPending, forKey: .legacySecretPending); try c.encode(keyOrigins, forKey: .keyOrigins)
         try c.encode(budgetOverrides, forKey: .budgetOverrides)
+        try c.encodeIfPresent(liveVoice, forKey: .liveVoice)
     }
 
     func budgetOverride(_ selection: ModelSelection) -> ContextBudgetOverride? {

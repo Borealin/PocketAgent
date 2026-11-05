@@ -76,11 +76,11 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        UIBackgroundModes: [processing]
+        UIBackgroundModes: [processing, audio]
         BGTaskSchedulerPermittedIdentifiers:
           - '$(PRODUCT_BUNDLE_IDENTIFIER).run.*'
         NSCameraUsageDescription: 拍摄照片并作为图片附加到你发送给助手的消息中。
-        NSMicrophoneUsageDescription: 将你主动录入的语音在本机转成文字并追加到消息草稿。
+        NSMicrophoneUsageDescription: 将你主动录入的语音在本机转成文字并追加到草稿，或在你开始 Live 时发送给所选语音服务进行对话。
         NSLocalNetworkUsageDescription: 通过本机 VPN 连接这台 iPhone 的开发服务，执行你在对话中请求的手机操作。
         NSBonjourServices: [_pocketagent._tcp]
         NSAppTransportSecurity:
