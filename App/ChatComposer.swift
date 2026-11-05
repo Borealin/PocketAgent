@@ -117,6 +117,9 @@ struct ChatComposer: View {
     private var target: InputTarget { chat.inputTarget(session.id) }
     private var remembering: Bool { primary && chat.rememberMode }
     private var placeholder: String {
+        if dictation.input.phase == .recording { return "正在听写，点麦克风停止…" }
+        if dictation.input.phase == .preparing { return "正在准备听写…" }
+        if dictation.input.phase == .finishing { return "正在识别…" }
         if remembering { return "输入要记住的内容，确认后才保存…" }
         return switch target {
         case .steer: "追加到本轮…"
@@ -165,7 +168,18 @@ struct ChatComposer: View {
                     .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("rememberModeHint")
             }
             if !session.draftAttachments.isEmpty || chat.isImporting(session.id) { draftImages }
-            dictationControls
+            if dictation.input.phase == .preview, let generation = dictation.input.generation {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("听写文字未写入草稿").foregroundStyle(.orange)
+                    ScrollView { Text(dictation.input.finalText).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+                        .frame(maxHeight: 80).accessibilityIdentifier("dictationRecovery")
+                    HStack {
+                        Button("重试") { chat.appendDictation(generation: generation) }.disabled(!chat.storageReady)
+                        Button("丢弃") { dictation.cancel() }
+                    }
+                }.font(.caption).buttonStyle(.borderless)
+            }
+            if !dictation.notice.isEmpty { Text(dictation.notice).font(.caption).foregroundStyle(.secondary) }
             HStack(spacing: 8) {
                 // Model first. On a narrow row the provider name goes, then the
                 // project name becomes its icon; neither is clipped mid-word.
@@ -202,13 +216,18 @@ struct ChatComposer: View {
                     .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .focused(inputFocused)
                     .accessibilityIdentifier("chatInput")
-                if remembering {
+                dictationButton
+                if dictation.input.busy {
+                    Button { dictation.cancel() } label: {
+                        Image(systemName: "xmark").frame(width: 36, height: 36)
+                    }.buttonStyle(.plain).accessibilityLabel("取消听写").accessibilityIdentifier("cancelDictation")
+                } else if remembering {
                     Button { chat.beginRemember() } label: {
                         Image(systemName: "bookmark").font(.body.weight(.bold)).frame(width: 36, height: 36)
                             .background(chat.canRemember ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
                             .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain).disabled(!chat.canRemember || dictation.input.busy)
+                    .buttonStyle(.plain).disabled(!chat.canRemember)
                     .accessibilityLabel("保存为记忆…").accessibilityIdentifier("rememberMessage")
                 } else {
                     Button { chat.send() } label: {
@@ -217,7 +236,7 @@ struct ChatComposer: View {
                             .background(chat.canSend ? Color.accentColor : Color.secondary.opacity(0.3), in: Circle())
                             .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain).disabled(!chat.canSend || dictation.input.busy)
+                    .buttonStyle(.plain).disabled(!chat.canSend)
                     .accessibilityLabel(target == .steer ? "追加指令" : (target == .next ? "加入下一件事" : "发送")).accessibilityIdentifier("sendMessage")
                 }
             }
@@ -247,47 +266,21 @@ struct ChatComposer: View {
         }
     }
 
-    private var dictationControls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                if dictation.input.phase == .recording {
-                    Button { dictation.stop() } label: { Label("停止听写", systemImage: "stop.circle.fill") }
-                        .accessibilityIdentifier("stopDictation")
-                    Text("最长 60 秒").foregroundStyle(.secondary)
-                } else {
-                    Button { chat.startDictation() } label: { Label("语音输入", systemImage: "mic") }
-                        .disabled(dictation.input.phase != .idle || !chat.storageReady)
-                        .accessibilityIdentifier("startDictation")
-                    Picker("听写语言", selection: $dictation.localeID) {
-                        Text("普通话").tag("zh-CN")
-                        Text("English").tag("en-US")
-                    }.pickerStyle(.menu).disabled(dictation.input.phase != .idle)
-                }
-                Spacer(minLength: 0)
-                if dictation.input.phase != .idle {
-                    Button("取消") { dictation.cancel() }.accessibilityIdentifier("cancelDictation")
-                }
-            }
-            if let download = dictation.download { ProgressView(download) }
-            else if dictation.input.phase == .preparing { ProgressView("正在准备本机听写…") }
-            else if dictation.input.phase == .finishing { ProgressView("正在完成听写…") }
-            if !dictation.language.isEmpty, dictation.input.phase != .idle {
-                Text(dictation.language).foregroundStyle(.secondary)
-            }
-            if !dictation.input.finalText.isEmpty || !dictation.input.volatileText.isEmpty {
-                ScrollView {
-                    (Text(dictation.input.finalText) + Text(dictation.input.volatileText).foregroundColor(.secondary))
-                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                }.frame(maxHeight: 120).accessibilityIdentifier("dictationPreview")
-            }
-            if dictation.input.phase == .preview, let generation = dictation.input.generation {
-                Button("确认追加到草稿末尾") { chat.appendDictation(generation: generation) }
-                    .disabled(!dictation.input.canAppend || !chat.storageReady)
-                    .accessibilityIdentifier("appendDictation")
-                Text("确认后仍需点击发送。离开会话或取消会丢弃未追加的听写。").foregroundStyle(.secondary)
-            }
-            if !dictation.notice.isEmpty { Text(dictation.notice).foregroundStyle(.secondary) }
-        }.font(.caption).buttonStyle(.borderless)
+    private var dictationButton: some View {
+        Button {
+            if dictation.input.phase == .recording { dictation.stop() }
+            else { inputFocused.wrappedValue = false; chat.startDictation() }
+        } label: {
+            Group {
+                if let download = dictation.download { ProgressView(download).labelsHidden().progressViewStyle(.circular) }
+                else if dictation.input.busy, dictation.input.phase != .recording { ProgressView().controlSize(.small) }
+                else { Image(systemName: dictation.input.phase == .recording ? "stop.circle.fill" : "mic") }
+            }.frame(width: 28, height: 36)
+        }
+        .buttonStyle(.plain)
+        .disabled((dictation.input.phase != .idle && dictation.input.phase != .recording) || !chat.storageReady)
+        .accessibilityLabel(dictation.input.phase == .recording ? "停止听写" : dictation.input.busy ? "正在处理听写" : "语音输入")
+        .accessibilityIdentifier(dictation.input.phase == .recording ? "stopDictation" : "startDictation")
     }
 
     private func modelChip(provider showProvider: Bool) -> some View {

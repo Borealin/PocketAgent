@@ -163,6 +163,7 @@ final class ChatController: ObservableObject {
             }
         }
         owner.onChange = { [weak self] in self?.historyChanged() }
+        dictation.onFinal = { [weak self] in self?.appendDictation(generation: $0) }
         owner.onStorageFailure = { [weak self] error in self?.storageFailed(error) }
         if DeviceSettings.dirtyAfterFirstScriptCall {
             // Local acceptance only: one failing write of an unchanged run event,
@@ -332,7 +333,7 @@ final class ChatController: ObservableObject {
     /// Storage became dirty: stop every active turn at its next boundary.
     /// Already issued effects keep their real or unknown results; nothing resumes on its own.
     private func storageFailed(_ error: StorageCommitError) {
-        dictation.interrupt("历史尚未保存，听写已停止；已确认的预览可在存储恢复后追加。")
+        dictation.interrupt("历史尚未保存，听写已停止；已识别文字保留，恢复后可重试。")
         for job in jobs.values where !job.cancelled {
             job.cancelled = true; job.ready = false
         }

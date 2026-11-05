@@ -18,7 +18,7 @@ nonisolated enum HistoryEditError: LocalizedError, Equatable {
 /// transaction or record so that messages, scope membership and run state
 /// change in the same write.
 nonisolated extension HistoryFile {
-    /// Explicit confirmation appends to the latest draft; no message, pending
+    /// Completed dictation appends to the latest draft; no message, pending
     /// request, memory or attachment is created or replaced.
     mutating func appendDictation(_ input: DictationInput) throws {
         guard input.canAppend, let id = input.sessionID else {

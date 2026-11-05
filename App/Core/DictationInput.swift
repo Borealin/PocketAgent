@@ -1,6 +1,6 @@
 import Foundation
 
-/// Ephemeral, local-only recognition. Only explicit confirmation edits history.
+/// Ephemeral, local-only recognition. Completed input is appended to the draft.
 /// Audio ranges identify revisions; text equality cannot deduplicate speech
 /// because a person may deliberately repeat the same words.
 nonisolated struct DictationInput: Equatable, Sendable {
@@ -26,7 +26,7 @@ nonisolated struct DictationInput: Equatable, Sendable {
 
     @discardableResult
     mutating func transition(to phase: Phase, generation: UUID) -> Bool {
-        guard self.generation == generation else { return false }
+        guard self.generation == generation, self.phase != phase else { return false }
         self.phase = phase
         if phase == .preview { volatileText = "" }
         return true

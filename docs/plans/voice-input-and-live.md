@@ -1,87 +1,87 @@
 # Voice input and Live
 
-Implement two separate PRs in order. The base for voice input is the published
-0.4.0 / 19.1.7 revision `7f09cef9e9bce4befcf936a9d092ec99a6ff9524`.
-The original Duo worktree, version/feed, signing and device state are outside
-this change.
+Implement local dictation in PR 14, then Live in a separate PR. The dictation
+base is published 0.4.0 / 19.1.7 at
+`7f09cef9e9bce4befcf936a9d092ec99a6ff9524`. The first complete implementation
+baseline remains `166a77e` (513 handwritten non-test changed lines). Original
+Duo worktree, feed/version, signing and device state are outside this change.
 
 ## Phase 1: Local dictation
 
-Click the microphone, stop, inspect a separate preview, then explicitly append
-confirmed text to the original conversation's latest draft. Keyboard edits and
-attachments survive; only the ordinary send/steer/next/remember controls can
-submit or save that draft. Capture/finishing disable those submission buttons.
-MVP appends at the end (with a newline when needed); selection-aware insertion
-and press-and-hold gestures are deferred.
+Tap the microphone in the input row to dismiss the keyboard and start. Tap its
+stop icon to finish; finalized text automatically appends once to the original
+conversation's latest editable draft. Existing keyboard text and attachments
+survive. Sending, steering, next requests and memory saving still require their
+ordinary manual controls. Preparing/finishing use a small spinner; the send
+position becomes Cancel while input is busy. Cancel and switching conversation
+invalidate the generation and append nothing. Language selection lives in
+Settings, persisted in one local UserDefaults preference.
 
-Use iOS 26 SpeechAnalyzer with SpeechTranscriber when hardware and the selected
-locale support it. Otherwise try DictationTranscriber's own supported locales;
-it is an on-device module, not SFSpeechRecognizer's server-backed fallback.
-Prepare system-managed model assets before capture. Offer Mandarin and English,
-display the actual matched locale, and explain keyboard/system-dictation
-fallback when microphone access, assets or local recognition are unavailable.
-No legacy Speech server authorization, cloud request or paid API is added.
+Recognition remains separate from the draft while recording. Audio-range
+revisions replace volatile guesses, preserving deliberately repeated final
+words. The existing ready phase is internal: a duplicate ready transition is
+rejected, so timeout and late finalization cannot dispatch two automatic
+appends. The onFinal callback uses the existing HistoryOwner append transaction
+and draft edit revision; no new draft writer, delivery ledger or history format
+is introduced. Success consumes the input. Only a write failure exposes
+copyable finalized text with Retry and Discard. Empty recognition returns to
+idle with a short notice. Interruption appends only already recognized final
+text and reports that the remainder was not retained.
 
-Recognition is ephemeral. A session ID and generation reject stale starts and
-results. Volatile text replaces the current guess; finalized audio ranges are
-accepted once, preserving deliberately repeated words. Only explicit
-confirmation writes through HistoryOwner, consumes the preview after success,
-and increments the existing draft edit revision. A failed history write keeps
-the latest draft and preview. A storage-failure notification stops audio and
-retains finalized preview text while rejecting further recognition results.
+Use iOS 26 SpeechAnalyzer with runtime hardware/locale/asset checks. Prefer
+SpeechTranscriber, then DictationTranscriber's on-device supported locale.
+Prepare system-managed assets and obtain microphone permission before capture;
+fail explicitly to keyboard/system dictation when unavailable. Permission-alert
+inactive scenes preserve preparation. Entering the background cancels only
+preparation or active capture; explicitly stopped input may finish within the
+existing 10-second limit and append to its original session. Failed-write text
+also survives backgrounding. There is no new background task or automatic mic
+resumption. Audio device addition/removal, interruption and media-services loss
+stop capture; setup category/configuration changes do not.
 
-Cancel, conversation replacement/switch/deletion, entering the background and
-audio interruption/device route changes stop capture; microphone capture never resumes
-automatically. Explicit cancel/session/background transitions discard the
-unconfirmed preview. Other audio failures retain already finalized text. No
-audio, recognition preview or credential enters history, logs, export or sync.
-The bounded PCM stream holds eight owned buffers; overflow fails cleanly.
-Capture stops after 60 seconds; finalization waits at most 10 seconds before
-offering only already finalized text. Audio stays in memory and is never saved.
-Temporary inactive scenes, such as the first microphone permission alert, do
-not cancel a pending start or preview. Route-change reasons for adding/removing
-devices stop capture; category/configuration changes from setup do not. Storage
-errors do not create dictation notices when no generation exists. Successful
-history identity changes provide the session cancellation boundary, so failed
-clear/recovery transactions do not discard the preview in advance.
+PCM stays in an eight-buffer bounded memory stream; overflow fails cleanly.
+Capture ends after 60 seconds. Audio and temporary recognition are never saved,
+logged, exported or synchronized. Only draft text is written locally; ordinary
+message sync applies after the user explicitly sends it.
 
-Implemented: pure preview/history append logic, native capture/controller,
-composer controls, lifecycle integration and microphone purpose string. Three
-Core tests pass for result revision/repetition, stale generation rejection, and
-explicit latest-draft append with failed-write retention. The native controller
-and pure input compile in Swift 6 strict concurrency against the installed iOS
-SDK with an iOS 26 deployment target. These tests are not App/device evidence.
-Independent review, complete App build/IPA inspection and remote CI are still
-required; exact-device microphone/locale/assets/route/permission exercises have
-not been run. No recording or device operation was authorized for this work.
+The independent preview/confirmation interaction was rejected by the user.
+Tap-toggle avoids first-use permission/model preparation breaking a held
+finger gesture; press-and-hold is deferred. Streaming revisions directly into
+the draft would complicate concurrent typing and persistence, so only completed
+input is appended. No caret/selection infrastructure or microphone long-press
+menu is added.
 
-## Phase 2: Live — pending
+Validation: three Core regressions pass, including the duplicate-ready guard;
+strict Swift 6 concurrency typechecking passes with an iOS 26 deployment target.
+Full App/IPA/CI checks must be repeated for this changed implementation. The
+previous candidate produced Mandarin text during user operation, but its UX was
+not accepted. No device acceptance of the replacement flow is claimed. Route,
+asset-download, permission, background finishing and storage-retry scenarios
+still need exact-device exercise. Logs/artifacts remain outside Git.
 
-Start after Phase 1 review as a separate PR. Reuse only the small process-wide
-microphone lease, permission and audio-session ownership boundary. Live's
-network session, playback, barge-in and tool dispatch remain separate from
-dictation preview/draft insertion. No Live backend, credential, transport or
-automatic tool dispatch is prebuilt in Phase 1. Provider capability/credential
-origin validation, frozen accepted-turn configuration and the serial phone
-action queue remain required for that later work.
+## Phase 2: Live — separate PR
 
-## API references and decisions
+Reuse the small process-wide microphone lease; keep Live transport, playback,
+barge-in and tool dispatch separate from dictation. This dictation branch adds
+no Live backend, credential or automatic tool dispatch. The later PR must retain
+provider-origin validation, frozen accepted-turn configuration, explicit task
+confirmation and the serial phone action queue.
 
-- [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber)
-  and [DictationTranscriber](https://developer.apple.com/documentation/speech/dictationtranscriber):
-  runtime hardware/locale checks and a local fallback, rather than assuming all
-  iOS 26 devices or system keyboard languages have the new model.
-- [AssetInventory](https://developer.apple.com/documentation/speech/assetinventory):
-  system-managed assets/downloads; no bundled speech model or recording file.
+## References
+
+- [ChatGPT dictation](https://learn.chatgpt.com/docs/prompting#use-voice-dictation)
+  documents editable composer text before sending; it does not establish every
+  mobile button detail. [Claude mobile dictation](https://support.claude.com/en/articles/10065434-use-dictation-on-claude-mobile)
+  documents microphone input, manual sending and Settings language selection.
+  These support a draft-input flow, not a second normal confirmation surface.
+- [Apple dictation](https://support.apple.com/guide/iphone/dictate-text-iph2c0651d2/ios),
+  [SpeechTranscriber](https://developer.apple.com/documentation/speech/speechtranscriber),
+  [DictationTranscriber](https://developer.apple.com/documentation/speech/dictationtranscriber)
+  and [AssetInventory](https://developer.apple.com/documentation/speech/assetinventory)
+  distinguish ordinary text input from runtime model/device availability.
 - [Speech permission](https://developer.apple.com/documentation/speech/asking-permission-to-use-speech-recognition)
   and [microphone permission](https://developer.apple.com/documentation/avfaudio/avaudioapplication/requestrecordpermission(completionhandler:)):
-  new local modules require microphone access for capture, not legacy server
-  recognition authorization.
+  local modules need microphone access, not legacy server-recognition permission.
 - [start(inputSequence:)](https://developer.apple.com/documentation/speech/speechanalyzer/start(inputsequence:))
-  returns immediately; [finalizeAndFinishThroughEndOfInput](https://developer.apple.com/documentation/speech/speechanalyzer/finalizeandfinishthroughendofinput())
-  drains the ended input and final results. Cancellation uses cancelAndFinishNow.
-
-Unknown until device exercise: model availability/download behavior on each
-reference phone and OS, Mandarin/English mixed-term accuracy, Bluetooth routing,
-and system-interruption behavior. No hardware list or quality claim is inferred
-from the SDK build or previous PocketAgent device acceptance.
+  returns immediately; [finalization](https://developer.apple.com/documentation/speech/speechanalyzer/finalizeandfinishthroughendofinput())
+  drains input and final results before the automatic draft append.

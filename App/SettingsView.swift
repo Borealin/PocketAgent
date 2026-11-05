@@ -35,6 +35,7 @@ struct SettingsView: View {
     @State private var initializeSyncFolder = false
     @State private var pickingDefault = false
     @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
+    @AppStorage(DictationController.localeStorageKey) private var dictationLocale = "zh-CN"
 
     var body: some View {
         NavigationStack {
@@ -53,6 +54,12 @@ struct SettingsView: View {
                     Button { pickingDefault = true } label: {
                         LabeledContent("新会话默认模型", value: providers.describe(providers.defaultSelection).label)
                     }.accessibilityIdentifier("defaultModel")
+                }
+                Section("语音输入") {
+                    Picker("听写语言", selection: $dictationLocale) {
+                        Text("普通话").tag("zh-CN")
+                        Text("English").tag("en-US")
+                    }.accessibilityIdentifier("dictationLanguage")
                 }
                 RulesSettingsSection(store: workspaces)
                 ScriptEnvironmentSection()

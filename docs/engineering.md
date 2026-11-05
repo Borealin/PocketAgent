@@ -3,24 +3,27 @@
 ## Requirements and scope
 
 The [voice input and Live plan](plans/voice-input-and-live.md) separates local
-dictation from the later Live PR. Dictation uses iOS 26 SpeechAnalyzer with
-runtime hardware/locale/asset checks and local DictationTranscriber fallback.
-The microphone starts only after explicit permission and preparation. Stop
-produces a separate preview; explicit confirmation appends finalized text once
-to the original conversation's latest draft through HistoryOwner, preserving
-keyboard edits and attachments. It never sends, steers, queues or saves memory.
-Cancel, session changes, entering the background and audio interruptions stop
-capture without automatic resumption. Raw audio is bounded in memory, never
-written/logged/exported/synchronized; preview state is local and transient.
-Storage failure stops capture while retaining finalized preview for retry or
-copying. Core regression and strict iOS 26 API/concurrency typechecks pass;
-complete App/IPA/CI and exact-device speech acceptance remain pending. Live,
-cloud transcription, caret insertion and press-and-hold are not implemented.
-Transient inactive scenes (including the microphone permission alert) preserve
-the pending start/preview. Route notifications stop input for device removal or
-addition, not the app's own category/configuration changes. Only an existing
-dictation generation receives a storage-failure notice. History identity changes
-cancel after a successful transaction; failed clear operations keep the preview.
+dictation from the later Live PR. Tap the input-row microphone to start, then
+stop to automatically append finalized text once to the original conversation's
+latest draft through HistoryOwner. Existing text/images survive; sending,
+steering, next requests and memory saving remain manual. There is no normal
+preview/confirmation surface. Preparing/finishing show a spinner, with Cancel
+at the send position; language is a local preference in Settings. Only failed
+writes expose copyable recognized text and retry/discard. A ready-phase gate
+rejects duplicate finalization without another writer or delivery ledger.
+
+Dictation uses iOS 26 SpeechAnalyzer with runtime hardware/locale/assets checks
+and local DictationTranscriber fallback. Permission-alert inactive scenes do
+not cancel input. Backgrounding cancels preparation/recording; stopped input
+may complete within its existing limit, and failed-write text remains available.
+Cancel/session changes invalidate input without appending. Other interruptions
+append only already recognized final text with a short partial-result notice.
+Device route changes stop capture; setup category/configuration changes do not.
+Audio is bounded in memory, never written/logged/exported/synchronized. Three
+Core regressions and strict iOS 26 API/concurrency typechecks pass; full App/IPA/CI
+checks and exact-device acceptance must be repeated for this simpler UX. The old
+candidate's microphone/Mandarin output does not accept the replacement flow.
+Live, cloud transcription, caret insertion and press-and-hold are separate scope.
 
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.

@@ -15,11 +15,11 @@ import Speech
 }
 
 @MainActor final class DictationController: ObservableObject {
+    static let localeStorageKey = "dictationLocale"
     @Published private(set) var input = DictationInput()
     @Published private(set) var notice = ""
-    @Published private(set) var language = ""
     @Published private(set) var download: Progress?
-    @Published var localeID = "zh-CN"
+    var onFinal: ((UUID) -> Void)?
     private var engine: AVAudioEngine?
     private var continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
     private var analyzer: SpeechAnalyzer?
@@ -37,7 +37,7 @@ import Speech
             input.cancel(); notice = "麦克风正被其他语音功能使用。"; return
         }
         lease = token
-        notice = ""; language = ""
+        notice = ""
         preparation = Task { [weak self] in
             guard let self else { return }
             do {
@@ -45,16 +45,14 @@ import Speech
                     throw DictationFailure.permission
                 }
                 try check(token)
-                let requested = Locale(identifier: localeID)
+                let requested = Locale(identifier: UserDefaults.standard.string(forKey: Self.localeStorageKey) ?? "zh-CN")
                 if SpeechTranscriber.isAvailable,
                    let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requested) {
                     try check(token)
-                    language = locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
                     let module = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
                     try await prepare(module, token: token) { String($0.text.characters) }
                 } else if let locale = await DictationTranscriber.supportedLocale(equivalentTo: requested) {
                     try check(token)
-                    language = locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
                     let module = DictationTranscriber(locale: locale, preset: .progressiveShortDictation)
                     try await prepare(module, token: token) { String($0.text.characters) }
                 } else { throw DictationFailure.unavailable }
@@ -144,7 +142,7 @@ import Speech
                 try await analyzer.finalizeAndFinishThroughEndOfInput()
                 await results?.value
                 guard let self, self.input.generation == token else { return }
-                self.preview(token)
+                self.complete(token)
             } catch {
                 guard let self, !Task.isCancelled, self.input.generation == token, self.input.phase == .finishing else { return }
                 self.fail("听写结束失败；请使用键盘或系统键盘听写。")
@@ -154,27 +152,39 @@ import Speech
             do { try await Task.sleep(for: .seconds(10)) } catch { return }
             guard let self, self.input.generation == token else { return }
             self.notice = "听写结束超时，仅保留已确认的文字。"
-            self.preview(token)
+            self.complete(token)
         }
     }
 
-    private func preview(_ token: UUID) {
-        input.transition(to: .preview, generation: token)
+    private func complete(_ token: UUID) {
+        guard input.transition(to: .preview, generation: token) else { return }
         cleanUp()
-        if !input.canAppend, notice.isEmpty { notice = "没有识别到文字，请重新开始或使用键盘输入。" }
+        let message = notice
+        if input.canAppend {
+            onFinal?(token)
+            if input.phase == .idle { notice = message }
+        } else {
+            cancel()
+            notice = message.isEmpty ? "没有识别到文字，请重试。" : message
+        }
     }
 
     func cancel() {
         input.cancel() // Invalidate before any asynchronous cleanup/callback.
         cleanUp()
-        notice = ""; language = ""
+        notice = ""
+    }
+
+    func enteredBackground() {
+        if input.phase == .preparing || input.phase == .recording { cancel() }
     }
 
     func interrupt(_ message: String) {
         guard input.generation != nil else { return }
+        if input.phase == .preview { notice = message; return }
         if let token = input.generation, !input.finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            notice = message
-            preview(token) // Stops capture and rejects later results; preserves confirmed text.
+            notice = message + " 仅保留已识别的部分。"
+            complete(token) // Stop input, reject later results and append the finalized portion.
         } else {
             cancel()
             notice = message

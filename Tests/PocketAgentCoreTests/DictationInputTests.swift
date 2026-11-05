@@ -17,6 +17,8 @@ struct DictationInputTests {
         input.receive("未确认", start: 2, end: 3, final: false, generation: token)
         input.transition(to: .preview, generation: token)
         #expect(input.finalText == "你好你好" && input.volatileText.isEmpty)
+        let repeatedReady = input.transition(to: .preview, generation: token)
+        #expect(!repeatedReady) // Timeout and a late finalizer cannot trigger two appends.
     }
 
     @Test func cancellationAndNewSessionRejectLateResults() {
@@ -34,7 +36,7 @@ struct DictationInputTests {
         #expect(input.finalText.isEmpty && input.sessionID == session)
     }
 
-    @Test @MainActor func confirmationUsesLatestDraftAndFailedWriteKeepsPreview() throws {
+    @Test @MainActor func completedInputUsesLatestDraftAndFailedWriteKeepsText() throws {
         var file = HistoryFile.initial(selection: nil)
         let id = try #require(file.primary?.id)
         var input = DictationInput()
