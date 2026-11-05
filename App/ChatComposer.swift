@@ -101,6 +101,7 @@ struct ExecutionStrip: View {
 struct ChatComposer: View {
     @ObservedObject var chat: ChatController
     @ObservedObject var dictation: DictationController
+    @ObservedObject var voice: LiveVoiceController
     @ObservedObject var providers: ProviderStore
     @ObservedObject var workspaces: WorkspaceStore
     let session: ChatSession
@@ -111,6 +112,7 @@ struct ChatComposer: View {
     @State private var showPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showCamera = false
+    @State private var showLiveVoice = false
 
     private var running: Bool { chat.isRunning(session.id) }
     private var primary: Bool { chat.isPrimary(session.id) }
@@ -222,6 +224,13 @@ struct ChatComposer: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 dictationButton
+                Button { inputFocused.wrappedValue = false; showLiveVoice = true } label: {
+                    Image(systemName: voice.state.running ? "waveform.circle.fill" : "waveform")
+                        .frame(width: 28, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(voice.state.running ? "Live 对话（进行中）" : "Live 对话")
+                .accessibilityIdentifier("openLiveVoice")
                 if dictation.input.busy {
                     Button { dictation.cancel() } label: {
                         Image(systemName: "xmark").frame(width: 36, height: 36)
@@ -268,6 +277,9 @@ struct ChatComposer: View {
                 if let data = image.jpegData(compressionQuality: 0.92) { chat.importImages([data], into: session.id) }
                 else { chat.reportImportFailure(AttachmentError.unreadableImage.localizedDescription) }
             }.ignoresSafeArea()
+        }
+        .sheet(isPresented: $showLiveVoice) {
+            LiveVoiceView(chat: chat, providers: providers, voice: voice, sessionID: session.id)
         }
     }
 

@@ -73,6 +73,7 @@ final class ChatController: ObservableObject {
     let workspaces: WorkspaceStore
     let owner: HistoryOwner
     let dictation = DictationController()
+    let liveVoice = LiveVoiceController()
     let storage: HistoryStorage
     /// The production writer (nil in the read-only viewer); held only for
     /// the local acceptance fault injection.
@@ -333,6 +334,7 @@ final class ChatController: ObservableObject {
     /// Storage became dirty: stop every active turn at its next boundary.
     /// Already issued effects keep their real or unknown results; nothing resumes on its own.
     private func storageFailed(_ error: StorageCommitError) {
+        liveVoice.end("历史尚未保存，Live 已结束；手机执行按原存储门禁停止。")
         dictation.interrupt("历史尚未保存，听写已停止；已识别文字保留，恢复后可重试。")
         for job in jobs.values where !job.cancelled {
             job.cancelled = true; job.ready = false
@@ -353,6 +355,7 @@ final class ChatController: ObservableObject {
     private func historyChanged() {
         revision &+= 1
         if let id = dictation.input.sessionID, id != selectedID || owner.file.session(id) == nil { dictation.cancel() }
+        if let id = liveVoice.state.sessionID, id != selectedID || owner.file.session(id) == nil { liveVoice.end("已离开原会话，语音结束。") }
     }
 
     func startDictation() {

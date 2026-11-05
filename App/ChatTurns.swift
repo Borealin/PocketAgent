@@ -14,6 +14,8 @@ struct FrozenTurn {
 enum JobOrigin {
     /// Ordinary send: a never-started turn may give its draft back.
     case send(DraftSnapshot)
+    /// Separately confirmed text never consumes/restores the keyboard draft.
+    case confirmedVoice
     /// Activated pending-next request: failure before the permit holds it.
     case pending
     /// Explicit same-ID continuation of an unauthorized promoted request.
@@ -73,7 +75,7 @@ final class ChatJob {
     var referencedAttachmentIDs: Set<UUID> {
         Set(promptAttachments.map(\.id) + steerLeases.values.joined().map(\.id))
     }
-    var isPendingOrigin: Bool { if case .send = origin { false } else { true } }
+    var isPendingOrigin: Bool { switch origin { case .pending, .resume: true; case .send, .confirmedVoice: false } }
 }
 
 extension ChatController {
@@ -128,6 +130,36 @@ extension ChatController {
         }
     }
 
+    /// Explicit card input, pinned to its original conversation. It cannot
+    /// borrow photos, mutate the keyboard draft or silently steer an active turn.
+    func acceptLiveTask(text: String, sessionID: UUID) -> UUID? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard storageReady, foreground, let session = file.session(sessionID), !text.isEmpty,
+              !isImporting(sessionID), !dictation.input.busy else { return nil }
+        guard MemoryCommand.parse(text) == nil, MemoryIntent.parse(text) == nil else {
+            notice = "记忆操作请使用原聊天的记住/记忆入口确认；Live 不会绕过记忆确认。"; return nil
+        }
+        if isPrimary(sessionID) {
+            guard assistant.primaryNotice == nil, assistant.pendingNext == nil else {
+                notice = "请先处理助理中待确认或待继续的请求。"; return nil
+            }
+            if jobs[sessionID] != nil {
+                return acceptNext(session: session, text: text, images: [], textOnly: false, consumeDraft: false)
+            }
+        } else if jobs[sessionID] != nil {
+            notice = "此任务正在执行。请到原聊天显式追加指令，或结束后确认新任务。"; return nil
+        }
+        return acceptSend(session: session, text: text, images: [], textOnly: false, consumeDraft: false)
+    }
+
+    func liveResult(for prompt: UUID, in sessionID: UUID) -> String? {
+        guard storageReady else { return nil }
+        return file.session(sessionID)?.messages.last(where: {
+            $0.role == .assistant && $0.toolCalls.isEmpty && !$0.text.isEmpty &&
+            file.assistant.scopeIndex.root(of: $0.id) == prompt
+        })?.text
+    }
+
     /// Captures provider, endpoint, format, model, capability, key, budget,
     /// project, backend and clipboard policy now. Nil after reporting why not.
     func freeze(selection: ModelSelection?, workspaceID: UUID?, sessionID: UUID, text: String,
@@ -176,10 +208,11 @@ extension ChatController {
         drainPhone()
     }
 
-    private func acceptSend(session: ChatSession, text: String, images: [ChatAttachment], textOnly: Bool) {
-        if isPrimary(session.id), assistant.pendingNext != nil { notice = PendingError.alreadyPending.localizedDescription; return }
+    @discardableResult
+    private func acceptSend(session: ChatSession, text: String, images: [ChatAttachment], textOnly: Bool, consumeDraft: Bool = true) -> UUID? {
+        if isPrimary(session.id), assistant.pendingNext != nil { notice = PendingError.alreadyPending.localizedDescription; return nil }
         guard let frozen = freeze(selection: session.selection, workspaceID: session.workspaceID, sessionID: session.id,
-                                  text: text, images: images, references: referenceDrafts[session.id] ?? []) else { return }
+                                  text: text, images: images, references: consumeDraft ? (referenceDrafts[session.id] ?? []) : []) else { return nil }
         let message = AgentTranscriptMessage(role: .user, text: text)
         let draft = DraftSnapshot(text: session.draft, attachments: session.draftAttachments,
                                   revision: draftRevisions[session.id, default: 0])
@@ -188,27 +221,32 @@ extension ChatController {
         // published only after it succeeds. A failed write keeps the draft.
         let ok = transact { file in
             try file.acceptRoot(message, attachments: images, in: session.id, scope: WorkScope(workspaceID: frozen.workspace?.id))
+            try file.settleAcceptedDraft(in: session.id, consume: consumeDraft, keepImages: textOnly)
             try file.editSession(session.id) {
-                $0.draft = ""; $0.detail = ""; $0.state = .queued
-                if !textOnly { $0.draftAttachments = [] }
+                $0.detail = ""; $0.state = .queued
                 if $0.title == ChatSession.defaultTitle { $0.title = text.isEmpty ? "图片" : String(text.prefix(20)) }
             }
         }
-        guard ok, let job = makeJob(session: session.id, prompt: message, attachments: images, origin: .send(draft),
-                                    frozen: frozen, ordinal: takeOrdinal()) else { return }
-        referenceDrafts[session.id] = nil
-        enqueue(job)
+        guard ok else { return nil }
+        if consumeDraft { referenceDrafts[session.id] = nil }
+        if let job = makeJob(session: session.id, prompt: message, attachments: images,
+                             origin: consumeDraft ? .send(draft) : .confirmedVoice, frozen: frozen, ordinal: takeOrdinal()) {
+            enqueue(job)
+        }
+        // The root is already accepted durably even if opening its runtime gate failed.
+        return message.id
     }
 
     // MARK: Pending next (primary line)
 
     /// While the primary line works, a new request waits as the single
     /// pending next. Its original text is stored detached from history.
-    private func acceptNext(session: ChatSession, text: String, images: [ChatAttachment], textOnly: Bool) {
-        guard assistant.pendingNext == nil else { notice = PendingError.alreadyPending.localizedDescription; return }
-        guard let selection = session.selection else { notice = ProviderError.noSelection.localizedDescription; return }
+    @discardableResult
+    private func acceptNext(session: ChatSession, text: String, images: [ChatAttachment], textOnly: Bool, consumeDraft: Bool = true) -> UUID? {
+        guard assistant.pendingNext == nil else { notice = PendingError.alreadyPending.localizedDescription; return nil }
+        guard let selection = session.selection else { notice = ProviderError.noSelection.localizedDescription; return nil }
         guard let frozen = freeze(selection: selection, workspaceID: session.workspaceID, sessionID: session.id,
-                                  text: text, images: images, references: referenceDrafts[session.id] ?? []) else { return }
+                                  text: text, images: images, references: consumeDraft ? (referenceDrafts[session.id] ?? []) : []) else { return nil }
         let message = AgentTranscriptMessage(role: .user, text: text)
         let pending = PendingNext(sessionID: session.id, prompt: .detached(message: message, attachments: images),
                                   selection: selection, workspaceID: frozen.workspace?.id, backend: frozen.backend,
@@ -217,13 +255,14 @@ extension ChatController {
         persist()
         let ok = transact { file in
             try file.acceptPending(pending)
-            try file.editSession(session.id) { $0.draft = ""; if !textOnly { $0.draftAttachments = [] } }
+            try file.settleAcceptedDraft(in: session.id, consume: consumeDraft, keepImages: textOnly)
         }
-        guard ok else { return }
-        referenceDrafts[session.id] = nil
+        guard ok else { return nil }
+        if consumeDraft { referenceDrafts[session.id] = nil }
         pendingFrozen = frozen
         pendingStopEpoch = stopEpoch
         advancePendingIfReady()
+        return message.id
     }
 
     /// Activates the pending request when the primary line is free and the
@@ -638,6 +677,8 @@ extension ChatController {
         jobs[job.sessionID] = nil; live[job.sessionID] = nil
         owner.barrier.close(epoch: job.epoch)
         owner.record { try $0.editSession(job.sessionID) { $0.state = state; $0.detail = String(detail.prefix(600)) } }
+        liveVoice.taskFinished(job.prompt.id, completed: state == .completed, cancelled: state == .interrupted,
+                               answer: liveResult(for: job.prompt.id, in: job.sessionID))
         cleanupAttachments()
         // After the caller's settlement: drain, decide pending advancement,
         // and only then let idle observers (deferred sync) run.

@@ -71,19 +71,92 @@ prove single-turn deduplication. No new device exercise is claimed. Route,
 asset-download, permission, background finishing and storage-retry scenarios
 still need exact-device exercise. Logs/artifacts remain outside Git.
 
-## Phase 2: Live — separate PR
+## Phase 2: Live
 
-Reuse the small process-wide microphone lease; keep Live transport, playback,
-barge-in and tool dispatch separate from dictation. This dictation branch adds
-no Live backend, credential or automatic tool dispatch. The later PR must retain
-provider-origin validation, frozen accepted-turn configuration, explicit task
-confirmation and the serial phone action queue.
+Implemented as a separate stacked change over the reviewed local-dictation
+head `70aaa818208f965bbf9f905490a1c064a3f7b3e9`. The Live baseline remains
+`429a775` (914 handwritten non-test changed lines); rebasing does not reset it. One native WebSocket
+connects to GPT-Live (`gpt-live-1`), with client delegation and explicit
+`store: false`. Start freezes the selected provider, full HTTPS Live endpoint,
+local key and background choice. HTTPS is changed to WSS only after checking
+the provider's existing local credential-origin binding. No automatic provider,
+model, endpoint, protocol or credential fallback exists. The local optional
+ProviderFile setting remains version 1 and is excluded from portable sync;
+provider sync preserves it without granting a new key origin.
+The Start UI explains that audio, captions and selected phone-task results go
+to this Live provider for conversation/playback, which can differ from the task
+model's provider. Displayed pricing is the OpenAI standard reference; gateways
+use their provider's actual rates.
+
+Live shares only MicrophoneOwnership with dictation. One voiceChat audio engine
+with VoiceProcessing captures and plays mono PCM16LE at 24 kHz. The audio tap
+and single WebSocket writer each hold at most 96 chunks/packets. With the
+requested 1,024-frame tap at a 48 kHz hardware rate, each nominal capture chunk
+covers about 21 ms, so each queue can accommodate roughly two seconds of
+normal scheduling/network jitter. Actual callback sizes/rates and network
+behavior remain unmeasured; this is not a timing guarantee. Playback has a
+60-second PCM memory ceiling (about 5.8 MB as Float), not a target latency or
+an assumption that the server paces output in real time. Overflow still fails
+cleanly. Audio packets bypass published logical state, and playback status only
+publishes Boolean changes; packet delivery no longer redraws the chat UI.
+Protocol/capacity failures retain their own sanitized cause instead of being
+reported as connection failures. Audio is uploaded
+only after session.started. Muting immediately invalidates old captured and
+unsent mic packets before queuing the server control; an already submitted
+network frame cannot be retracted. The mic mute retains the audio session and
+billing; End stops local audio immediately, sends session.close and drains up
+to fifteen seconds for session.closed. No final event means final usage is
+unconfirmed. Usage snapshots replace, never sum. There is no automatic
+reconnect, retry or phone-action replay. Protocol/provider error prose and raw
+JSON/audio/transcripts are not logged.
+
+Input/output captions are continuous, transient and bounded. There is no
+utterance-complete event. A client delegation creates one editable task card,
+not an action. Later captions never silently alter the card. An unaccepted card remains
+copyable after an error/end, with acceptance disabled; a new session never
+automatically adopts or submits it. Confirm sends
+only its visible text, once, to the original conversation through the existing
+history/freeze/queue path with consumeDraft=false: keyboard text, photos and
+reference chips survive. The primary line queues a next request when busy;
+Live never implicitly steers or rewrites the running task. A busy independent
+task refuses this confirmation and points to the ordinary chat's explicit
+steering control. Memory-like requests are refused in Live and use the existing
+memory confirmation entry. No second history writer or voice ledger exists.
+Accepted tasks and AgentKit results keep their original durable messages;
+spoken paraphrases are not appended as extra assistant messages.
+
+An explicit, default-off option allows a user-started call to continue after
+switching apps. Only an already started call may retain real playAndRecord
+capture/playback under the audio background mode; preparing/connecting calls
+are invalidated in the background regardless of that option. Inactive permission
+alerts do not terminate preparation. Without the option, background ends Live.
+Audio interruption, device route changes and media reset end audio without
+automatic recovery. There is no silent playback loop or background keepalive
+workaround. End voice and Stop phone execution remain separate controls; the
+latter uses the existing runtime cancellation and terminal drain. Task-complete
+or stopped speech is sent only after the host's terminal event.
+
+Three Core regressions pass for origin/start admission, one-shot confirmed
+tasks with draft/photo retention, and mute/close/late-event/usage behavior.
+The native controller and view pass Swift 6 complete-concurrency typechecking
+with an iOS 26 target and thin external host stubs; that is not whole-App proof.
+Full App build, IPA inspection and independent review belong to the integrator. No real Live API,
+key, recording or device was used for implementation. Account entitlement,
+network handshake, acoustic echo cancellation, natural barge-in, Bluetooth,
+background/lock-screen continuity, audio/task coexistence and final billing
+remain exact-account/device acceptance gates. Natural interruption is model
+behavior, not a deterministic local VAD guarantee; End voice is the immediate
+local playback-stop control.
 
 ## References
 
 - [Native symbol effects](https://developer.apple.com/documentation/swiftui/view/symboleffect(_:options:isactive:))
   and the Reduce Motion environment provide the recording indicator without
   timers, measured levels or an animation lifecycle.
+- [GPT-Live primary WebSocket](https://developers.openai.com/api/reference/resources/live/primary-websocket)
+  and [Live session lifecycle](https://developers.openai.com/api/docs/guides/live-conversations):
+  continuous captions and cumulative usage without Realtime VAD/commit events.
+
 - [ChatGPT dictation](https://learn.chatgpt.com/docs/prompting#use-voice-dictation)
   documents editable composer text before sending; it does not establish every
   mobile button detail. [Claude mobile dictation](https://support.claude.com/en/articles/10065434-use-dictation-on-claude-mobile)

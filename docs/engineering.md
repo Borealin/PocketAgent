@@ -30,7 +30,43 @@ checks and exact-device acceptance must be repeated for this UI. The user
 confirmed direct draft append without confirmation in 20.1.3; that observation
 does not validate the new streaming display/animation or prove single-turn
 deduplication. No new device exercise was performed for this UI change.
-Live, cloud transcription, caret insertion and press-and-hold are separate scope.
+Cloud transcription, caret insertion and press-and-hold are separate scope.
+
+The separate Live change adds a user-started GPT-Live WebSocket session using
+personal BYOK, frozen HTTPS-to-WSS origin checks and the existing microphone
+lease. One voiceChat engine with VoiceProcessing owns bounded 24 kHz mono
+PCM capture/playback; one bounded writer and one receive loop handle Live's
+session protocol. Capture/outgoing queues each allow 96 chunks/packets (roughly
+two seconds at the nominal 1,024-frame / 48 kHz tap, not a measured guarantee).
+Playback is limited to 60 seconds of PCM memory, without assuming real-time
+server pacing. Audio packets do not publish logical UI state; playing only
+publishes on a Boolean transition. Protocol/capacity errors keep their actual
+sanitized classification. The Start UI discloses audio/caption/task-result
+routing to the selected Live provider and labels OpenAI pricing as a reference.
+No audio uploads before session.started. Mute invalidates
+unsent audio immediately; End releases local audio and drains session.closed
+for final cumulative usage, otherwise reporting finalization unconfirmed.
+ProviderFile's optional Live selection/URL/background choice is local only;
+portable provider sync neither exports it nor grants credentials to new origins.
+
+Client delegation only opens an editable confirmation card. Confirm sends its
+visible text once through the original conversation's history/freeze/queue,
+without consuming keyboard drafts, photos or references. A busy primary line
+queues the next request; a busy independent task is refused. Live does not
+implicitly steer, save memory or dispatch phone tools. Use ordinary chat for
+explicit steering and memory confirmation. Full voice captions remain ephemeral;
+only accepted tasks and the original AgentKit events become history. Spoken
+progress/results follow verified host state, without duplicate assistant rows.
+
+An explicit default-off option permits an already started real call to continue
+in other apps using the audio background mode. Preparation/connection always
+ends on background, while inactive permission alerts remain allowed. Interruption,
+headset/device changes or media reset end audio without auto-resume. There is no
+silent-loop keepalive. End voice does not stop the accepted phone task; Stop
+phone uses the existing effect gate, runtime cancellation and terminal drain.
+No reconnect, provider fallback or action replay is added. Full App/IPA/review
+checks and real-account/device audio, Bluetooth, background, lock-screen,
+barge-in and billing acceptance are still required for this Live change.
 
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.

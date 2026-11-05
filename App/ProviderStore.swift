@@ -54,6 +54,7 @@ final class ProviderStore: ObservableObject {
     private var legacySecretPending = false
     /// Local context budget settings; never synchronized.
     @Published private(set) var budgetOverrides: [ContextBudgetOverride] = []
+    @Published private(set) var liveVoice = LiveVoiceSettings()
     /// Called after the default selection is assigned.
     var onDefaultSelection: (() -> Void)?
     /// The app's common Settings file, shared by the assistant and independent tasks.
@@ -68,6 +69,25 @@ final class ProviderStore: ObservableObject {
     func configuration(for selection: ModelSelection?) throws -> RunConfiguration {
         try RunConfiguration.resolve(selection, providers: providers, secret: { try ProviderKeychain.secret(for: $0) },
                                      boundOrigins: boundOrigins, budgetOverride: selection.flatMap(budgetOverride))
+    }
+
+    func setLiveVoice(_ settings: LiveVoiceSettings) throws {
+        guard storageError.isEmpty else { throw failure(storageError) }
+        let previous = liveVoice
+        liveVoice = settings
+        do { try persist() } catch { liveVoice = previous; throw error }
+    }
+
+    /// Called only after the user selects Start, never by view rendering or probes.
+    func liveVoiceRequest() throws -> URLRequest {
+        guard storageError.isEmpty, let id = liveVoice.providerID, let provider = provider(id), provider.isEnabled else {
+            throw LiveVoiceFailure.key
+        }
+        let url = try liveVoice.socketURL(boundOrigins: boundOrigins(id) ?? [])
+        guard let key = try ProviderKeychain.secret(for: id), !key.isEmpty else { throw LiveVoiceFailure.key }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
+        return request
     }
 
     func budgetOverride(_ selection: ModelSelection) -> ContextBudgetOverride? {
@@ -206,6 +226,7 @@ final class ProviderStore: ObservableObject {
                 legacySecretPending = stored.legacySecretPending
                 keyOrigins = stored.keyOrigins
                 budgetOverrides = stored.budgetOverrides
+                liveVoice = stored.liveVoice ?? LiveVoiceSettings()
             }
         } catch { storageError = "服务商配置读取失败，原文件已保留：\(error.localizedDescription)" }
         refreshKeys()
@@ -223,6 +244,6 @@ final class ProviderStore: ObservableObject {
         guard storageError.isEmpty else { return }
         try storage.write(ProviderFile(providers: providers, defaultSelection: defaultSelection,
                                        deletedProviders: deletedProviders, legacySecretPending: legacySecretPending,
-                                       keyOrigins: keyOrigins, budgetOverrides: budgetOverrides))
+                                       keyOrigins: keyOrigins, budgetOverrides: budgetOverrides, liveVoice: liveVoice))
     }
 }
