@@ -11,6 +11,16 @@
       "versions": [
         {
           "version": "0.4.0",
+          "buildVersion": "19.1.7",
+          "minOSVersion": "26.0",
+          "size": 60199863,
+          "sha256": "3da8a72e6b93ff139b748946a799c6910a3320bf9cba5e1e27e6313329535f2b",
+          "date": "2026-11-05T02:25:14Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.4.0-build-19.1.7/PocketAgent-0.4.0-19.1.7.ipa",
+          "localizedDescription": "0.4.0 candidate build 19.1.7: DDI peer identity fix, anonymous AX diagnostics, authentication guidance, and accepted Duo layout/build adaptation. Task-card auto-collapse and inner-display phone control remain unaccepted."
+        },
+        {
+          "version": "0.4.0",
           "buildVersion": "19",
           "minOSVersion": "26.0",
           "size": 60151873,
@@ -124,8 +134,8 @@
           "minOSVersion": "26.0",
           "size": 611614,
           "sha256": "ca1167ec1a1682fef64ae3f59d8f008f895e769018e960af629fc277f077405b",
-          "date": "2026-11-03T13:48:00Z",
-          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.4.0/PocketAgent-WDA-0.4.0.ipa"
+          "date": "2026-11-05T02:25:14Z",
+          "downloadURL": "https://github.com/Borealin/PocketAgent/releases/download/candidate-0.4.0-build-19.1.7/PocketAgent-WDA-0.4.0.ipa"
         },
         {
           "version": "0.3.7",

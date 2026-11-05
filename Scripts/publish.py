@@ -14,7 +14,11 @@ def version_key(version):
     match = re.fullmatch(r'(\d+)(?:\.(\d+))?(?:\.(\d+))?', version['version'])
     if not match:
         raise ValueError('IPA version must use one to three numeric components')
-    return (*[int(part or '0') for part in match.groups()], int(version['buildVersion']))
+    build = re.fullmatch(r'(\d+)(?:\.(\d+))?(?:\.(\d+))?', version['buildVersion'])
+    if not build:
+        raise ValueError('IPA build must use one to three numeric components')
+    return (*[int(part or '0') for part in match.groups()],
+            *[int(part or '0') for part in build.groups()])
 
 
 def merge_published_source(current, release):
