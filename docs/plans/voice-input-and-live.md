@@ -30,14 +30,20 @@ and increments the existing draft edit revision. A failed history write keeps
 the latest draft and preview. A storage-failure notification stops audio and
 retains finalized preview text while rejecting further recognition results.
 
-Cancel, conversation replacement/switch/deletion, leaving the foreground and
-audio interruption/route changes stop capture; microphone capture never resumes
+Cancel, conversation replacement/switch/deletion, entering the background and
+audio interruption/device route changes stop capture; microphone capture never resumes
 automatically. Explicit cancel/session/background transitions discard the
 unconfirmed preview. Other audio failures retain already finalized text. No
 audio, recognition preview or credential enters history, logs, export or sync.
 The bounded PCM stream holds eight owned buffers; overflow fails cleanly.
 Capture stops after 60 seconds; finalization waits at most 10 seconds before
 offering only already finalized text. Audio stays in memory and is never saved.
+Temporary inactive scenes, such as the first microphone permission alert, do
+not cancel a pending start or preview. Route-change reasons for adding/removing
+devices stop capture; category/configuration changes from setup do not. Storage
+errors do not create dictation notices when no generation exists. Successful
+history identity changes provide the session cancellation boundary, so failed
+clear/recovery transactions do not discard the preview in advance.
 
 Implemented: pure preview/history append logic, native capture/controller,
 composer controls, lifecycle integration and microphone purpose string. Three

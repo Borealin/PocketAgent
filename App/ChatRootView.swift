@@ -68,9 +68,14 @@ struct ChatRootView: View {
                 }
             }
         }
-        .onAppear { chat.foregroundChanged(scenePhase == .active); if scenePhase == .active { sync.foreground() } }
+        .onAppear {
+            chat.foregroundChanged(scenePhase == .active)
+            if scenePhase == .background { chat.dictation.cancel() }
+            if scenePhase == .active { sync.foreground() }
+        }
         .onChange(of: scenePhase) { _, phase in
             chat.foregroundChanged(phase == .active)
+            if phase == .background { chat.dictation.cancel() }
             if phase == .active { sync.foreground() } else { chat.persist() }
         }
         .onChange(of: engine.busy) { _, _ in chat.foregroundChanged(scenePhase == .active) }

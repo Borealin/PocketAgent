@@ -247,7 +247,6 @@ extension ChatController {
     /// Memory stays; files no longer referenced are removed afterwards.
     func clearPrimaryConversation() {
         if let blocker = clearPrimaryBlocker { notice = blocker; return }
-        if dictation.input.sessionID == primaryID { dictation.cancel() }
         let old = primaryID
         guard transact({ try $0.clearPrimaryConversation() }) else { return }
         referenceDrafts[old] = nil; visibleLimit[old] = nil; draftRevisions[old] = nil

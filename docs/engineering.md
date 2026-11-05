@@ -9,13 +9,18 @@ The microphone starts only after explicit permission and preparation. Stop
 produces a separate preview; explicit confirmation appends finalized text once
 to the original conversation's latest draft through HistoryOwner, preserving
 keyboard edits and attachments. It never sends, steers, queues or saves memory.
-Cancel, session changes, leaving the foreground and audio interruptions stop
+Cancel, session changes, entering the background and audio interruptions stop
 capture without automatic resumption. Raw audio is bounded in memory, never
 written/logged/exported/synchronized; preview state is local and transient.
 Storage failure stops capture while retaining finalized preview for retry or
 copying. Core regression and strict iOS 26 API/concurrency typechecks pass;
 complete App/IPA/CI and exact-device speech acceptance remain pending. Live,
 cloud transcription, caret insertion and press-and-hold are not implemented.
+Transient inactive scenes (including the microphone permission alert) preserve
+the pending start/preview. Route notifications stop input for device removal or
+addition, not the app's own category/configuration changes. Only an existing
+dictation generation receives a storage-failure notice. History identity changes
+cancel after a successful transaction; failed clear operations keep the preview.
 
 The [Duo adaptation](duo-adaptation.md) records the user-approved delivery of
 accepted adaptive UI, real simulator builds and the anonymous geometry diagnostic.

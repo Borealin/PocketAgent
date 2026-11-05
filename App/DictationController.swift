@@ -171,6 +171,7 @@ import Speech
     }
 
     func interrupt(_ message: String) {
+        guard input.generation != nil else { return }
         if let token = input.generation, !input.finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             notice = message
             preview(token) // Stops capture and rejects later results; preserves confirmed text.
@@ -211,7 +212,12 @@ import Speech
     private func observeAudio(_ token: UUID) {
         for name in [AVAudioSession.interruptionNotification, AVAudioSession.routeChangeNotification,
                      AVAudioSession.mediaServicesWereLostNotification, AVAudioSession.mediaServicesWereResetNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                if name == AVAudioSession.routeChangeNotification {
+                    guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                          let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+                          reason == .oldDeviceUnavailable || reason == .newDeviceAvailable else { return }
+                }
                 MainActor.assumeIsolated {
                     guard let self, self.input.generation == token else { return }
                     self.fail("音频输入已中断，录音已停止；请重新开始或使用键盘输入。")

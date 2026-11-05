@@ -290,7 +290,6 @@ final class ChatController: ObservableObject {
 
     func foregroundChanged(_ active: Bool) {
         foreground = active
-        if !active { dictation.cancel() }
         if active { drainPhone(); advancePendingIfReady() }
     }
 
