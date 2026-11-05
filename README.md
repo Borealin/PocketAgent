@@ -8,14 +8,14 @@ provider you configure.
 
 ## Installation
 
-The 0.4.0 candidate has been exercised on an iPhone 12 mini with development
+PocketAgent 0.4.0 has been exercised on an iPhone 12 mini with development
 signing. Build 19.1.7 also passed Duo outer-display portrait phone turns and
 inner-display session/draft layout checks with development signing. Inner-display
 phone control and Duo's actual AltStore 2.3.2 re-signing flow remain unverified.
 A signer that renames the app must also update its permitted
 background-task identifiers; otherwise a turn can be rejected before it starts.
 
-The 0.4.0 candidate's default DDI backend uses the main app, Developer Mode, an RP pairing record
+PocketAgent 0.4.0's default DDI backend uses the main app, Developer Mode, an RP pairing record
 and a local VPN. It needs no Automation companion or XCTest authorization.
 Select **WDA** in Settings → 手机操作配置 to use the companion instead. Backend
 selection is captured when a turn is queued. DDI currently accepts verified
@@ -36,7 +36,7 @@ password fields, TextView and caret insertion. AX does not promise focus transfe
 confirm target focus before submitting a keyboard action. Uncertain effects are never replayed. Keyboard calls return the actual screen
 without assuming the layout or claiming that composition has committed.
 The source offers the main app and optional WDA companion from the
-[0.4.0 candidate, build 19.1.7](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0-build-19.1.7).
+[0.4.0, build 19.1.7](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0-build-19.1.7).
 This update includes the DDI peer-identity fix, anonymous AX diagnostics,
 authentication-error guidance and accepted Duo UI/build adaptation. Automatic
 task-card collapse remains separate follow-up work in
@@ -58,7 +58,7 @@ On the tested iPhone 15 Pro, initial developer TCP connections are refused when
 cellular is the only network. A tunnel established with cellular off supported
 phone operations after restoring data in a wired diagnostic test; survival of
 a live prepared tunnel after USB removal remains unverified. No tested VPN
-configuration has fixed direct cellular-only startup. This remains a prerelease.
+configuration has fixed direct cellular-only startup.
 
 The v0.3.0 Automation packaging caused a provisioning-profile error. Versions
 0.3.1 and later package the complete test module as a nested framework.
@@ -73,7 +73,7 @@ the WDA backend. To install manually:
 
 1. Install [AltStore Classic](https://altstore.io/) or
    [SideStore](https://docs.sidestore.io/).
-2. Open [the 0.4.0 candidate](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0-build-19.1.7)
+2. Open [PocketAgent 0.4.0](https://github.com/Borealin/PocketAgent/releases/tag/candidate-0.4.0-build-19.1.7)
    in Safari. Download `PocketAgent-0.4.0-19.1.7.ipa` to Files. For WDA, also download
    `PocketAgent-WDA-0.4.0.ipa`.
 3. Import and sign the IPA in your sideloading app. For WDA, install **both IPAs
@@ -99,9 +99,9 @@ changed, so mixing these versions does not support phone automation.
 ### AltStore Classic/SideStore source
 
 The public feed contains **PocketAgent** and **PocketAgent Automation**, currently
-offering the **0.4.0 candidate (main app build 19.1.7; unchanged Automation build 19)**.
-Both IPAs are available in the same release. Stable releases update
-the feed automatically; this candidate is included explicitly for device validation.
+offering **0.4.0 (main app build 19.1.7; Automation build 19)**.
+Both IPAs are available in the same stable release. The feed is updated from
+the published artifacts and retains earlier versions.
 Open the button below on your iPhone to
 add the source in AltStore Classic. For SideStore, copy the source URL into its
 Sources screen. No GitHub sign-in is required.

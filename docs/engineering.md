@@ -2268,11 +2268,13 @@ so a locally generated source cannot leave the wrong checksum for CI assets.
 Candidate build `19.1.7` exposed an integer-only build-number parser in the
 publisher. Build keys now compare one to three numeric components, padded with
 zeroes, so `19 < 19.1.7 < 20`; merging retains earlier artifact metadata.
-The candidate publishes the unchanged, device-exercised `7a584c2` IPA and its
+The 0.4.0 release publishes the unchanged, device-exercised `7a584c2` IPA and its
 corresponding source with the original `--build-version 19.1.7` override.
 Later merged changes are documentation and CI only; the Automation IPA remains
 the unchanged 0.4.0/build 19 artifact. Publication does not extend the Duo
-acceptance described in [Duo adaptation](duo-adaptation.md).
+acceptance described in [Duo adaptation](duo-adaptation.md). The owner explicitly
+promoted this same build to a stable release; the historical tag and asset URLs
+remain unchanged to preserve existing downloads and subscriptions.
 
 Independent merge review reproduced order-dependent copy metadata and deletion
 during a local append losing text. Parent metadata inheritance, deterministic
