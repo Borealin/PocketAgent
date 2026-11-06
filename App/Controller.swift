@@ -881,8 +881,11 @@ final class Model: ObservableObject {
                 // Finalization runs uncancelled. Returning to our app is a
                 // cleanup effect, even after Stop or a failed AX observation.
                 log("finish_step_enter", ["step": "return", "ms": elapsed()])
-                _ = try await ffi { try device.ddiRequest(["op": "return", "bundle_id": DeviceSettings.assistantBundleID]) }
-                log("assistant_returned")
+                let returned = try await ffi { try device.ddiRequest(["op": "return", "bundle_id": DeviceSettings.assistantBundleID]) }
+                if returned["activation_skipped"] != nil {
+                    warnings.append("显示布局已变化或尚未支持自动返回，请手动切回 App。")
+                    log("assistant_return_skipped")
+                } else { log("assistant_returned") }
             } catch { warnings.append("未能自动返回 App，请手动切回。"); log("assistant_return_failed", Model.errorFields(error)) }
             log("finish_step_enter", ["step": "close", "ms": elapsed()])
             do { try await ffi { try device.closeDDI() }; log("ddi_services_closed") }

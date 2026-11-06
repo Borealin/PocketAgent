@@ -30,6 +30,33 @@ struct DDIOperationFailureTests {
         #expect(failure.actionWasIssued(after: true)) // Preserve an earlier clear or focus tap.
     }
 
+    @Test func displayEvidenceSurvivesARefusalWithoutAuthorizingAnEffect() throws {
+        var object = response()
+        object["control_surface"] = ["state": "unavailable", "reason": "window_mapping_unverified",
+            "display_count": 2, "active_display_count": 1, "rotation": "rot90"] as [String: Any]
+        let refused = try #require(try DDIOperationFailure.decode(object))
+        #expect(!refused.actionIssued && !refused.requiresNewTurn)
+        #expect(refused.controlSurface?.dictionary["reason"] as? String == "window_mapping_unverified")
+        object["action_issued"] = true; object["requires_new_turn"] = true
+        let uncertain = try #require(try DDIOperationFailure.decode(object))
+        #expect(uncertain.actionIssued && uncertain.requiresNewTurn)
+        #expect(uncertain.controlSurface == refused.controlSurface)
+        for value in [refused, uncertain] {
+            var result: [String: Any] = ["action_issued": value.actionIssued,
+                "requires_new_turn": value.requiresNewTurn, "replay_allowed": false]
+            #expect(value.applyUnavailableSurfaceGuidance(to: &result))
+            #expect(result["requires_replan"] as? Bool == false)
+            #expect(result["recovery"] as? String == "supported_layout_required")
+            #expect(result["action_issued"] as? Bool == value.actionIssued)
+            #expect(result["requires_new_turn"] as? Bool == value.requiresNewTurn)
+            #expect(result["replay_allowed"] as? Bool == false)
+            #expect((result["message"] as? String)?.contains("不要重放") == value.requiresNewTurn)
+        }
+        object["control_surface"] = ["state": "unavailable", "reason": "invalid_metadata",
+            "display_count": 1, "active_display_count": 2] as [String: Any]
+        #expect(throws: DDIOperationFailure.DecodeIssue.malformed) { try DDIOperationFailure.decode(object) }
+    }
+
     @Test func uncertainInputAndPreviouslyPoisonedSessionRemainDistinct() throws {
         let uncertain = try #require(try DDIOperationFailure.decode(response(issued: true, newTurn: true)))
         #expect(uncertain.actionWasIssued(after: false))

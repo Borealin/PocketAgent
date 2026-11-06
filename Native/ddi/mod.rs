@@ -1,6 +1,7 @@
 //! PocketAgent's serial, turn-owned DDI services. No screen stream/XCTest.
 mod archive;
 mod ax;
+mod surface;
 use crate::{
     IdeviceFfiError, core_device_proxy::AdapterHandle, ffi_err, rsd::RsdHandshakeHandle,
     run_sync_local,
@@ -200,6 +201,10 @@ pub struct PocketDDISession {
     /// Cleared when a snapshot starts and consumed by every screen effect, so a
     /// coordinate effect is always checked against the screen observed for it.
     observed: Option<(u64, usize)>,
+    /// Latest display evidence, snapshot binding and frozen action boundary.
+    surface: Option<surface::State>,
+    observation_surface: Option<surface::State>,
+    action_surface: Option<surface::State>,
     hid: Channel<UniversalHidServiceClient<Box<dyn ReadWrite>>>,
     keyboard_hid: Option<Channel<UniversalHidServiceClient<Box<dyn ReadWrite>>>>,
     buttons: Channel<IndigoHidClient<Box<dyn ReadWrite>>>,
@@ -598,7 +603,7 @@ impl Geometry {
             .and_then(Value::as_array)
             .ok_or_else(|| error("DDI display bounds missing"))?;
         let pairs: Vec<_> = b.iter().filter_map(Value::as_array).collect();
-        if pairs.len() != 2 || pairs.iter().any(|a| a.len() != 2) {
+        if b.len() != 2 || pairs.len() != 2 || pairs.iter().any(|a| a.len() != 2) {
             return Err(error("DDI display bounds invalid"));
         }
         let n: Vec<_> = pairs
@@ -759,6 +764,9 @@ impl PocketDDISession {
                 .map(|s| s.port),
             hit_point: None,
             observed: None,
+            surface: None,
+            observation_surface: None,
+            action_surface: None,
             info: Channel::new(info, info_port, channel::INFO),
             apps: Channel::new(apps, apps_port, channel::APPS),
             installed,
@@ -813,24 +821,52 @@ impl PocketDDISession {
             Ok("not_observed")
         }
     }
-    async fn geometry(&mut self) -> Result<Geometry, IdeviceError> {
+    async fn display_info(&mut self, finalizing: bool) -> Result<Value, IdeviceError> {
         let cancel = self.cancel.clone();
         let stall = take_stall(self.stall, &mut self.injected, stage::GEOMETRY);
         cancel.progress.enter(stage::GEOMETRY, 0);
-        let info = self.info.request(connector(&mut self.adapter), &cancel, Wait::Raced, async |c| {
+        let info = self.info.request(connector(&mut self.adapter), &cancel, if finalizing { Wait::TimeOnly } else { Wait::Raced }, async |c| {
             if stall {
                 // Local acceptance: the request is outstanding (channel marked)
                 // until Stop or the call budget ends it.
                 return cancellable(&cancel, std::future::pending::<Result<Value, IdeviceError>>()).await;
             }
-            bounded_call(&cancel, c.invoke_with_plist(
-                "com.apple.coredevice.feature.getdisplayinfo",
-                plist::Dictionary::new(),
-            ))
-            .await
+            let request = c.invoke_with_plist("com.apple.coredevice.feature.getdisplayinfo", plist::Dictionary::new());
+            if finalizing { bounded(request).await } else { bounded_call(&cancel, request).await }
         })
         .await?;
-        Geometry::from(&info)
+        Ok(info)
+    }
+    fn invalidate_surface_observation(&mut self) {
+        self.observed = None;
+        self.observation_surface = None;
+        self.hit_point = None;
+    }
+    async fn read_surface(&mut self, finalizing: bool) -> Result<surface::State, IdeviceError> {
+        let info = match self.display_info(finalizing).await {
+            Ok(info) => info,
+            Err(e) => { self.invalidate_surface_observation(); self.surface = None; return Err(e); }
+        };
+        let mut current = surface::State::read(&info);
+        if current.geometry.is_none() && !finalizing && self.touch.is_none() {
+            let cancel = self.cancel.clone();
+            let surfaces = self.hid.request(connector(&mut self.adapter), &cancel, Wait::Raced,
+                async |c| bounded_call(&cancel, c.list_connected_services()).await).await;
+            current.record_touchscreen(surfaces.as_deref().ok());
+        }
+        if self.surface.as_ref() != Some(&current) { self.invalidate_surface_observation(); }
+        self.surface = Some(current.clone());
+        Ok(current)
+    }
+    async fn geometry(&mut self) -> Result<Geometry, IdeviceError> {
+        let previous = self.surface.clone();
+        let current = self.read_surface(false).await?;
+        let geometry = current.require().map_err(error)?;
+        // Surface changes must reach Swift's reference validation even when
+        // App identity, node frames and logical dimensions happen to match.
+        if let Some(previous) = previous.as_ref() { current.require_same(Some(previous)).map_err(error)?; }
+        if let Some(expected) = self.action_surface.as_ref() { current.require_same(Some(expected)).map_err(error)?; }
+        Ok(geometry)
     }
     async fn bundle_for_pid(&mut self, pid: u64) -> Result<String, IdeviceError> {
         let cancel = self.cancel.clone();
@@ -939,10 +975,12 @@ impl PocketDDISession {
     }
     async fn snapshot(&mut self) -> Result<Json, IdeviceError> {
         self.observed = None;
+        self.observation_surface = None;
         if take_stall(self.stall, &mut self.injected, stage::AX_READ) {
             self.ax().await?.stall_next_read = true;
         }
         let before = self.geometry().await?;
+        let before_surface = self.surface.clone();
         let (selected_pid, x, y) = self.active_hit(before).await?;
         let ax::Graph { pid, nodes, outside } = self.ax().await?.graph(x, y).await.map_err(error)?;
         if pid != selected_pid {
@@ -950,9 +988,9 @@ impl PocketDDISession {
         }
         self.proceed()?;
         let bundle = self.bundle_for_pid(pid).await?;
-        if self.geometry().await? != before {
-            return Err(error("DDI display changed during observation"));
-        }
+        self.geometry().await?;
+        self.surface.as_ref().ok_or_else(|| error("DDI control surface unavailable"))?
+            .require_same(before_surface.as_ref()).map_err(error)?;
         let mut result = vec![];
         for attrs in nodes {
             let mut d = attrs
@@ -968,6 +1006,7 @@ impl PocketDDISession {
             result.push(node);
         }
         self.observed = Some((pid, outside));
+        self.observation_surface = before_surface;
         Ok(json!({"app":bundle,"frame":before.json(),"nodes":result,"source":"ddi_ax","atomic":false,
             "outside_app_elements":outside}))
     }
@@ -1165,6 +1204,11 @@ impl PocketDDISession {
                 "subscription_acknowledged": stop == "acknowledged", "connection_closed": true}));
         }
         if op == "return" {
+            let previous = self.surface.clone();
+            let current = self.read_surface(true).await?;
+            if current.require().is_err() || previous.as_ref().is_some_and(|old| old != &current) {
+                return Ok(json!({"activation_skipped":"unverified_or_changed_surface"}));
+            }
             let bundle = v["bundle_id"]
                 .as_str()
                 .ok_or_else(|| error("DDI return bundle missing"))?;
@@ -1183,6 +1227,14 @@ impl PocketDDISession {
             return Err(error(
                 "DDI input is disabled after an uncertain effect; observe and send a new turn",
             ));
+        }
+        let screen_effect = ["tap", "hold", "drag", "surface_drag", "clear", "paste", "key", "keys", "ax_replace"].contains(&op);
+        if screen_effect || ["clipboard_set", "activate", "home"].contains(&op) {
+            let observed = if screen_effect || ["activate", "home"].contains(&op) { self.observation_surface.take() } else { None };
+            let previous = self.surface.clone();
+            let current = self.read_surface(false).await?;
+            current.admit_effect(op, previous.as_ref(), observed.as_ref()).map_err(error)?;
+            self.action_surface = Some(current);
         }
         let expected = v["expected_app"].as_str();
         // Every screen effect consumes the observed scope; the next coordinate
@@ -1411,15 +1463,17 @@ impl PocketDDISession {
     }
     async fn screenshot(&mut self, stall: bool) -> Result<Vec<u8>, IdeviceError> {
         self.proceed()?;
+        let observed = self.observation_surface.clone();
         let cancel = self.cancel.clone();
         cancel.progress.enter(stage::SCREENSHOT, 0);
-        self.capture.request(connector(&mut self.adapter), &cancel, Wait::Raced, async |c| {
+        let data = self.capture.request(connector(&mut self.adapter), &cancel, Wait::Raced, async |c| {
             if stall {
                 return cancellable(&cancel, std::future::pending::<Result<Vec<u8>, IdeviceError>>()).await;
             }
             bounded_call(&cancel, c.take_screenshot(None, ImageFormat::Png)).await
-        })
-        .await
+        }).await?;
+        self.read_surface(false).await?.require_same(observed.as_ref()).map_err(error)?;
+        Ok(data)
     }
 }
 
@@ -1788,7 +1842,8 @@ pub unsafe extern "C" fn pocket_ddi_call(
         session.stall = if finalization { None } else { requested_stall(&value) };
         session.drop_release = !finalization && value["diagnostic_release_unconfirmed"].as_bool() == Some(true);
         session.effect_started = false;
-        let result = tokio::time::timeout(window, session.call(&value))
+        session.action_surface = None;
+        let mut result = tokio::time::timeout(window, session.call(&value))
             .await
             .map_err(|_| {
                 tracing::warn!(stage = state.progress.stage.load(Ordering::Relaxed),
@@ -1796,6 +1851,8 @@ pub unsafe extern "C" fn pocket_ddi_call(
                 error(BUDGET_EXHAUSTED)
             });
         // Cleanup below runs without the call's expiry.
+        let observation_deadline = session.expires_at;
+        let action_surface = session.action_surface.take();
         session.expires_at = None;
         session.stall = None;
         if session.cancel.cancelled() {
@@ -1807,8 +1864,20 @@ pub unsafe extern "C" fn pocket_ddi_call(
         session.drop_release = false;
         let read_only = READ_ONLY_OPS.contains(&op);
         if let Err(e) = cleanup {
+            session.invalidate_surface_observation();
             let _ = session.close_ax().await;
             return Ok(request_failure(error_message(&e), session.effect_started, &mut session.poisoned, true, read_only));
+        }
+        // Release first: a post-effect sample must never extend a held contact.
+        // It shares the original deadline; failures retain the already-issued effect.
+        if matches!(result, Ok(Ok(_))) && session.effect_started {
+            if let Some(expected) = action_surface {
+                let remaining = Duration::from_millis(observation_deadline.unwrap_or(0).saturating_sub(unix_ms()));
+                let checked = tokio::time::timeout(remaining, async {
+                    session.read_surface(false).await?.require_same(Some(&expected)).map_err(error)
+                }).await.unwrap_or_else(|_| Err(error(BUDGET_EXHAUSTED)));
+                if let Err(e) = checked { result = Ok(Err(e)); }
+            }
         }
         match result {
             Ok(Ok(mut v)) => {
@@ -1818,6 +1887,7 @@ pub unsafe extern "C" fn pocket_ddi_call(
                 Ok(v)
             }
             Ok(Err(e)) | Err(e) => {
+                session.invalidate_surface_observation();
                 // Abort semantic AX correlation after any failed operation.
                 // Read-only recovery may reconnect; uncertain effects never replay.
                 let _ = session.close_ax().await;
@@ -1827,7 +1897,12 @@ pub unsafe extern "C" fn pocket_ddi_call(
     });
     state.progress.enter(stage::ENCODE, 0);
     match result {
-        Ok(v) => match serde_json::to_string(&v)
+        Ok(mut v) => match {
+            if let Some(surface) = &session.surface {
+                if surface.geometry.is_none() { v["control_surface"] = surface.summary.clone(); }
+            }
+            serde_json::to_string(&v)
+        }
             .ok()
             .and_then(|s| CString::new(s).ok())
         {

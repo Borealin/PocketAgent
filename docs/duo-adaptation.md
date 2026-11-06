@@ -1,5 +1,56 @@
 # Duo adaptation
 
+## Dynamic control state (work in progress)
+
+The current [dynamic-state plan](plans/duo-dynamic-state.md) supersedes the
+fixed left/right control direction in Draft PR #16. It adds native read-only
+display evidence and refusal/invalidation boundaries, not inner-display control.
+There is no persistent side picker, fixed crop or synthetic pane App identity
+in this implementation. The accepted chat layout below is unchanged.
+
+Every observation binds the advertised display UUID and active state, primary
+state, rotation, scale and geometry. The established single-entry path retains
+optional UUID/active metadata; explicit inactivity or malformed values refuse. A same-size display replacement invalidates the native
+observation and hit-point cache. Coordinate/AX actions consume that binding; text chords retain the existing
+focus sequence after its focus tap consumes a snapshot. Captures check against
+the observation after reading. The existing single primary, not-explicitly-inactive, unrotated portrait
+display path retains its App identity and AX point-ownership checks. Multiple
+enumerated displays, inactive/ambiguous displays, unknown metadata and unverified
+rotations refuse effects, including global Home, activation and clipboard writes.
+When finalization encounters an unverified/changed layout it skips activation
+rather than choosing a pane. Fresh observation can recover after a supported
+layout returns; no previous action is replayed.
+
+Unavailable-state reports include anonymous display counts, rotation and a
+reason. The optional touchscreen descriptor probe reports a unique typed
+display-UUID association, ambiguity or probe failure; it cannot authorize a
+coordinate transform or an App/window target. UUIDs/service identifiers stay
+native, out of model results. Successful observations receive no diagnostic
+surface payload. No model tool can select a display.
+
+Action completion samples the display after original-channel input release and
+within the original deadline. A changed/unreadable state preserves an issued
+effect as unknown and disables further input under the existing contract.
+This is boundary sampling: there is no verified live update subscription or
+mid-contact detection/atomicity guarantee. A layout change and return between
+samples can be missed. Protocol-side simulator evidence also shows identical
+display metadata for visibly open and partially open poses; a metadata fingerprint
+is not a full posture, window-layout or continuous-generation identifier. Adding unmeasured getdisplayinfo RPCs to every HID packet
+would extend gestures; it is not adopted as a real-time transition mechanism.
+
+The remaining hard dependency is a fresh scene/App-to-global-window-region
+mapping across exchange/resizing. Research observed unchanged PID and local AX
+window frame after an App moved to the other pane. Display identity, primary,
+frontmost, equal widths, context IDs and screenshot gutters do not establish that
+mapping. Shared keyboards/system overlays and all inner-screen rotation/touch
+transforms still require evidence. Existing calibrated Mac-side PR #16 touch,
+crop and Home probes remain research inputs; they are not on-phone acceptance.
+The first milestone can refuse every Duo pose if both displays remain enumerated.
+It must not be presented as completed Duo automatic adaptation. System split
+creation/resizing or pane-targeted launch remains unavailable pending protocol
+and independent outcome evidence. No physical device or model phone turn was
+operated for this milestone.
+
 The user approved delivering the accepted Duo UI, real simulator builds and
 anonymous geometry diagnostic separately from automatic task-card collapse.
 The original default-collapse/transient-expansion contract and its

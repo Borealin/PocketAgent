@@ -10,6 +10,7 @@
 		026DB859A70E5FD78B160ED4 /* RustLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 49BF9B5D946340940F5C4C82 /* RustLicenses */; };
 		037E5381B669DED7A34CA611 /* ProviderToolSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7340231C7BD6B653702BA7 /* ProviderToolSchema.swift */; };
 		0563D84C8D1D279D25E3A64B /* ScriptRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55305E8A4D543D88B56A2702 /* ScriptRuntime.swift */; };
+		07C3CCD08BD03DCD5444A6D9 /* DDIControlSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2243B4030AF22F79A8217108 /* DDIControlSurface.swift */; };
 		095DCA0C093561DD5E3A2198 /* SwiftLicenses in Resources */ = {isa = PBXBuildFile; fileRef = 1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */; };
 		0EAC87CE9ECA7B9DE0AE901D /* PocketISH.m in Sources */ = {isa = PBXBuildFile; fileRef = 21C75A8C07B02E84366B00D3 /* PocketISH.m */; settings = {COMPILER_FLAGS = "-I$(SRCROOT)/.build/ish/sources/ish -I$(SRCROOT)/.build/ish/sources/ish/app"; }; };
 		15F5311E7962EEC6181C4D27 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73652AF715C4968790030FB2 /* ProviderConfig.swift */; };
@@ -122,6 +123,7 @@
 		1FCA1E1B0E92499BC93C74FB /* SwiftLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftLicenses; path = App/Resources/SwiftLicenses; sourceTree = SOURCE_ROOT; };
 		21B9777F694312D830BE8C77 /* HTTPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPTool.swift; sourceTree = "<group>"; };
 		21C75A8C07B02E84366B00D3 /* PocketISH.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PocketISH.m; sourceTree = "<group>"; };
+		2243B4030AF22F79A8217108 /* DDIControlSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DDIControlSurface.swift; sourceTree = "<group>"; };
 		288C5CC7122C0F08F9B29C94 /* TurnGates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnGates.swift; sourceTree = "<group>"; };
 		2A30E3059701B9B77BA06A7D /* PhoneControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneControl.swift; sourceTree = "<group>"; };
 		32B3A8F0E5F8ACF9827F513B /* LongHistoryBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongHistoryBenchmark.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 				DD4A4FEDBE10A1FA845086EB /* ClearPrimary.swift */,
 				71BBBC1966721F24A0B7C74B /* ContextBudget.swift */,
 				A187CEE22A5291401CCFC137 /* DDICallBudget.swift */,
+				2243B4030AF22F79A8217108 /* DDIControlSurface.swift */,
 				EBA2D0FF0E59721A43424E53 /* DDIImagePreparation.swift */,
 				9DA9085FCB9EB65E37CAA71F /* DDIOperationFailure.swift */,
 				F59CB77CCF90A3F6BA7ED38F /* DiagnosticBundle.swift */,
@@ -496,6 +499,7 @@
 				EAC477D9DF67D43E10E429AA /* ContextBudget.swift in Sources */,
 				27A59D03AF44719DE29A7FB7 /* Controller.swift in Sources */,
 				7D936E9FB0D5FDFF2CAB52F9 /* DDICallBudget.swift in Sources */,
+				07C3CCD08BD03DCD5444A6D9 /* DDIControlSurface.swift in Sources */,
 				FF2CBA0C3F8FD46A96559D29 /* DDIImagePreparation.swift in Sources */,
 				F2FDE3B2136A4DD8384EB4E1 /* DDIOperationFailure.swift in Sources */,
 				D86E98F9B23241F0BD968285 /* DeviceSettings.swift in Sources */,
