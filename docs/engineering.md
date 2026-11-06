@@ -38,6 +38,16 @@ It contains the 19.1.7 display/session/draft acceptance, remaining inner-display
 DDI/WDA and layout limits, and the separate follow-up for the original automatic
 task-card collapse contract.
 
+The [dynamic control-state milestone](plans/duo-dynamic-state.md) binds native
+observations, coordinate effects and captures to display identity as well as
+geometry. Only the existing single primary portrait path without explicit inactivity is admitted;
+unverified multi-display/window mapping and rotation produce an anonymous
+`control_surface` report and refuse effects. App/AX ownership checks remain
+required. After effects, original-channel input is released before a bounded
+state check; a transition preserves unknown effects and never replays input.
+This does not implement inner-screen control, live mid-contact detection or
+system split management. See Duo adaptation for the missing scene/window evidence.
+
 The [diagnostic export contract](diagnostic-export.md) adds local, user-initiated
 ZIP snapshots from Settings and conversation context menus. Only allowlisted
 opt-in metadata is exported; history, screenshots, credentials, pairing records

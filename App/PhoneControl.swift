@@ -282,6 +282,9 @@ final class DDIControl: PhoneControl {
     /// "not executed"); otherwise the failure itself with its metadata.
     private static func refusal(_ failure: DDIOperationFailure, op: String) -> any Error {
         let text = failure.message
+        // Keep the structured unavailable-state report; it is not a transient
+        // foreground change and must never be retried as an effect.
+        if failure.controlSurface?.state == "unavailable" { return failure }
         if text.contains("AX foreground or root changed") { return PhoneObservationIssue.foregroundChanged }
         // The device can refuse attributes with error 8 during a UI transition.
         // The executor retries only observation, after the old AX socket closes.
@@ -308,12 +311,19 @@ final class DDIControl: PhoneControl {
     }
     func screenshot() async throws -> Data {
         let stall: UInt32 = self.stall == "screenshot" ? 1 : 0
-        let result: Data = try await native("screenshot", encode: { _ in "" }) { handle, _, expiresAt in
+        let result: Data
+        do { result = try await native("screenshot", encode: { _ in "" }) { handle, _, expiresAt in
             var bytes: UnsafeMutablePointer<UInt8>?, count: UInt = 0
             try check(pocket_ddi_screenshot(handle, expiresAt, stall, &bytes, &count))
             guard let bytes, count > 0 else { throw failure("DDI 截图为空。") }
             defer { pocket_ddi_bytes_free(bytes, count) }
             return Data(bytes: bytes, count: Int(count))
+        }
+        } catch {
+            if error.localizedDescription.contains("DDI display changed") || error.localizedDescription.contains("DDI control surface unavailable") {
+                throw PhoneObservationIssue.geometryChanged
+            }
+            throw error
         }
         try cancellationCheck?(); return result
     }

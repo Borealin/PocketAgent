@@ -164,6 +164,7 @@ nonisolated enum ToolCatalog {
         var lines = ["## 本轮可用能力"]
         lines.append("- 手机：find_apps 查询实际安装信息，open_app_by_name 按名称打开；observe_screen、tap 等工具实际操作这台 iPhone。")
         if capabilities.phoneBackend == .ddi {
+            lines.append("- control_surface.state=unavailable 表示当前布局无法确认目标 App 的操作区域：停止手机动作，说明需要恢复受支持布局或补充适配证据；不能反复尝试、猜左右侧、用坐标或其他工具绕过。布局改变后旧截图、节点和坐标均失效，必须重新观察；不得重放效果未知的动作。")
             lines.append(capabilities.clipboardAllowed
                 ? "- DDI type_text 默认使用 paste：会替换系统剪贴板并粘贴，目标可能要求许可。method=ax 可对普通 TextField/SearchField 执行非空整字段替换；只用于确需避免剪贴板时，观察返回屏幕和业务结果。AX 与 paste 的目标回调可能不同；失败后不得自动改用另一种方式。"
                 : "- 本轮 DDI 禁止剪贴板：type_text 默认 paste 被执行层拒绝；可显式 method=ax 对普通 TextField/SearchField 做非空整字段替换。AX 与 paste 的目标回调可能不同；检查返回屏幕和业务结果，失败后不得自动改用另一种方式。复制、剪切、粘贴组合键也被执行层拒绝。")

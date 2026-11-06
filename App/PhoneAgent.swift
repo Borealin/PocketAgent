@@ -940,7 +940,11 @@ final class PhoneExecutor {
                     "action_issued": actionIssued, "action_outcome": actionIssued ? "unconfirmed" : "not_started",
                     "requires_new_turn": failure.requiresNewTurn, "requires_replan": !failure.requiresNewTurn,
                     "replay_allowed": false]
+                if let surface = failure.controlSurface { result["control_surface"] = surface.dictionary }
                 if let textInput { result["input_method"] = textInput.method.rawValue; result["input_verified"] = false }
+                if failure.applyUnavailableSurfaceGuidance(to: &result) {
+                    return try Self.result(result, error: true)
+                }
                 // Read-only recovery is allowed even when input is disabled.
                 do {
                     result["screen"] = try await observe(proceed: proceed, prepareSurface: false)
